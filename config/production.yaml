@@ -1,7 +1,23 @@
 log_level: INFO
 
+storage:
+  storage_path: /qdrant/storage
+  snapshots_path: /qdrant/snapshots
+  on_disk_payload: true
+  wal:
+    wal_capacity_mb: 128
+  performance:
+    max_search_threads: 0
+    max_optimization_threads: 0
+  optimizers:
+    default_segment_number: 0
+    memmap_threshold_kb: 200000
+    indexing_threshold_kb: 200000
+  hnsw_index:
+    on_disk: true
+    m: 32
+    ef_construct: 200
+
 service:
-  host: 0.0.0.0
-  http_port: 6333
-  # Uncomment to enable gRPC:
-  #grpc_port: 6334
+  max_workers: 0
+  api_key: ${QDRANT_API_KEY}

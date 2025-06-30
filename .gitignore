@@ -1,18 +1,30 @@
-/target
-/.idea
-/.vscode
-/.devcontainer
-/storage
-/snapshots
-/consensus_test_logs
-/config/local
-/tls
-/static
+# User-specific
+.env
+qdrant_data/
+QdrantValidator/[Bb]in/
+QdrantValidator/[Oo]bj/
+
+# VS Code
+.vscode/
+.vs/
+
+# .NET Core
+[Bb]in/
+[Oo]bj/
+apphost/
+publish/
+
+# Rider
+.idea/
+*.sln.DotSettings.user
+
+# Mac
+.DS_Store
+
+# Logs
+logs/
 *.log
-.qdrant-initialized
-/.hypothesis
-**/__pycache__
-tests/storage-compat/compatibility.tar
-tests/storage-compat/full-snapshot.snapshot.gz
-tests/storage-compat/storage.tar.bz2
-venv
+
+# Temp files
+*.tmp
+*.temp
