@@ -10,6 +10,7 @@ storage:
     max_search_threads: 0
     max_optimization_threads: 0
   optimizers:
+    flush_interval_sec: 1
     default_segment_number: 0
     memmap_threshold_kb: 200000
     indexing_threshold_kb: 200000
@@ -20,4 +21,3 @@ storage:
 
 service:
   max_workers: 0
-  api_key: ${QDRANT_API_KEY}

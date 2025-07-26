@@ -28,3 +28,7 @@ logs/
 # Temp files
 *.tmp
 *.temp
+
+
+# Qdrant data
+qdrant_data_quarantine/
