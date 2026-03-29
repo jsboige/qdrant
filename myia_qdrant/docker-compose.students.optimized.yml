@@ -1,0 +1,68 @@
+services:
+  qdrant_students:
+    image: qdrant/qdrant:latest
+    container_name: qdrant_students
+    restart: always
+    
+    # MODIFIÉ: 30s -> 60s pour permettre un arrêt plus gracieux
+    # Donne plus de temps à Qdrant pour finaliser les écritures en cours
+    stop_grace_period: 60s
+    
+    env_file:
+      - .env.students
+    
+    # PORTS SPÉCIFIQUES STUDENTS (inchangé)
+    ports:
+      - "6335:6333"  # HTTP API Students
+      - "6336:6334"  # gRPC Students
+    
+    # VOLUMES DOCKER (inchangé - students utilise des volumes Docker, pas WSL)
+    volumes:
+      - qdrant-students-storage:/qdrant/storage
+      - qdrant-students-snapshots:/qdrant/snapshots
+      # MODIFIÉ: Utilisation de la configuration optimisée
+      - ./config/students.optimized.yaml:/qdrant/config/production.yaml
+    
+    networks:
+      - qdrant-students-network
+    
+    # NOUVEAU: Limites de ressources pour éviter la surcharge système
+    # Adaptées pour students (plus petit que production)
+    deploy:
+      resources:
+        limits:
+          # Limite maximale de mémoire: 12 GB (vs 16GB production)
+          memory: 12G
+          # Limite maximale de CPU: 12 cœurs (vs 16 production)
+          cpus: '12'
+        reservations:
+          # Réservation garantie de mémoire: 4 GB
+          memory: 4G
+          # Réservation garantie de CPU: 4 cœurs
+          cpus: '4'
+    
+    # MODIFIÉ: Health check amélioré avec CORRECTION CRITIQUE
+    # ⚠️ CORRECTION BUG: Utilisation de wget au lieu de curl
+    # L'image qdrant/qdrant ne contient pas curl par défaut, mais wget oui
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:6333/healthz"]
+      # MODIFIÉ: interval 30s -> 30s (inchangé mais explicite)
+      interval: 30s
+      # MODIFIÉ: timeout 10s -> 10s (inchangé mais explicite)
+      timeout: 10s
+      # MODIFIÉ: retries 3 -> 5 pour students (plus tolérant)
+      # Students peut être plus lent au démarrage
+      retries: 5
+      # MODIFIÉ: start_period 40s -> 60s pour students
+      # Donne plus de temps au démarrage initial (collections, index, etc.)
+      start_period: 60s
+
+volumes:
+  qdrant-students-storage:
+    external: false
+  qdrant-students-snapshots:
+    external: false
+
+networks:
+  qdrant-students-network:
+    driver: bridge

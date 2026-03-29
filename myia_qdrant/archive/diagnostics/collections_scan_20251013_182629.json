@@ -1,0 +1,450 @@
+[
+  {
+    "Collection": "ws-f63fbda110d423c3",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 44283,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-b260fcbe37df73da",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 88584,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-f31120a68442d3b4",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 116514,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-4d7e7ed83a8c8b85",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 611,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-65bab0352bb3814d",
+    "Status": "✓",
+    "IndexingThreshold": 300000,
+    "MaxSegmentSize": null,
+    "PointsCount": 110,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-23c38b54d195678d",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 540,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-f1dd9518d7692622",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 150131,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-370450749910be8b",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 6,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-edcfbafde043b127",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 4335,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-0dab8e5c37260502",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 13,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-148b8bbd9bc4bf7f",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 984325,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-dae5c93415ed4416",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 95199,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-4de1da37ae55c865",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 4,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-862d3bbde59686c9",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 1100,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-5f9783d4a522488d",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 42215,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-38eab2bfd013468e",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 1665,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-2fd9253a3ff69174",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 600,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-cced6a0374b91fe1",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 176751,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-d2ffdbaa832aed16",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 178387,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-74756b71cd87029d",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 4455,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-4bca73bf13a5574c",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 4241,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-63d57bee5fe7607d",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 918,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-faef6f6fe6495516",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 7886,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-d0ea8516edd27fde",
+    "Status": "✓",
+    "IndexingThreshold": 300000,
+    "MaxSegmentSize": null,
+    "PointsCount": 121,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-3091d0dd3766da4b",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 252390,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "roo_tasks_semantic_index",
+    "Status": "✓",
+    "IndexingThreshold": 300000,
+    "MaxSegmentSize": null,
+    "PointsCount": 0,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-17b2d7c86cee3604",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 82860,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-b4aa0216322021b8",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 11744,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-eee43ea32b400193",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 111979,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-59e7574de63c6e62",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 224499,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-a489732355cfe00d",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 11308,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-919f008381cd62a1",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 4520,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-18a8a565c8f36fa6",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 235,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-4b0af3506c460557",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 12181,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-145199eda1a0c299",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 20396,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-f3f3e9bf613de90e",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 0,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-2543aacd45899527",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 2807,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-488a04faefcef4d2",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 30571,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-99cb8df5b7059013",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 42287,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-f48b3c714509019d",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 0,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-1f03edf4aabc67c8",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 205690,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-78b57f0e7b78c5fd",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 245060,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-7471f85299c3e0ec",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 130095,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-a240df80bf2c0bf8",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 9,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-db703c20715987b2",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 0,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-2b22e71d06dab072",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 0,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-6ab9c1aa645b89b7",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 40039,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-4c4fbe964ba5901f",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 185,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-7898ea136848bdec",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 31677,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-850ef92233fe3f6f",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 0,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-e6e4106ba16ce5cc",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 0,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-1e080c29696665cb",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 755,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-605087d5693d3b5c",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 12,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-68b0067e8c080032",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 0,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-2aa9d6283a934738",
+    "Status": "✓",
+    "IndexingThreshold": 300000,
+    "MaxSegmentSize": null,
+    "PointsCount": 861,
+    "VectorsCount": null
+  },
+  {
+    "Collection": "ws-f738ac0a2562ce76",
+    "Status": "✓",
+    "IndexingThreshold": 200000,
+    "MaxSegmentSize": null,
+    "PointsCount": 7,
+    "VectorsCount": null
+  }
+]

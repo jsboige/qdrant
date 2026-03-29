@@ -1,0 +1,1364 @@
+{
+  "collections": [
+    {
+      "points_count": 252363,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-85e10a06f1de4f79"
+    },
+    {
+      "points_count": 4737,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-eb928fbf6d4af1c6"
+    },
+    {
+      "points_count": 49,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-d5cb0bda2c61456f"
+    },
+    {
+      "points_count": 41,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-15907ea1faae0cd3"
+    },
+    {
+      "points_count": 1118,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-0bd0038ba75bf052"
+    },
+    {
+      "points_count": 1312,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-441ff111449f9f90"
+    },
+    {
+      "points_count": 15,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-75675fda75d30b30"
+    },
+    {
+      "points_count": 94,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-a504f78a3a6ff26c"
+    },
+    {
+      "points_count": 258401,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-5ceaf57f2e9e37c2"
+    },
+    {
+      "points_count": 1888,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-e5e3763ce9ce4b07"
+    },
+    {
+      "points_count": 24740,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-5750e1de8c571139"
+    },
+    {
+      "points_count": 4,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-9d80b659014f3e5b"
+    },
+    {
+      "points_count": 22315,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-47d1666ae48cba0a"
+    },
+    {
+      "points_count": 33,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-e506e7221313dd12"
+    },
+    {
+      "points_count": 3696,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-d2d6b8799dd11502"
+    },
+    {
+      "points_count": 11470,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-4ad737b656e7f27c"
+    },
+    {
+      "points_count": 2532,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-7992ed340c559627"
+    },
+    {
+      "points_count": 1045,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-5e6202ef37b435a8"
+    },
+    {
+      "points_count": 13,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-68272ce65780a33a"
+    },
+    {
+      "points_count": 9785,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-256e84dbc16a0379"
+    },
+    {
+      "points_count": 1827,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-62856047f263dea5"
+    },
+    {
+      "points_count": 6,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-10d1eae6ece40335"
+    },
+    {
+      "points_count": 144,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-175da03b643459f5"
+    },
+    {
+      "points_count": 148,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-a2a36a3854b6ba44"
+    },
+    {
+      "points_count": 1856,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-9c8bffaf50946457"
+    },
+    {
+      "points_count": 559,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-f50df71c4e0bcc0b"
+    },
+    {
+      "points_count": 41203,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-15777dec3d68b397"
+    },
+    {
+      "points_count": 11275,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-f8d741cd45d460e1"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-ecef0c128d36c1d2"
+    },
+    {
+      "points_count": 40,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-03423a33ae28194f"
+    },
+    {
+      "points_count": 364,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-61b8b0a17316eb14"
+    },
+    {
+      "points_count": 517,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-f6a2983d40788fa7"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-d041e56be58fba4a"
+    },
+    {
+      "points_count": 77340,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-afcea34c6ea90fc5"
+    },
+    {
+      "points_count": 143,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-9995ca94759d528c"
+    },
+    {
+      "points_count": 1453,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-73457b480db2c61d"
+    },
+    {
+      "points_count": 141,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-63792a75d07de54a"
+    },
+    {
+      "points_count": 116,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-61f73883220de00d"
+    },
+    {
+      "points_count": 10,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-bf4195229dad9bdb"
+    },
+    {
+      "points_count": 90,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-4d193bbb1ee34445"
+    },
+    {
+      "points_count": 142,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-38211ec3ded08f80"
+    },
+    {
+      "points_count": 31,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-f3d85434f81902c9"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-6273c7737aa81477"
+    },
+    {
+      "points_count": 501,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-0166b5ae055442e7"
+    },
+    {
+      "points_count": 13097,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-e14c94ae59dd475b"
+    },
+    {
+      "points_count": 1384,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-6c852b0548f5c66e"
+    },
+    {
+      "points_count": 24779,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-910b8cabda6895c2"
+    },
+    {
+      "points_count": 2687,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-97a57770a18a3d16"
+    },
+    {
+      "points_count": 725,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-bc0a90b5df89ee26"
+    },
+    {
+      "points_count": 204,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-056811b2693e4136"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-618630910824bc09"
+    },
+    {
+      "points_count": 5,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-bb82fdf79b9e3608"
+    },
+    {
+      "points_count": 38,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-db928627844d9acb"
+    },
+    {
+      "points_count": 184,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-3bee8a19887398f6"
+    },
+    {
+      "points_count": 1169,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-911b4b31ce09781d"
+    },
+    {
+      "points_count": 1974,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-414e3365dcfac5ff"
+    },
+    {
+      "points_count": 1,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-487dfc2c54379664"
+    },
+    {
+      "points_count": 18087,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-c2abd59d34b2cabf"
+    },
+    {
+      "points_count": 16,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-62908261ca6c955f"
+    },
+    {
+      "points_count": 124320,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-7a3edf57a6ee2ecb"
+    },
+    {
+      "points_count": 1,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-daf3401ad91cc5de"
+    },
+    {
+      "points_count": 468,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-2a5ebc45c119ec61"
+    },
+    {
+      "points_count": 143,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-050feed732b80689"
+    },
+    {
+      "points_count": 55080,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-c13f069dac953da1"
+    },
+    {
+      "points_count": 49121,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-0d01fb10a5f5fbd4"
+    },
+    {
+      "points_count": 3877,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-f4c5a4b385333c24"
+    },
+    {
+      "points_count": 256673,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-a6dbe4fb81d155a4"
+    },
+    {
+      "points_count": 1888,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-edb01877856f314d"
+    },
+    {
+      "points_count": 98,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-c3d2193eb1cee42c"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-5fa43203715193f7"
+    },
+    {
+      "points_count": 266178,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-0000bbfbc496a6ac"
+    },
+    {
+      "points_count": 1888,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-e7854e2370c1d4fa"
+    },
+    {
+      "points_count": 11506,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-51b18c5154a0b99c"
+    },
+    {
+      "points_count": 1012,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-a9e5ea93759e1d58"
+    },
+    {
+      "points_count": 15,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-0cdd640e1fa45784"
+    },
+    {
+      "points_count": 31,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-d2a9fd23321f40c3"
+    },
+    {
+      "points_count": 22655,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-5d6ae9841a2f3225"
+    },
+    {
+      "points_count": 6933,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-aa3a614fb7c2b62b"
+    },
+    {
+      "points_count": 12251,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-782bf53544de558d"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-49348b133d1ff075"
+    },
+    {
+      "points_count": 5940,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-95897a70c5d56c5a"
+    },
+    {
+      "points_count": 427,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-d539b884e8385350"
+    },
+    {
+      "points_count": 302,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-f1836a67f5f3ea12"
+    },
+    {
+      "points_count": 8185,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-c26adfedbc99331c"
+    },
+    {
+      "points_count": 89,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-3798e90284549530"
+    },
+    {
+      "points_count": 669,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-d56b436b9d135d20"
+    },
+    {
+      "points_count": 14,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-8b9663f2bf44a552"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-b0dae3079276e091"
+    },
+    {
+      "points_count": 1888,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-f17bf8416b0b0332"
+    },
+    {
+      "points_count": 2400,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-e5f23922d71d95b8"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-84ea95b8d63bba27"
+    },
+    {
+      "points_count": 11536,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-21ab17e83e5aacea"
+    },
+    {
+      "points_count": 234,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-1950a0cff9b4dad7"
+    },
+    {
+      "points_count": 333,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-63a9342f0ffdb3bb"
+    },
+    {
+      "points_count": 7560,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-2a50c2ab2fe97092"
+    },
+    {
+      "points_count": 12050,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-fc08b9a364400c5d"
+    },
+    {
+      "points_count": 18119,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-1d908b16d48612b0"
+    },
+    {
+      "points_count": 2262,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-4abb8e33a587bbd8"
+    },
+    {
+      "points_count": 4,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-35f834ca7273f735"
+    },
+    {
+      "points_count": 254486,
+      "vectors_count": null,
+      "segments_count": 7,
+      "status": "green",
+      "name": "ws-c210524299da424b"
+    },
+    {
+      "points_count": 729,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-bda535bc364c1337"
+    },
+    {
+      "points_count": 78,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-55c53e6b75ddb18c"
+    },
+    {
+      "points_count": 323692,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-123ee71fb401fc5b"
+    },
+    {
+      "points_count": 48,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-5f6d14452ecc2bfd"
+    },
+    {
+      "points_count": 42549,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-597974742bf152ea"
+    },
+    {
+      "points_count": 4380,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-848c46ed5f3b5b9a"
+    },
+    {
+      "points_count": 15,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-075dc755e7bcb78d"
+    },
+    {
+      "points_count": 385,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-1fa73fb3b03b89bf"
+    },
+    {
+      "points_count": 1905,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-770dc7639de7a884"
+    },
+    {
+      "points_count": 9935,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-1e905c3d8de61a63"
+    },
+    {
+      "points_count": 5,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-2f118cd9ad8cd6d3"
+    },
+    {
+      "points_count": 837,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-13db94ab7b111d0b"
+    },
+    {
+      "points_count": 6063,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-400618740222dabe"
+    },
+    {
+      "points_count": 913,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-a09f79b1b506ded3"
+    },
+    {
+      "points_count": 834,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-414659edf3ec7979"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-70ab51c54b9dc592"
+    },
+    {
+      "points_count": 254322,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-266cbe674c44fbb6"
+    },
+    {
+      "points_count": 27,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-d3d7ebd9a268ffc4"
+    },
+    {
+      "points_count": 636,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-517abebf1521731b"
+    },
+    {
+      "points_count": 6,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-bac7ba9f5ea9997e"
+    },
+    {
+      "points_count": 252736,
+      "vectors_count": null,
+      "segments_count": 7,
+      "status": "green",
+      "name": "ws-d38271923baf7c92"
+    },
+    {
+      "points_count": 6,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-aecb4a15357fd711"
+    },
+    {
+      "points_count": 7500,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-b2d72f753862afc6"
+    },
+    {
+      "points_count": 261843,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-86429261179093cc"
+    },
+    {
+      "points_count": 6,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-7ff6159db796be4b"
+    },
+    {
+      "points_count": 93,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-fca52231d9513559"
+    },
+    {
+      "points_count": 254311,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-5cf627e2500c3974"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-6eb754b2b665f75f"
+    },
+    {
+      "points_count": 250628,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-2895799dbaa17f52"
+    },
+    {
+      "points_count": 35,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-90be8e42c588c628"
+    },
+    {
+      "points_count": 405,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-016027b2456db55a"
+    },
+    {
+      "points_count": 851,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-398da5777712d18a"
+    },
+    {
+      "points_count": 1884,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-d00f6c761dc8f807"
+    },
+    {
+      "points_count": 12,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-4cc7a81df34a6b45"
+    },
+    {
+      "points_count": 254657,
+      "vectors_count": null,
+      "segments_count": 7,
+      "status": "green",
+      "name": "ws-072f32d814202ca2"
+    },
+    {
+      "points_count": 9749,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-2c18cfe5985e534d"
+    },
+    {
+      "points_count": 8403,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-9bbb4176a71b2d57"
+    },
+    {
+      "points_count": 41,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-84e22d9ecacd6685"
+    },
+    {
+      "points_count": 3602,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-5bd4d63e7d18e84f"
+    },
+    {
+      "points_count": 481,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-430a37f8634726ab"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-f95658cf2a6ac5eb"
+    },
+    {
+      "points_count": 1766,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-c194770bf5fb8145"
+    },
+    {
+      "points_count": 57,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-46cd702f0fbd9cf8"
+    },
+    {
+      "points_count": 8062,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-b77af2583028baf4"
+    },
+    {
+      "points_count": 6,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-1de74f709a9ac578"
+    },
+    {
+      "points_count": 129,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-5515fb12fdd7bd28"
+    },
+    {
+      "points_count": 4200,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-df296a31a0c7a92b"
+    },
+    {
+      "points_count": 8552,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-fd76aa2651931584"
+    },
+    {
+      "points_count": 3569,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-e9e56f2471a1d674"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-af2b6c6ebc5fa992"
+    },
+    {
+      "points_count": 479,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-9f8a6f571b5fa3a6"
+    },
+    {
+      "points_count": 1468,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-6ba22cc5b6b7d041"
+    },
+    {
+      "points_count": 4,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-564d9462a0307fe7"
+    },
+    {
+      "points_count": 44,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-1d847672be6a00f0"
+    },
+    {
+      "points_count": 11472,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-5a01ab2fedff30f1"
+    },
+    {
+      "points_count": 17439,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-e5235d0f47ba3a45"
+    },
+    {
+      "points_count": 7,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-9ca1c09ea94dcbf0"
+    },
+    {
+      "points_count": 41,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-6777c81b25f0ad4f"
+    },
+    {
+      "points_count": 258047,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-ba5fd150a81b0deb"
+    },
+    {
+      "points_count": 7,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-8818948309e4c34c"
+    },
+    {
+      "points_count": 55380,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-640409bb887dce13"
+    },
+    {
+      "points_count": 190,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-76d6430bfa1b0244"
+    },
+    {
+      "points_count": 8162,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-e562ec730a0fae6c"
+    },
+    {
+      "points_count": 11,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-5df6e15114c6ec29"
+    },
+    {
+      "points_count": 8451,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-2b63fae4af3e000b"
+    },
+    {
+      "points_count": 104,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-ef018333af3b6fd8"
+    },
+    {
+      "points_count": 31,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-f3c7f3246c9b2b7d"
+    },
+    {
+      "points_count": 254360,
+      "vectors_count": null,
+      "segments_count": 7,
+      "status": "green",
+      "name": "ws-1d030851cf4dc7bf"
+    },
+    {
+      "points_count": 556,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-a1dbccccc5569300"
+    },
+    {
+      "points_count": 2704,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-0141f3d1566f0865"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-ce876d0c8f2f52d8"
+    },
+    {
+      "points_count": 78,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-ca1690d474bd65cf"
+    },
+    {
+      "points_count": 1840,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-3d3bc01d0ef5b5ba"
+    },
+    {
+      "points_count": 252749,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-c5fcd2b812423d5c"
+    },
+    {
+      "points_count": 20,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-97fa76006725b9b8"
+    },
+    {
+      "points_count": 14296,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-5479fd630681cf90"
+    },
+    {
+      "points_count": 11441,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-85b82712fb5f7491"
+    },
+    {
+      "points_count": 759,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-60fd38025a89818e"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-65251b4d8b60abd9"
+    },
+    {
+      "points_count": 23015,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-7778cecac0e0ad2c"
+    },
+    {
+      "points_count": 229,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-5511635cee290943"
+    },
+    {
+      "points_count": 12,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-6bf64227ee64c5d9"
+    },
+    {
+      "points_count": 46636,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-638997d800f598cc"
+    },
+    {
+      "points_count": 56862,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-039c79577556b14e"
+    },
+    {
+      "points_count": 11849,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-2301f2795ea49b75"
+    },
+    {
+      "points_count": 75,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-899e13fba3b7e4aa"
+    },
+    {
+      "points_count": 207,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-595fb6747f3802c0"
+    },
+    {
+      "points_count": 1,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-9818f2fa593b3a39"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-1fff6ce12da4e43e"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-d002f03bc24165f0"
+    },
+    {
+      "points_count": 6933,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-75f786c29c0300e8"
+    },
+    {
+      "points_count": 41,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-84e1cf6144ac6042"
+    },
+    {
+      "points_count": 1840,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-3dd7edce22e07589"
+    },
+    {
+      "points_count": 0,
+      "vectors_count": null,
+      "segments_count": 8,
+      "status": "green",
+      "name": "ws-1e57fe25fe541533"
+    }
+  ],
+  "total_collections": 194,
+  "timestamp": "2025-10-08 20:25:09"
+}

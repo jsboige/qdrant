@@ -1,0 +1,59 @@
+services:
+  qdrant_students:
+    image: qdrant/qdrant:latest
+    container_name: qdrant_students
+    restart: always
+    
+    # MODIFIÉ: 30s -> 60s pour permettre un arrêt plus gracieux
+    # Donne plus de temps à Qdrant pour finaliser les écritures en cours
+    stop_grace_period: 60s
+    
+    env_file:
+      - .env.students
+    
+    # PORTS SPÉCIFIQUES STUDENTS (inchangé)
+    ports:
+      - "6335:6333"  # HTTP API Students
+      - "6336:6334"  # gRPC Students
+    
+    # VOLUMES DOCKER (inchangé - students utilise des volumes Docker, pas WSL)
+    volumes:
+      - qdrant-students-storage:/qdrant/storage
+      - qdrant-students-snapshots:/qdrant/snapshots
+      # MODIFIÉ: Utilisation de la configuration optimisée
+      - ./config/students.optimized.yaml:/qdrant/config/production.yaml
+    
+    networks:
+      - qdrant-students-network
+    
+    # NOUVEAU: Limites de ressources pour éviter la surcharge système
+    # Adaptées pour students (plus petit que production)
+    deploy:
+      resources:
+        limits:
+          # Limite maximale de mémoire: 18 GB (augmenté pour migration dim=2560)
+          memory: 18G
+          # Limite maximale de CPU: 12 cœurs (vs 16 production)
+          cpus: '12'
+        reservations:
+          # Réservation garantie de mémoire: 4 GB
+          memory: 4G
+          # Réservation garantie de CPU: 4 cœurs
+          cpus: '4'
+    
+    # DÉSACTIVÉ: Health check Docker désactivé
+    # ⚠️ RAISON: L'image qdrant/qdrant:latest ne contient ni curl, ni wget, ni netcat
+    # Le service fonctionne parfaitement (vérifié via API), mais Docker ne peut pas exécuter de healthcheck interne
+    # SOLUTION: Monitoring externe via scripts PowerShell (students_monitor.ps1)
+    healthcheck:
+      test: ["NONE"]
+
+volumes:
+  qdrant-students-storage:
+    external: false
+  qdrant-students-snapshots:
+    external: false
+
+networks:
+  qdrant-students-network:
+    driver: bridge

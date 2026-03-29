@@ -1,0 +1,97 @@
+# Configuration Qdrant Optimisée pour Production
+# Date de création: 2025-10-07
+# Objectif: Améliorer la stabilité du service (redémarrages quotidiens -> stabilité continue)
+#
+# CHANGEMENTS PAR RAPPORT À production.yaml:
+# ============================================
+# 1. flush_interval_sec: 1 -> 5 (réduit la charge I/O)
+# 2. wal_capacity_mb: 128 -> 512 (augmente la capacité du Write-Ahead Log)
+# 3. max_workers: 0 -> 16 (limite explicite au lieu de auto-détection)
+# 4. max_search_threads: 0 -> 16 (limite explicite pour éviter la surcharge)
+# 5. max_optimization_threads: 0 -> 8 (limite explicite pour l'indexation)
+# 6. memmap_threshold_kb: 200000 -> 300000 (plus de données en mémoire)
+# 7. indexing_threshold_kb: 200000 -> 300000 (seuil d'indexation plus élevé)
+# 8. max_request_size_mb: 32 (NOUVEAU - limite la taille des requêtes)
+#
+# RATIONALE:
+# - flush_interval_sec augmenté: Réduit la fréquence des écritures disque, améliore perf
+# - wal_capacity_mb augmenté: Plus de buffer avant flush, moins de contention I/O
+# - max_workers défini: Évite l'over-subscription CPU (auto=31 threads)
+# - max_search_threads défini: Limite la concurrence des recherches
+# - max_optimization_threads défini: Balance entre indexation et disponibilité
+# - thresholds augmentés: Garde plus de données en RAM, réduit les accès disque
+# - max_request_size_mb: Protège contre les requêtes trop volumineuses
+
+log_level: INFO
+
+storage:
+  storage_path: /qdrant/storage
+  snapshots_path: /qdrant/snapshots
+  on_disk_payload: true
+  
+  wal:
+    # MODIFIÉ: 128 -> 512 MB
+    # Augmente la capacité du Write-Ahead Log pour réduire la fréquence des flush
+    wal_capacity_mb: 512
+  
+  performance:
+    # MODIFIÉ: 0 (auto) -> 16 threads
+    # Limite explicite pour éviter l'over-subscription (auto détectait 31 cores)
+    max_search_threads: 16
+    
+    # MODIFIÉ: 0 (auto) -> 8 threads
+    # Limite explicite pour l'optimisation/indexation en arrière-plan
+    max_optimization_threads: 8
+  
+  optimizers:
+    # MODIFIÉ: 1 -> 5 secondes
+    # Réduit la fréquence des flush pour diminuer la charge I/O
+    flush_interval_sec: 5
+    
+    # INCHANGÉ: 0 = auto-détection du nombre de segments
+    default_segment_number: 0
+    
+    # MODIFIÉ: 200000 -> 300000 KB (≈293 MB)
+    # Augmente le seuil pour garder plus de données en mémoire
+    memmap_threshold_kb: 300000
+    
+    # MODIFIÉ: 200000 -> 300000 KB (≈293 MB)
+    # Augmente le seuil d'indexation pour réduire les opérations disque
+    indexing_threshold_kb: 300000
+  
+  hnsw_index:
+    # INCHANGÉ: Index HNSW stocké sur disque
+    on_disk: true
+    
+    # INCHANGÉ: Paramètre m (nombre de connexions par nœud)
+    m: 32
+    
+    # INCHANGÉ: Paramètre ef_construct (taille de la liste dynamique lors de la construction)
+    ef_construct: 200
+    
+    # CRITIQUE: Threads pour l'indexation HNSW
+    # MODIFIÉ: 0 -> 16 (valeur maximum recommandée)
+    # DIAGNOSTIC: Auto-détection (0) causait des redémarrages continuels
+    # 16 = Limite explicite pour éviter la surcharge CPU
+    # Source: https://qdrant.tech/articles/indexing-optimization/
+    # Date correction: 2025-10-14 (passage à 16 threads)
+    max_indexing_threads: 16
+
+service:
+  # MODIFIÉ: 0 (auto) -> 16 workers
+  # Limite explicite pour le pool de workers API (auto détectait tous les cores)
+  max_workers: 16
+  
+  # NOUVEAU: Limite la taille maximale des requêtes HTTP
+  # Protège contre les requêtes trop volumineuses qui pourraient déstabiliser le service
+  max_request_size_mb: 32
+
+# NOTES D'UTILISATION:
+# ===================
+# 1. Sauvegarder production.yaml avant de déployer cette config
+# 2. Créer un snapshot avant le redémarrage: docker exec qdrant curl -X POST http://localhost:6333/snapshots
+# 3. Arrêter gracieusement: docker stop -t 60 qdrant
+# 4. Copier ce fichier: cp config/production.optimized.yaml config/production.yaml
+# 5. Redémarrer: docker compose up -d
+# 6. Vérifier health: curl http://localhost:6333/healthz
+# 7. Monitorer les premiers jours avec monitor_qdrant_health_enhanced.ps1

@@ -1,0 +1,28 @@
+{
+  "ScriptsDeleted": [
+    "backup_before_migration.ps1",
+    "backup_production_before_update.ps1",
+    "execute_migration.ps1",
+    "fix_network_and_restart.ps1",
+    "monitor_qdrant_health_enhanced.ps1",
+    "rollback_migration.ps1",
+    "safe_restart_production.ps1",
+    "students_backup.ps1",
+    "students_migration.ps1",
+    "students_monitor.ps1",
+    "students_rollback.ps1",
+    "update_production_simple.ps1",
+    "verify_qdrant_config.ps1"
+  ],
+  "ScriptsCopied": [
+    "qdrant_backup.ps1",
+    "qdrant_migrate.ps1",
+    "qdrant_monitor.ps1",
+    "qdrant_restart.ps1",
+    "qdrant_rollback.ps1",
+    "qdrant_update.ps1",
+    "qdrant_verify.ps1"
+  ],
+  "Timestamp": "2025-10-13 20:08:24",
+  "Errors": []
+}

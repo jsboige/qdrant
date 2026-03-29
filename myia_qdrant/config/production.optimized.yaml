@@ -1,0 +1,140 @@
+# Configuration Qdrant Optimisée pour Production
+# Date de mise à jour: 2026-03-24
+# Objectif: Performance optimale pour 10M+ vecteurs (2560 dims) avec quantization int8
+#
+# CHANGEMENTS 2026-03-24 (perf 10M+):
+# ====================================
+# 1. Docker limits: 12G/8 CPUs -> 24G/12 CPUs
+# 2. max_workers: 8 -> 12, max_search_threads: 8 -> 12
+# 3. max_indexing_threads: 8 -> 10
+# 4. wal_capacity_mb: 384 -> 512
+#
+# CHANGEMENTS 2026-03-25 (anti-freeze):
+# ======================================
+# 1. max_optimization_threads: 6 -> 4 (éviter contention optimizer vs upserts)
+# 2. flush_interval_sec: 5 -> 10 (réduire pression I/O pendant writes intensifs)
+# 3. Docker healthcheck activé (HTTP réel via bash /dev/tcp)
+# 4. Container autoheal ajouté (restart auto si unhealthy)
+#
+# OPTIMISATIONS APPLIQUÉES (via API, pas dans ce fichier):
+# ========================================================
+# - Quantization scalaire int8 sur roo_tasks_semantic_index (always_ram: true)
+# - Payload indexes: timestamp (datetime), source (keyword), chunk_type (keyword), task_id (keyword)
+#
+# CONTEXTE:
+# =========
+# - Collection principale: roo_tasks_semantic_index = 10.1M vecteurs × 2560 dims
+# - 50 collections au total
+# - Système: 128GB RAM, 3x RTX 4090 (CPU non-GPU pour Qdrant)
+
+log_level: INFO
+
+storage:
+  storage_path: /qdrant/storage
+  snapshots_path: /qdrant/snapshots
+  on_disk_payload: true
+  
+  wal:
+    # MODIFIÉ: 384 -> 512 MB (augmenté pour 24G RAM Docker limit)
+    # Plus de marge WAL pour les upserts fréquents (50K+ depuis dernier restart)
+    wal_capacity_mb: 512
+  
+  performance:
+    # MODIFIÉ: 8 -> 12 threads (aligné avec Docker limits cpus: '12')
+    # Plus de parallélisme pour les recherches sur 10M+ vecteurs
+    max_search_threads: 12
+
+    # MODIFIÉ: 6 -> 4 threads (réduit pour éviter contention avec upserts intensifs)
+    # Le freeze du 25/03 était causé par optimizer + upserts concurrents sur 10M+ vecteurs
+    # 4 threads = bon compromis rebuild quantization vs marge pour les writes
+    max_optimization_threads: 4
+  
+  optimizers:
+    # MODIFIÉ: 5 -> 10 secondes entre flush (réduit pression I/O pendant upserts intensifs)
+    # RooSync envoie ~1 upsert/2-3s, flush trop fréquent cause contention disque
+    flush_interval_sec: 10
+    
+    # INCHANGÉ: Auto-détection du nombre de segments
+    default_segment_number: 0
+    
+    # NOUVEAU: Limite la taille maximale d'un segment (500 MB)
+    # Évite segments trop volumineux qui ralentissent les opérations
+    max_segment_size_kb: 512000
+    
+    # MODIFIÉ: 300000 -> 250000 KB (≈244 MB, réduit pour 12G RAM)
+    # Garde les données chaudes en mémoire mais sans saturer
+    memmap_threshold_kb: 250000
+    
+    # FIX CRITIQUE: 250000 -> 6000 KB (≈6 MB)
+    # AVANT: 250 MB trop élevé → 66% collections (médiane ~4500 points = 27 MB) en full scan
+    # APRÈS: 6 MB → indexation dès ~1000 points (1000 vecteurs × 1536 dim × 4 bytes)
+    # Résultat: Collections >1000 points seront indexées au lieu de faire des full scans O(n)
+    indexing_threshold_kb: 6000
+    
+    # Seuils de vacuum (nettoyage des vecteurs supprimés)
+    deleted_threshold: 0.2
+    vacuum_min_vector_number: 1000
+  
+  hnsw_index:
+    # Index HNSW sur disque (économie RAM)
+    on_disk: true
+    
+    # Paramètre m: nombre de connexions par nœud
+    m: 32
+    
+    # Paramètre ef_construct: taille liste dynamique construction
+    ef_construct: 200
+    
+    # MODIFIÉ: 8 -> 10 (aligné avec Docker limits cpus: '12')
+    # Légèrement sous le max CPU pour laisser de la marge aux threads search
+    # Date correction: 2026-03-24
+    max_indexing_threads: 10
+
+service:
+  # MODIFIÉ: 8 -> 12 workers (aligné avec Docker limits cpus: '12')
+  # Pool de workers API pour 10M+ vecteurs et requêtes concurrentes
+  max_workers: 12
+  
+  # Limite taille maximale des requêtes HTTP (32 MB)
+  # Protège contre requêtes volumineuses déstabilisantes
+  max_request_size_mb: 32
+  
+  # NOUVEAU: Timeout GRPC en millisecondes (60 secondes)
+  # Évite que requêtes GRPC bloquent indéfiniment
+  # Aligné avec Docker healthcheck timeout (10s) * 6 = 60s
+  grpc_timeout_ms: 60000
+  
+  # NOUVEAU: Activation CORS (utile pour APIs)
+  enable_cors: true
+
+# NOTES D'UTILISATION:
+# ===================
+# 1. Config alignée avec docker-compose.production.yml:
+#    - Docker limits: 24G RAM / 12 CPUs
+#    - Healthcheck HTTP actif: 30s interval, 15s timeout, 3 retries
+#    - Autoheal: restart auto si unhealthy (60s check interval)
+#    - GRPC timeout: 60s
+#
+# 2. Déploiement:
+#    a. Arrêter: docker compose -f docker-compose.production.yml down
+#    b. Redémarrer: docker compose -f docker-compose.production.yml up -d
+#    c. Vérifier: docker ps (doit afficher "healthy" après ~3min)
+#
+# 3. Monitoring:
+#    - Healthcheck Docker: automatique toutes les 30s
+#    - Autoheal: restart auto si 3 healthchecks échouent
+#    - Stats: docker stats qdrant_production
+#
+# 4. Anti-freeze:
+#    - Healthcheck HTTP détecte le freeze (pas juste crash)
+#    - Autoheal restart automatiquement (~2min après freeze)
+#    - Optimizer threads réduits (4) pour éviter contention avec writes
+#    - Flush interval augmenté (10s) pour réduire pression I/O
+#    - Threads max: 12 workers + 12 search + 4 optim + 10 indexing = 38 sur 12 cores
+#
+# LIMITES SYSTÈME ACTUELLES:
+# ==========================
+# - 10.3M+ vecteurs indexés (50 collections, quantization int8)
+# - RAM: 24G Docker limit (8G réservé)
+# - CPU: 12 cœurs Docker limit (4 réservés)
+# - Charge I/O: Flush 10s, WAL 512 MB

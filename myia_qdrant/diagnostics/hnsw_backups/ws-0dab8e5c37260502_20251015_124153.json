@@ -1,0 +1,68 @@
+{
+  "status": "green",
+  "optimizer_status": "ok",
+  "indexed_vectors_count": 0,
+  "points_count": 13,
+  "segments_count": 8,
+  "config": {
+    "params": {
+      "vectors": {
+        "size": 1536,
+        "distance": "Cosine",
+        "on_disk": true
+      },
+      "shard_number": 1,
+      "replication_factor": 1,
+      "write_consistency_factor": 1,
+      "on_disk_payload": true
+    },
+    "hnsw_config": {
+      "m": 64,
+      "ef_construct": 512,
+      "full_scan_threshold": 10000,
+      "max_indexing_threads": 0,
+      "on_disk": true
+    },
+    "optimizer_config": {
+      "deleted_threshold": 0.2,
+      "vacuum_min_vector_number": 1000,
+      "default_segment_number": 0,
+      "max_segment_size": null,
+      "memmap_threshold": 200000,
+      "indexing_threshold": 200000,
+      "flush_interval_sec": 1,
+      "max_optimization_threads": null
+    },
+    "wal_config": {
+      "wal_capacity_mb": 128,
+      "wal_segments_ahead": 0,
+      "wal_retain_closed": 1
+    },
+    "quantization_config": null,
+    "strict_mode_config": {
+      "enabled": false
+    }
+  },
+  "payload_schema": {
+    "pathSegments.1": {
+      "data_type": "keyword",
+      "points": 0
+    },
+    "pathSegments.3": {
+      "data_type": "keyword",
+      "points": 0
+    },
+    "pathSegments.4": {
+      "data_type": "keyword",
+      "points": 0
+    },
+    "pathSegments.0": {
+      "data_type": "keyword",
+      "points": 13
+    },
+    "pathSegments.2": {
+      "data_type": "keyword",
+      "points": 0
+    }
+  }
+}

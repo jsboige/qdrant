@@ -1,0 +1,12 @@
+{
+  "serviceUp": true,
+  "logsFile": "myia_qdrant/diagnostics/freeze_4_logs_20251013_183109.txt",
+  "timestamp": "20251013_183109",
+  "dockerStatus": "Up About an hour (unhealthy)",
+  "errors": {
+    "e400": 191,
+    "panics": 0,
+    "timeouts": 0,
+    "e500": 8
+  }
+}

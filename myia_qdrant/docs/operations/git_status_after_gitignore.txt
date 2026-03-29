@@ -1,0 +1,47 @@
+ M .gitignore
+ M config/production.yaml
+ M myia_qdrant/config/production.optimized.yaml
+ M myia_qdrant/docker-compose.production.yml
+ M myia_qdrant/scripts/qdrant_restart.ps1
+?? myia_qdrant/CORRECTION_URGENTE_README.md
+?? myia_qdrant/FIABILISATION_README.md
+?? myia_qdrant/archive/reports/CONSOLIDATION_REPORT_20251014.md
+?? myia_qdrant/config/production.yaml
+?? myia_qdrant/diagnostics/
+?? myia_qdrant/docs/ARCHITECTURE_GLOBALE.md
+?? myia_qdrant/docs/configuration/MODIFICATIONS_PRODUCTION_CONFIG.md
+?? myia_qdrant/docs/diagnostics/
+?? myia_qdrant/docs/guides/
+?? myia_qdrant/docs/operations/
+?? myia_qdrant/scripts/20251014_apply_critical_fixes.ps1
+?? myia_qdrant/scripts/20251014_diagnostic_ressources_systeme.ps1
+?? myia_qdrant/scripts/20251014_qdrant_update.ps1
+?? myia_qdrant/scripts/analyze_cycle_hypothesis.ps1
+?? myia_qdrant/scripts/diagnostics/20251013_analyze_real_http_errors.ps1
+?? myia_qdrant/scripts/diagnostics/20251013_validation_multi_instances.ps1
+?? myia_qdrant/scripts/diagnostics/20251014_deploiement_fix_threads.ps1
+?? myia_qdrant/scripts/diagnostics/20251014_fix_hnsw_and_quantization.ps1
+?? myia_qdrant/scripts/diagnostics/20251014_verification_finale.ps1
+?? myia_qdrant/scripts/diagnostics/20251015_URGENCE_fix_now.ps1
+?? myia_qdrant/scripts/diagnostics/20251015_analyse_collections_freeze.ps1
+?? myia_qdrant/scripts/diagnostics/20251015_fix_hnsw_corruption_batch.ps1
+?? myia_qdrant/scripts/diagnostics/20251015_monitor_overload_realtime.ps1
+?? myia_qdrant/scripts/diagnostics/20251015_rapport_final_correction_hnsw.ps1
+?? myia_qdrant/scripts/diagnostics/20251015_validate_hnsw_correction.ps1
+?? myia_qdrant/scripts/diagnostics/analyze_collections.ps1
+?? myia_qdrant/scripts/diagnostics/cycle_hypothesis_analysis.md
+?? myia_qdrant/scripts/diagnostics/diagnostic_configuration.ps1
+?? myia_qdrant/scripts/diagnostics/diagnostic_espace_disque.ps1
+?? myia_qdrant/scripts/diagnostics/diagnostic_logs_qdrant.ps1
+?? myia_qdrant/scripts/diagnostics/diagnostic_memoire_complet.ps1
+?? myia_qdrant/scripts/diagnostics/stress_test_qdrant.ps1
+?? myia_qdrant/scripts/fix/
+?? myia_qdrant/scripts/monitoring/
+?? myia_qdrant/scripts/utilities/activate_quantization_int8.ps1
+?? myia_qdrant/scripts/utilities/check_collection_status.ps1
+?? myia_qdrant/scripts/utilities/check_node_heap.ps1
+?? myia_qdrant/scripts/utilities/cleanup_old_logs.ps1
+?? myia_qdrant/scripts/utilities/create_collection_temp.ps1
+?? myia_qdrant/scripts/utilities/measure_qdrant_response_time.ps1
+?? myia_qdrant/scripts/utilities/monitor_http_400_errors.ps1
+?? myia_qdrant/scripts/utilities/monitor_roo_state_manager_errors.ps1

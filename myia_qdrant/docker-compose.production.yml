@@ -1,0 +1,100 @@
+# Docker Compose - Configuration Production Qdrant
+# Date: 2025-10-15
+# Optimisations: Healthcheck actif, limites ressources ajustées, timeouts GRPC
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant_production
+    restart: always
+    
+    # Grace period pour arrêt propre (flush des données)
+    stop_grace_period: 60s
+    
+    env_file:
+      - .env.production
+    
+    # Variables d'environnement pour tuning Qdrant
+    environment:
+      # Limite taille requêtes HTTP (protection contre surcharge)
+      - QDRANT__SERVICE__MAX_REQUEST_SIZE_MB=32
+      
+      # Timeout GRPC (protection contre requêtes bloquantes)
+      - QDRANT__SERVICE__GRPC_TIMEOUT_MS=60000
+      
+      # Niveau de log pour diagnostic
+      - QDRANT__LOG_LEVEL=INFO
+      
+      # Désactiver télémétrie (réduit charge réseau)
+      - QDRANT__TELEMETRY_DISABLED=true
+    
+    ports:
+      - "6333:6333"  # HTTP/REST API
+      - "6334:6334"  # GRPC API
+    
+    volumes:
+      - \\wsl.localhost\Ubuntu\home\jesse\qdrant_data\storage:/qdrant/storage
+      - \\wsl.localhost\Ubuntu\home\jesse\qdrant_data\snapshots:/qdrant/snapshots
+      - ./config/production.optimized.yaml:/qdrant/config/production.yaml
+    
+    # CRITIQUE: Limites de ressources ajustées pour 10M+ vecteurs (2560 dims)
+    deploy:
+      resources:
+        limits:
+          # Limite RAM: 24 GB (augmenté de 12G pour supporter 10M+ vecteurs avec quantization)
+          # Quantization int8 + HNSW on-disk + payload indexes nécessitent plus de RAM
+          memory: 24G
+
+          # Limite CPU: 12 cœurs (augmenté de 8 pour meilleur parallélisme search)
+          # Système a 24 threads, on en réserve 12 pour Qdrant
+          cpus: '12'
+
+        reservations:
+          # Réservation garantie RAM: 8 GB
+          memory: 8G
+
+          # Réservation garantie CPU: 4 cœurs
+          cpus: '4'
+    
+    # HEALTHCHECK via bash /dev/tcp (l'image n'a pas curl/wget mais a bash+timeout)
+    # Envoie une requête HTTP réelle et vérifie la réponse "healthz check passed"
+    # Détecte les freezes (serveur HTTP figé) pas seulement les crashes
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 10 bash -c 'exec 3<>/dev/tcp/localhost/6333; echo -e \"GET /healthz HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" >&3; timeout 5 cat <&3; exec 3>&-' | grep -q 'healthz check passed'"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 180s
+
+  # Autoheal: redémarre automatiquement le container Qdrant si le healthcheck échoue 3x
+  # Nécessaire car Docker Compose (non-swarm) ne restart pas les containers unhealthy
+  autoheal:
+    image: willfarrell/autoheal
+    container_name: qdrant_autoheal
+    restart: always
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=all
+      - AUTOHEAL_INTERVAL=60
+      - AUTOHEAL_START_PERIOD=300
+      - AUTOHEAL_DEFAULT_STOP_TIMEOUT=60
+    volumes:
+      - //var/run/docker.sock:/var/run/docker.sock
+
+# NOTES D'UTILISATION:
+# ===================
+# 1. Démarrer: docker compose -f docker-compose.production.yml up -d
+# 2. Vérifier santé: docker ps (colonne STATUS doit afficher "healthy")
+# 3. Logs: docker logs -f qdrant_production
+# 4. Stats: docker stats qdrant_production
+# 5. Arrêt propre: docker compose -f docker-compose.production.yml down
+#
+# MONITORING & ANTI-FREEZE:
+# - Healthcheck HTTP toutes les 30s (bash /dev/tcp, vérifie réponse réelle)
+# - Si 3 échecs → marqué unhealthy
+# - Autoheal restart automatique (~2min après détection freeze)
+# - start_period: 180s (10M+ vecteurs = ~1min chargement)
+#
+# LIMITES RESSOURCES:
+# - RAM: 8G réservé, 24G max (10M+ vecteurs, quantization int8, payload indexes)
+# - CPU: 4 cœurs réservés, 12 max
+# - Timeouts: 60s GRPC, 15s healthcheck

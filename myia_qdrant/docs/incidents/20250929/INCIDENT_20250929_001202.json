@@ -1,0 +1,14 @@
+{
+  "before_collections": "45+ collections including ws-* and roo_tasks_semantic_index",
+  "cause": "Docker volumes recreated empty during restart",
+  "timestamp": "2025-09-29 00:12:02",
+  "recovery_options": [
+    "Check Students service (port 6335)",
+    "Analyze suspicious volumes with crypto IDs",
+    "Look for external snapshots",
+    "Check backup directories"
+  ],
+  "incident": "Production data loss during Qdrant update",
+  "status": "CRITICAL - Data recovery required",
+  "after_collections": "1 collection: roo_tasks_semantic_index only"
+}

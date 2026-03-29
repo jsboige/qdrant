@@ -1,3 +1,4 @@
+# === Upstream Qdrant ===
 /target
 .idea
 .vscode
@@ -20,3 +21,42 @@ venv
 .venv
 .env
 .python-version
+
+# === MyIA Qdrant customizations ===
+
+# Secrets / env files
+.env.*
+**/.env
+**/.env.*
+
+# MyIA data
+qdrant_data/
+qdrant_data_quarantine/
+
+# MyIA logs & temp diagnostics
+myia_qdrant/logs/
+myia_qdrant/diagnostics/*.log
+myia_qdrant/diagnostics/*.txt
+myia_qdrant/**/*.log
+
+# Temp & backup files
+*.tmp
+*.temp
+*.backup
+*.bak
+*.orig
+
+# IDE
+.vs/
+*.sln.DotSettings.user
+.DS_Store
+
+# .NET build artifacts
+QdrantValidator/[Bb]in/
+QdrantValidator/[Oo]bj/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Legacy backups
+*.backup_*

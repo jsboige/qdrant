@@ -1,0 +1,95 @@
+# Configuration Qdrant Optimisée pour Students
+# Date de création: 2025-10-08
+# Objectif: Améliorer la stabilité du service students (adaptation des optimisations production)
+#
+# CHANGEMENTS PAR RAPPORT À students.yaml:
+# ============================================
+# 1. flush_interval_sec: 1 -> 5 (réduit la charge I/O)
+# 2. wal_capacity_mb: 128 -> 512 (augmente la capacité du Write-Ahead Log)
+# 3. max_workers: 0 -> 12 (limite explicite, adapté à students - plus petit que production)
+# 4. max_search_threads: 0 -> 12 (limite explicite pour éviter la surcharge)
+# 5. max_optimization_threads: 0 -> 8 (limite explicite pour l'indexation)
+# 6. memmap_threshold_kb: 200000 -> 300000 (plus de données en mémoire)
+# 7. indexing_threshold_kb: 200000 -> 300000 (seuil d'indexation plus élevé)
+# 8. max_request_size_mb: 32 (NOUVEAU - limite la taille des requêtes)
+#
+# DIFFÉRENCES AVEC production.optimized.yaml:
+# ===========================================
+# - max_workers: 16 -> 12 (students a moins de charge)
+# - max_search_threads: 16 -> 12 (adapté à la charge students)
+# - Tous les autres paramètres identiques
+#
+# RATIONALE:
+# - flush_interval_sec augmenté: Réduit la fréquence des écritures disque, améliore perf
+# - wal_capacity_mb augmenté: Plus de buffer avant flush, moins de contention I/O
+# - max_workers défini: Évite l'over-subscription CPU (auto détectait tous les cores)
+# - max_search_threads défini: Limite la concurrence des recherches (adapté à students)
+# - max_optimization_threads défini: Balance entre indexation et disponibilité
+# - thresholds augmentés: Garde plus de données en RAM, réduit les accès disque
+# - max_request_size_mb: Protège contre les requêtes trop volumineuses
+
+log_level: INFO
+
+storage:
+  storage_path: /qdrant/storage
+  snapshots_path: /qdrant/snapshots
+  on_disk_payload: true
+  
+  wal:
+    # MODIFIÉ: 128 -> 512 MB
+    # Augmente la capacité du Write-Ahead Log pour réduire la fréquence des flush
+    wal_capacity_mb: 512
+  
+  performance:
+    # MODIFIÉ: 0 (auto) -> 12 threads
+    # Limite explicite pour éviter l'over-subscription (adapté à students)
+    max_search_threads: 12
+    
+    # MODIFIÉ: 0 (auto) -> 8 threads
+    # Limite explicite pour l'optimisation/indexation en arrière-plan
+    max_optimization_threads: 8
+  
+  optimizers:
+    # MODIFIÉ: 1 -> 5 secondes
+    # Réduit la fréquence des flush pour diminuer la charge I/O
+    flush_interval_sec: 5
+    
+    # INCHANGÉ: 0 = auto-détection du nombre de segments
+    default_segment_number: 0
+    
+    # MODIFIÉ: 200000 -> 300000 KB (≈293 MB)
+    # Augmente le seuil pour garder plus de données en mémoire
+    memmap_threshold_kb: 300000
+    
+    # MODIFIÉ: 200000 -> 300000 KB (≈293 MB)
+    # Augmente le seuil d'indexation pour réduire les opérations disque
+    indexing_threshold_kb: 300000
+  
+  hnsw_index:
+    # INCHANGÉ: Index HNSW stocké sur disque
+    on_disk: true
+    
+    # INCHANGÉ: Paramètre m (nombre de connexions par nœud)
+    m: 32
+    
+    # INCHANGÉ: Paramètre ef_construct (taille de la liste dynamique lors de la construction)
+    ef_construct: 200
+
+service:
+  # MODIFIÉ: 0 (auto) -> 12 workers
+  # Limite explicite pour le pool de workers API (adapté à la charge students)
+  max_workers: 12
+  
+  # NOUVEAU: Limite la taille maximale des requêtes HTTP
+  # Protège contre les requêtes trop volumineuses qui pourraient déstabiliser le service
+  max_request_size_mb: 32
+
+# NOTES D'UTILISATION:
+# ===================
+# 1. Sauvegarder students.yaml avant de déployer cette config
+# 2. Créer un snapshot avant le redémarrage: docker exec qdrant_students curl -X POST http://localhost:6333/snapshots
+# 3. Arrêter gracieusement: docker stop -t 60 qdrant_students
+# 4. Copier ce fichier: cp config/students.optimized.yaml config/students.yaml
+# 5. Redémarrer: docker-compose -f docker-compose.students.yml up -d
+# 6. Vérifier health: curl http://localhost:6335/healthz
+# 7. Monitorer avec scripts/students_monitor.ps1

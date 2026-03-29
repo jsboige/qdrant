@@ -1,0 +1,9 @@
+log_level: INFO
+
+storage:
+  storage_path: /qdrant/storage
+  
+  optimizers:
+    # Test: est-ce que indexing_threshold (sans _kb) existe?
+    indexing_threshold_kb: 1000
+    indexing_threshold: 500  # SUSPECT - peut ne pas exister!

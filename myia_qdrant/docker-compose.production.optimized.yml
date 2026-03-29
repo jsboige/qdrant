@@ -1,0 +1,39 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant_production
+    restart: always
+    
+    # MODIFIÉ: 30s -> 60s pour permettre un arrêt plus gracieux
+    stop_grace_period: 60s
+    
+    env_file:
+      - .env.production
+    
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    
+    volumes:
+      - \\wsl.localhost\Ubuntu\home\jesse\qdrant_data\storage:/qdrant/storage
+      - \\wsl.localhost\Ubuntu\home\jesse\qdrant_data\snapshots:/qdrant/snapshots
+      # MODIFIÉ: Utilisation de la configuration optimisée
+      - ./config/production.optimized.yaml:/qdrant/config/production.yaml
+    
+    # NOUVEAU: Limites de ressources pour éviter la surcharge système
+    deploy:
+      resources:
+        limits:
+          # Limite maximale de mémoire: 16 GB
+          memory: 16G
+          # Limite maximale de CPU: 16 cœurs
+          cpus: '16'
+        reservations:
+          # Réservation garantie de mémoire: 4 GB
+          memory: 4G
+          # Réservation garantie de CPU: 4 cœurs
+          cpus: '4'
+    
+    # Health check désactivé: le monitoring externe via scripts/monitor_qdrant_health_enhanced.ps1 est plus fiable
+    healthcheck:
+      test: ["NONE"]
