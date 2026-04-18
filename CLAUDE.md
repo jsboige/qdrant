@@ -64,6 +64,19 @@ curl http://localhost:6335/healthz   # Students
 .\myia_qdrant\scripts\qdrant_restart.ps1
 ```
 
+### E2E Semantic Search Test
+Validates the full pipeline: embedding service -> Qdrant search.
+Use after any change to Qdrant config, embedding service, or RooSync env.
+```bash
+# Default query
+./myia_qdrant/scripts/test/e2e_semantic_search.sh
+
+# Custom query
+./myia_qdrant/scripts/test/e2e_semantic_search.sh "my search query"
+```
+Exits non-zero if embedding service down, Qdrant down, dim mismatch, or no results.
+Reads env from `myia_qdrant/.env.production` (`EMBEDDING_API_*`, `QDRANT_SERVICE_API_KEY`).
+
 ## API Authentication
 
 Each instance has its own API key. Keys are stored in env files (never commit them):
