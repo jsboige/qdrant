@@ -95,9 +95,10 @@ curl -H "api-key: $QDRANT__SERVICE__API_KEY" http://localhost:6335/collections
 ## Configuration Key Points
 
 Production config (`config/production.optimized.yaml`):
-- 8 CPUs max, 12G RAM (Docker limits)
+- 12 CPUs max, 40G RAM (Docker limits — raised from 24G on 2026-04-18 for binary quantization always_ram on 23.8M vectors)
 - `indexing_threshold_kb: 6000` (index at ~1000 points)
-- HNSW on disk, 8 indexing threads max
+- HNSW on disk, 10 indexing threads max
+- Binary quantization with `always_ram: true` on `roo_tasks_semantic_index` (~7.6 GB in RAM for 23.8M × 2560 dims)
 - GRPC timeout: 60s
 
 ## Upstream Sync

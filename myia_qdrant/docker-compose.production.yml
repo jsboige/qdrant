@@ -41,17 +41,17 @@ services:
     deploy:
       resources:
         limits:
-          # Limite RAM: 24 GB (augmenté de 12G pour supporter 10M+ vecteurs avec quantization)
-          # Quantization int8 + HNSW on-disk + payload indexes nécessitent plus de RAM
-          memory: 24G
+          # Limite RAM: 40 GB (augmenté de 24G pour supporter 23.8M+ vecteurs avec binary quantization always_ram)
+          # Binary quantization 1-bit sur 2560 dims: ~7.6 GB en RAM + HNSW on-disk + payload indexes + f32 originals pour rescore
+          memory: 40G
 
           # Limite CPU: 12 cœurs (augmenté de 8 pour meilleur parallélisme search)
           # Système a 24 threads, on en réserve 12 pour Qdrant
           cpus: '12'
 
         reservations:
-          # Réservation garantie RAM: 8 GB
-          memory: 8G
+          # Réservation garantie RAM: 16 GB (augmenté de 8G pour garantir binary quant toujours en RAM)
+          memory: 16G
 
           # Réservation garantie CPU: 4 cœurs
           cpus: '4'
