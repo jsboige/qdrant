@@ -96,7 +96,7 @@ print(json.dumps(body))
 
 # ---- 3. Qdrant health ---------------------------------------------
 echo "[3/4] Qdrant collection health"
-coll_resp=$(curl -s --max-time 10 -H "api-key: $QDRANT_SERVICE_API_KEY" "$QDRANT_URL/collections/$COLLECTION")
+coll_resp=$(curl -s --max-time 10 -H "api-key: $QDRANT__SERVICE__API_KEY" "$QDRANT_URL/collections/$COLLECTION")
 status=$(echo "$coll_resp" | python -c "import sys,json; print(json.load(sys.stdin)['result']['status'])" 2>/dev/null || echo "unreachable")
 points=$(echo "$coll_resp" | python -c "import sys,json; print(json.load(sys.stdin)['result']['points_count'])" 2>/dev/null || echo "0")
 coll_dim=$(echo "$coll_resp" | python -c "import sys,json; d=json.load(sys.stdin)['result']['config']['params']['vectors']; print(d.get('size', d))" 2>/dev/null || echo "?")
@@ -115,7 +115,7 @@ ok "collection status=$status points=$points dim=$coll_dim"
 echo "[4/4] Semantic search"
 t_search_start=$(python -c "import time; print(time.time())")
 search_resp=$(curl -s --max-time 30 \
-  -H "api-key: $QDRANT_SERVICE_API_KEY" \
+  -H "api-key: $QDRANT__SERVICE__API_KEY" \
   -H "Content-Type: application/json" \
   -X POST "$QDRANT_URL/collections/$COLLECTION/points/search" \
   --data @/tmp/e2e_search_body.json)

@@ -13,7 +13,7 @@ Write-Host "╚═════════════════════�
 
 # Récupération de l'API Key
 try {
-    $apiKey = (Get-Content $EnvFile | Select-String "QDRANT_SERVICE_API_KEY").ToString().Split("=")[1].Trim()
+    $apiKey = (Get-Content $EnvFile | Select-String "QDRANT__SERVICE__API_KEY").ToString().Split("=")[1].Trim()
     Write-Host "✓ API Key chargée depuis $EnvFile" -ForegroundColor Green
 } catch {
     Write-Host "✗ Erreur: Impossible de lire l'API Key depuis $EnvFile" -ForegroundColor Red

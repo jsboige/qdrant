@@ -30,7 +30,7 @@ function Write-ColoredStatus {
 
 function Get-CollectionHealth {
     # Récupérer l'API key
-    $apiKeyLine = Get-Content .env.production | Select-String 'QDRANT_SERVICE_API_KEY=(.+)'
+    $apiKeyLine = Get-Content .env.production | Select-String 'QDRANT__SERVICE__API_KEY=(.+)'
     if (-not $apiKeyLine) {
         throw "Impossible de récupérer l'API key"
     }

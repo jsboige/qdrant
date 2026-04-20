@@ -75,18 +75,18 @@ Use after any change to Qdrant config, embedding service, or RooSync env.
 ./myia_qdrant/scripts/test/e2e_semantic_search.sh "my search query"
 ```
 Exits non-zero if embedding service down, Qdrant down, dim mismatch, or no results.
-Reads env from `myia_qdrant/.env.production` (`EMBEDDING_API_*`, `QDRANT_SERVICE_API_KEY`).
+Reads env from `myia_qdrant/.env.production` (`EMBEDDING_API_*`, `QDRANT__SERVICE__API_KEY`).
 
 ## API Authentication
 
 Each instance has its own API key. Keys are stored in env files (never commit them):
-- **Production**: `myia_qdrant/.env.production` → variable `QDRANT_SERVICE_API_KEY`
+- **Production**: `myia_qdrant/.env.production` → variable `QDRANT__SERVICE__API_KEY`
 - **Students**: `myia_qdrant/.env.students` → variable `QDRANT__SERVICE__API_KEY`
 
 ```bash
 # Production (port 6333, also exposed via qdrant.myia.io:443)
 source myia_qdrant/.env.production
-curl -H "api-key: $QDRANT_SERVICE_API_KEY" http://localhost:6333/collections
+curl -H "api-key: $QDRANT__SERVICE__API_KEY" http://localhost:6333/collections
 # Students (port 6335)
 source myia_qdrant/.env.students
 curl -H "api-key: $QDRANT__SERVICE__API_KEY" http://localhost:6335/collections

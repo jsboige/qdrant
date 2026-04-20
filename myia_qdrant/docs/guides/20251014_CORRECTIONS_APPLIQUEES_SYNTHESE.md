@@ -142,7 +142,7 @@ Invoke-RestMethod -Uri "http://localhost:6333/collections/nom_collection" `
 
 ### 2. API Key Storage
 - **Fichier**: `.env` à la racine
-- **Nom variable**: `QDRANT_SERVICE_API_KEY` (sans doubles underscores)
+- **Nom variable**: `QDRANT__SERVICE__API_KEY` (sans doubles underscores)
 - **Valeur**: `<YOUR_PRODUCTION_API_KEY>`
 - **Note**: Scripts doivent chercher avec regex flexible: `QDRANT[_]{1,2}SERVICE[_]{1,2}API[_]{1,2}KEY`
 

@@ -74,13 +74,13 @@ docker ps
 
 - **HTTP API** : `http://localhost:6335`
 - **gRPC** : `localhost:6336`
-- **API Key** : Utilisée depuis le fichier `.env.students` (variable `QDRANT_SERVICE_API_KEY`)
+- **API Key** : Utilisée depuis le fichier `.env.students` (variable `QDRANT__SERVICE__API_KEY`)
 
 ## 📝 Variables d'environnement
 
 Le service utilise un fichier `.env.students` dédié :
 ```
-QDRANT_SERVICE_API_KEY=<YOUR_STUDENTS_API_KEY>
+QDRANT__SERVICE__API_KEY=<YOUR_STUDENTS_API_KEY>
 OPENAI_API_KEY=sk-proj-...
 ```
 

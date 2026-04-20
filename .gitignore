@@ -60,3 +60,6 @@ QdrantValidator/[Oo]bj/
 
 # Legacy backups
 *.backup_*
+
+# Key rotation scratch area (never commit)
+.rotation/

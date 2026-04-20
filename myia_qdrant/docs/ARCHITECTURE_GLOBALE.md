@@ -75,7 +75,7 @@ qdrant/
 ### API Keys
 Toutes les instances utilisent la même API key définie dans `.env` :
 ```bash
-QDRANT_SERVICE_API_KEY=<YOUR_PRODUCTION_API_KEY>
+QDRANT__SERVICE__API_KEY=<YOUR_PRODUCTION_API_KEY>
 ```
 
 ### Usage de l'API Key

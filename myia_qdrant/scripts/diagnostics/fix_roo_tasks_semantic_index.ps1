@@ -20,7 +20,7 @@ if ($DryRun) {
 
 # 1. Récupérer l'API key
 Write-Host "=== 1. RECUPERATION API KEY ===" -ForegroundColor Yellow
-$apiKeyLine = Get-Content .env.production | Select-String 'QDRANT_SERVICE_API_KEY=(.+)'
+$apiKeyLine = Get-Content .env.production | Select-String 'QDRANT__SERVICE__API_KEY=(.+)'
 if ($apiKeyLine) {
     $apiKey = $apiKeyLine.Matches.Groups[1].Value
     Write-Host "API Key récupérée: $($apiKey.Substring(0,8))..." -ForegroundColor Green
