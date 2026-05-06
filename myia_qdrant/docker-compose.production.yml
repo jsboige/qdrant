@@ -63,8 +63,10 @@ services:
       test: ["CMD-SHELL", "timeout 10 bash -c 'exec 3<>/dev/tcp/localhost/6333; echo -e \"GET /healthz HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" >&3; timeout 5 cat <&3; exec 3>&-' | grep -q 'healthz check passed'"]
       interval: 30s
       timeout: 15s
-      retries: 3
-      start_period: 180s
+      retries: 5
+      # 600s : recovery de roo_tasks_semantic_index (~6022 segments, 55M points) prend 5-6 min
+      # cold-start. Avant 180s autoheal tuait le container avant la fin de la recovery -> boucle infinie
+      start_period: 600s
 
   # Autoheal: redémarre automatiquement le container Qdrant si le healthcheck échoue 3x
   # Nécessaire car Docker Compose (non-swarm) ne restart pas les containers unhealthy
@@ -90,9 +92,9 @@ services:
 #
 # MONITORING & ANTI-FREEZE:
 # - Healthcheck HTTP toutes les 30s (bash /dev/tcp, vérifie réponse réelle)
-# - Si 3 échecs → marqué unhealthy
+# - Si 5 échecs consécutifs → marqué unhealthy
 # - Autoheal restart automatique (~2min après détection freeze)
-# - start_period: 180s (10M+ vecteurs = ~1min chargement)
+# - start_period: 600s (cold-start recovery 6022 segments / 55M points sur VHDX = 5-6 min)
 #
 # LIMITES RESSOURCES:
 # - RAM: 8G réservé, 24G max (10M+ vecteurs, quantization int8, payload indexes)
