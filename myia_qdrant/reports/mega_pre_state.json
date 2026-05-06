@@ -1,0 +1,9 @@
+{
+  "status": "green",
+  "disk_used_gb": "752",
+  "indexed_vectors_count": 59722170,
+  "segments_count": 1190,
+  "ts": "2026-05-06T12:53:05.7738204+02:00",
+  "optimizer_status": "ok",
+  "points_count": 58419310
+}

@@ -1,0 +1,2 @@
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sde        866G  762G   60G  93% /mnt/qdrant-e

@@ -1,0 +1,3182 @@
+[
+  {
+    "value": "claude-d--roo-extensions--16f59428-fd5c-4bda-a38b-a2e71f971fb7",
+    "count": 482265
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--5d9ab5de-1f87-4518-95e6-296791ceef41",
+    "count": 475716
+  },
+  {
+    "value": "claude-d--Dev-Argumentum--85c08c6e-a63d-416e-a918-f4bf8565b519",
+    "count": 465229
+  },
+  {
+    "value": "claude-d--dev-CoursIA--76dd451c-0538-4dc1-a7b8-fb93888b438f",
+    "count": 462234
+  },
+  {
+    "value": "claude-d--CoursIA--e10a3908-0148-43cb-8913-e42380d20b17",
+    "count": 452718
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260428-052410--3ee4863f-d2e9-4a5f-a34d-5d9abc759c28",
+    "count": 450341
+  },
+  {
+    "value": "claude-d--roo-extensions--368bcc1a-b858-4e9b-b1a5-4edb9ab61628",
+    "count": 441422
+  },
+  {
+    "value": "claude-g--Mon-Drive-Maintenance--b96790ec-d67c-4350-bb2f-4f0834e99727",
+    "count": 390957
+  },
+  {
+    "value": "claude-d--roo-extensions--a48ea1ec-9a3e-4473-8473-dde568e47b52",
+    "count": 379147
+  },
+  {
+    "value": "claude-d--roo-extensions--ffebb8cd-8f98-4045-bde9-88b1735793b4",
+    "count": 360931
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--fa2c082a-834e-4752-81ea-763f2ad87c43",
+    "count": 304087
+  },
+  {
+    "value": "claude-d--2025-Epita-Intelligence-Symbolique--b0b4db9d-63aa-4ebb-ac8a-445c8cb7a9ed",
+    "count": 283775
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--6f3fae56-bcb8-4766-a1f9-840ac40a8de0",
+    "count": 283024
+  },
+  {
+    "value": "claude-d--Argumentum--d3df8472-b681-4d2a-a68a-513e0df516b7",
+    "count": 272684
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--3afcd3c0-f6c5-4c2f-bb26-628fce0d2e91",
+    "count": 271166
+  },
+  {
+    "value": "claude-d--vllm--211afb97-71f1-4bc6-983e-f30f1d32a424",
+    "count": 252019
+  },
+  {
+    "value": "claude-c--dev-CoursIA--3ddc61a2-c7a7-43fa-8bfd-90f75c40aa39",
+    "count": 250570
+  },
+  {
+    "value": "claude-d--roo-extensions--7832be04-cc15-4a2a-8785-657dae4e1359",
+    "count": 239984
+  },
+  {
+    "value": "claude-d--roo-extensions--ef5f3290-9b04-41d1-ba57-7bed07ba045d",
+    "count": 233090
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260425-080730--e8673be9-ce62-4a2a-b805-7c751edf1d13",
+    "count": 216504
+  },
+  {
+    "value": "claude-d--roo-extensions--08389302-e0bb-4d33-bcea-801acb688b7b",
+    "count": 207837
+  },
+  {
+    "value": "claude-c--dev-CoursIA--4faf8512-891d-49f7-8ee3-dfeac4877427",
+    "count": 204565
+  },
+  {
+    "value": "claude-c--dev-CoursIA--e70f18ac-3412-435c-8574-72480d6c942d",
+    "count": 201839
+  },
+  {
+    "value": "claude-d--roo-extensions--6dcf425e-2b1f-494a-aa11-b78758238ae4",
+    "count": 199931
+  },
+  {
+    "value": "claude-d--roo-extensions--164f6024-5576-4cf6-a6cd-e65c9b973fad",
+    "count": 172786
+  },
+  {
+    "value": "claude-d--roo-extensions--4745080b-4165-4d2b-acaa-19ebe23945cc",
+    "count": 161670
+  },
+  {
+    "value": "claude-d--vllm--c81acbd7-46af-4273-94e6-e574068748e8",
+    "count": 160788
+  },
+  {
+    "value": "claude-d--Dev-2025-Epita-Intelligence-Symbolique--7c7b48c5-3af1-44fa-99bb-98c0e320e66c",
+    "count": 151274
+  },
+  {
+    "value": "claude-d--nanoclaw--a4f38013-e766-4452-9798-93f9728368d6",
+    "count": 150405
+  },
+  {
+    "value": "claude-g--Mon-Drive-MyIA-Comptes-LivresAgit-s--0123c7b4-717c-417a-b011-91bcaba93e6a",
+    "count": 137868
+  },
+  {
+    "value": "claude-d--roo-extensions--317cc81d-58dc-43cf-ab70-45b43c5ca3d7",
+    "count": 132539
+  },
+  {
+    "value": "claude-d--roo-extensions--f3bddfff-1f95-4637-90a0-57f3f2cecedc",
+    "count": 132182
+  },
+  {
+    "value": "claude-d--Dev-2025-Epita-Intelligence-Symbolique--90919718-e394-49ac-a666-854ec3a0ba61",
+    "count": 129755
+  },
+  {
+    "value": "claude-d--roo-extensions--e65af272-0ef5-4af6-9fa7-773370c24724",
+    "count": 128631
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260423-080731--8fde28a3-6f69-4f3c-b431-148c63c6f089",
+    "count": 125530
+  },
+  {
+    "value": "claude-d--roo-extensions--34753396-e810-4fe3-97eb-5a2290fb99f5",
+    "count": 121316
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260421-230730--b9575bda-3bae-4d54-8ece-eab0de7fc415",
+    "count": 114482
+  },
+  {
+    "value": "claude-d--dev-CoursIA--ca29528b-57e9-41c9-986a-b12ea3a8789c",
+    "count": 112831
+  },
+  {
+    "value": "claude-d--roo-extensions--6ab1eff5-471f-4882-9ef5-9d82574fbd6e",
+    "count": 112131
+  },
+  {
+    "value": "claude-d--roo-extensions--c106d1f1-802f-4847-9628-624d00b32852",
+    "count": 110192
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--7a342777-b50a-40f9-a595-6e9e11f3744d",
+    "count": 108504
+  },
+  {
+    "value": "claude-d--roo-extensions--4ea547c9-6280-4738-bfa5-68f060b971f9",
+    "count": 107552
+  },
+  {
+    "value": "claude-d--roo-extensions--a712f571-3920-4d3a-8e87-6ae7870e8f6b",
+    "count": 105028
+  },
+  {
+    "value": "claude-d--dev-CoursIA--8003ce49-6d25-46ff-ba93-0526519e1eba",
+    "count": 102351
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--c3cd5d85-0817-4f08-af0a-b3bb4ede492a",
+    "count": 99849
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--004d7740-66f1-40a9-80d2-6f023c37a4dd",
+    "count": 97944
+  },
+  {
+    "value": "claude-d--roo-extensions--1178264d-147e-4c84-9f35-eb7628e14ab2",
+    "count": 97891
+  },
+  {
+    "value": "claude-d--Dev-Argumentum--ce20879d-1c47-4942-9d21-2bb8e1e5f63a",
+    "count": 94375
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--469738c1-8a22-485e-a630-1da54b44e94f",
+    "count": 93310
+  },
+  {
+    "value": "claude-c--dev-CoursIA--88078904-a2f3-4080-9f8e-e592eb2253b2",
+    "count": 92137
+  },
+  {
+    "value": "claude-d--roo-extensions--72a38fae-e438-45e3-97fe-a13d9370e182",
+    "count": 91484
+  },
+  {
+    "value": "claude-d--dev-CoursIA--29f2a8ab-4039-4590-b5cd-75faca6cfeb5",
+    "count": 90669
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--1bdfa19f-08e6-4bf2-aadb-3f3bcaf0ab55",
+    "count": 86132
+  },
+  {
+    "value": "claude-d--dev-2025-Epita-Intelligence-Symbolique--b1fcff99-8535-499d-bf70-c84aea9c8ff8",
+    "count": 84046
+  },
+  {
+    "value": "claude-d--dev-2025-Epita-Intelligence-Symbolique--9ffde51e-e518-44c6-a97b-8d29ca4e4cc4",
+    "count": 81902
+  },
+  {
+    "value": "claude-d--dev-CoursIA",
+    "count": 77087
+  },
+  {
+    "value": "claude-g--Mon-Drive-Maintenance--ab5ab0c8-95cd-49f8-86ad-691e9b6e679d",
+    "count": 71147
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--62d9ec30-c80d-495f-a508-f5de9d7dc2e9",
+    "count": 70271
+  },
+  {
+    "value": "claude-d--CoursIA--d92881f1-8ff3-442c-9bc6-98aeb1e263ad",
+    "count": 67962
+  },
+  {
+    "value": "claude-c--dev-CoursIA--44992a8f-3ff8-4bf2-9ee0-f9853a960ca4",
+    "count": 67533
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260418-090808--cd4f22a1-606c-4e14-86c1-fb526640e67a",
+    "count": 67036
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--e6e82839-6768-4218-82c4-efa0bc70547b",
+    "count": 66578
+  },
+  {
+    "value": "claude-d--dev-2025-Epita-Intelligence-Symbolique--77d6b4c5-5c1c-48a1-ad53-ca2ad35130ac",
+    "count": 65790
+  },
+  {
+    "value": "claude-d--roo-extensions--1a97f0f1-153e-4294-8ee4-b3d48ccd2edc",
+    "count": 64676
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260428-140744--0e4e304c-2e59-42b5-ae4e-6b43f913fd15",
+    "count": 64668
+  },
+  {
+    "value": "claude-c--dev-CoursIA--d879681e-cfb6-4b0a-b505-cac5a1dfcf0a",
+    "count": 63167
+  },
+  {
+    "value": "claude-d--roo-extensions--9719dd14-285f-419b-9124-505792dc31b6",
+    "count": 63109
+  },
+  {
+    "value": "claude-d--roo-extensions--90fecbca-40bf-4ce5-a0b3-f8a2c8e90c8c",
+    "count": 61598
+  },
+  {
+    "value": "claude-d--roo-extensions--f4937036-dd69-45e9-a8e6-4f1653a7dc3c",
+    "count": 57523
+  },
+  {
+    "value": "claude-d--roo-extensions--f062c91c-f14d-4f9d-827b-6b51d8fe0789",
+    "count": 56946
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260331-172217",
+    "count": 56864
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--45d9a737-aa6c-41de-85e2-965bd9ea21ff",
+    "count": 56717
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260418-090808",
+    "count": 56054
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--5d605141-ba43-49f4-aa07-20a0bf33e912",
+    "count": 55814
+  },
+  {
+    "value": "claude-d--dev-CoursIA--144ceb7c-aa1b-4627-8ade-d905393af04a",
+    "count": 55436
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--fa12faa6-b108-48e9-954e-ead0d69172b9",
+    "count": 54825
+  },
+  {
+    "value": "claude-d--Dev-2025-Epita-Intelligence-Symbolique--699d07a1-a4ab-49eb-84f8-cb688e38fb5e",
+    "count": 53235
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260422-172244--783d02fb-6c8e-45cf-ba43-15122df53e79",
+    "count": 52380
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260429-232358--710895f0-b97c-499b-b4dd-ba4cdd95295c",
+    "count": 52168
+  },
+  {
+    "value": "claude-d--roo-extensions--45e91853-e028-44eb-bf52-19ad5faa5d0d",
+    "count": 52165
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260324-042223--95d93be6-8ddb-4bb6-9501-775ebe683f9d",
+    "count": 51134
+  },
+  {
+    "value": "claude-d--roo-extensions--e53a9f5a-3616-4b9e-9353-3b4ff8a3660d",
+    "count": 50525
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260428-220802--404c6040-d77f-4ef5-9c0d-6c461464a631",
+    "count": 50248
+  },
+  {
+    "value": "claude-d--dev-2025-Epita-Intelligence-Symbolique",
+    "count": 49884
+  },
+  {
+    "value": "claude-d--dev-CoursIA--b877c521-0a6c-4b97-bc9a-3d0de0dd267b",
+    "count": 49410
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--e0a095fa-d51b-4089-b640-74fa5f864e16",
+    "count": 49035
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--7222681f-adbd-4452-9d40-c455e3647a48",
+    "count": 47882
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260421-230730--b9e0baad-2f85-42b4-944d-e175291f1e49",
+    "count": 47843
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--64383144-1e2e-4161-8910-4fadf8a308f7",
+    "count": 46095
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--9382885c-ea24-4a7f-ac04-7788d2ba68d9",
+    "count": 45515
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260422-140731--6495adfd-1aee-4232-b516-cd465b726843",
+    "count": 44864
+  },
+  {
+    "value": "claude-d--CoursIA--450c82a8-b93e-40ad-aea6-9289cc6923d6",
+    "count": 44273
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260409-232239",
+    "count": 44225
+  },
+  {
+    "value": "claude-d--dev-CoursIA--07323e57-bee3-4ea4-808d-bb6e8f567838",
+    "count": 44143
+  },
+  {
+    "value": "claude-d--dev-2025-Epita-Intelligence-Symbolique--66aad7ae-9c5f-45dc-a514-9676148dd6c9",
+    "count": 44049
+  },
+  {
+    "value": "claude-d--roo-extensions--5b2f7a9b-dbdb-4aec-abcc-74a505f828d8",
+    "count": 43889
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260407-052206",
+    "count": 43568
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260418-170714--d23db674-d6cd-45c0-bc61-8e0b5ec5f351",
+    "count": 42900
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--35317284-5c4d-4f3a-8dc5-d8d47a2b64af",
+    "count": 40615
+  },
+  {
+    "value": "claude-d--roo-extensions--e94441ed-e0f1-461d-8cc7-4659e504b02f",
+    "count": 39713
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260420-052221--b309d4fa-dc6a-4ba9-8b39-46eb5498efd7",
+    "count": 39375
+  },
+  {
+    "value": "claude-d--dev-CoursIA--6ab85936-a6ee-4d9b-ae91-43b53b3b5734",
+    "count": 38919
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--7dc1e989-7fdc-4fb9-b28a-a1f09a4011b4",
+    "count": 38565
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--74cfd78d-4f58-4811-b675-4402a5018793",
+    "count": 37747
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260331-052250--c6597007-2277-491e-93b2-efab72128015",
+    "count": 37370
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260412-172325",
+    "count": 36936
+  },
+  {
+    "value": "claude-d--CoursIA--9c6fc642-ae8f-4ef5-acaa-69179e00947e",
+    "count": 36936
+  },
+  {
+    "value": "claude-d--roo-extensions--43ad49bc-9cc9-4d94-8198-82851c546b6c",
+    "count": 34877
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--223aaeb1-9086-4788-acea-463d1cae9360",
+    "count": 34800
+  },
+  {
+    "value": "claude-d--dev-2025-Epita-Intelligence-Symbolique--f10e92cd-850c-4003-957a-9415d3e7ddca",
+    "count": 34642
+  },
+  {
+    "value": "claude-d--roo-extensions--3a118741-f833-4c45-92e6-499c4e6dc7ea",
+    "count": 34312
+  },
+  {
+    "value": "claude-d--roo-extensions--d99601a6-25bd-4537-9da1-6fccd83144ba",
+    "count": 34206
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260405-112144",
+    "count": 33973
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--1b3058b0-836f-4b17-8002-1a0f224c0029",
+    "count": 33874
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260419-230741--27951ccc-f0cc-4074-b475-1f31f3cae495",
+    "count": 33655
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260407-232229--22364566-361b-4f6d-a518-e6360ca6653d",
+    "count": 33621
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--8a372019-0b68-4fa0-9a12-291853eafe69",
+    "count": 33439
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--841817ae-ca5f-48b0-b55a-b1f743056f0a",
+    "count": 32916
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260426-170743--9fb4df3f-2038-4c8d-94c2-2373006d13df",
+    "count": 32786
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--7b0b9b0d-0870-441c-b7cc-97c2a52e3d0f",
+    "count": 32619
+  },
+  {
+    "value": "claude-d--Dev-Argumentum--61d9f71d-33f3-482d-8939-8924875344d4",
+    "count": 32125
+  },
+  {
+    "value": "claude-d--roo-extensions--8e3acfc2-d9d8-4661-b469-7eb09aa5f37b",
+    "count": 31931
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--8e761a33-b80b-4e16-91fe-e1a9f2dc2dd9",
+    "count": 31360
+  },
+  {
+    "value": "claude-d--roo-extensions--54e14d18-b5a5-49b6-9787-09dafde19e54",
+    "count": 31019
+  },
+  {
+    "value": "claude-d--roo-extensions--fd0a3177-40d5-4ca5-8be1-3d3984ce27e3",
+    "count": 30934
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260423-172258--1d586327-3b88-449b-814c-ceaf0ca47a8f",
+    "count": 30460
+  },
+  {
+    "value": "claude-c--dev-CoursIA--922d5161-0580-4cdc-84ef-3673026d39c8",
+    "count": 30176
+  },
+  {
+    "value": "claude-d--Production-IISManagement--acc49294-567a-49a5-bc45-f7998255720c",
+    "count": 30174
+  },
+  {
+    "value": "claude-d--dev-CoursIA--b4c08d41-8557-4283-ab7b-095e914b087e",
+    "count": 30149
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260421-220721--246fbf64-5b52-41ef-b413-f1f058b667fb",
+    "count": 29442
+  },
+  {
+    "value": "claude-d--dev-CoursIA--911f00b4-ff4f-4f06-bf11-3401916e9f20",
+    "count": 29405
+  },
+  {
+    "value": "claude-d--dev-CoursIA--a9230bcb-0cbb-4a5f-9dd5-0add23263999",
+    "count": 29141
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--27549861-1c0e-4374-bd56-577844805ebd",
+    "count": 28936
+  },
+  {
+    "value": "claude-d--Open-WebUI-myia-open-webui--ff838bf1-ae4a-445a-bd38-aadf2f101ca4",
+    "count": 28872
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260426-020733--3178aa9f-9dfb-4144-9491-647196efff3d",
+    "count": 28841
+  },
+  {
+    "value": "claude-g--Mon-Drive-Maintenance--a9315f2a-bc6e-41a7-a9c1-2b4398c7f573",
+    "count": 28606
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260324-042223",
+    "count": 28530
+  },
+  {
+    "value": "claude-d--roo-extensions--4dd6ec2e-42c0-413e-ac52-5a2be1a9e3f9",
+    "count": 27686
+  },
+  {
+    "value": "claude-g--Mon-Drive-Maintenance--df9ef2fe-7704-461e-8410-5a4d5fab7809",
+    "count": 27440
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--e4f748e4-1ffa-4033-b03c-ee304cdc64dc",
+    "count": 27302
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260331-052250",
+    "count": 25634
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260419-172230--ff3371a4-9544-486b-9035-066730877bf5",
+    "count": 25431
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260418-090808--df829c21-9629-4153-9dcb-aee0fb7b760b",
+    "count": 25295
+  },
+  {
+    "value": "claude-c--dev-CoursIA--07c28c09-3255-4fc7-b915-ce71bc795906",
+    "count": 24833
+  },
+  {
+    "value": "claude-d--roo-extensions--b99ec1e6-ec92-4796-ae6a-3ec99114685d",
+    "count": 24742
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260321-173806--ceb41cda-f7d8-4d12-a321-4a70c68ebf39",
+    "count": 24582
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260429-050738--38035144-8a7b-4b00-8f66-a6409157d2da",
+    "count": 23724
+  },
+  {
+    "value": "claude-d--Open-WebUI-myia-open-webui--4828e076-b5b1-4b20-aa74-3b494e517473",
+    "count": 23460
+  },
+  {
+    "value": "claude-g--Mon-Drive-MyIA-Comptes-LivresAgit-s",
+    "count": 23247
+  },
+  {
+    "value": "claude-d--roo-extensions--a7ce56bd-0726-4c4f-953b-58de91530f74",
+    "count": 23040
+  },
+  {
+    "value": "claude-d--roo-extensions--e7282b2a-dbf0-45a9-b7e6-0344029bb877",
+    "count": 22992
+  },
+  {
+    "value": "claude-d--roo-extensions--4b8ee38d-ef3c-4731-a219-0626072e420b",
+    "count": 22979
+  },
+  {
+    "value": "claude-d--dev-CoursIA--49e289d2-fc2f-410a-9b9e-b6d57fe01ee9",
+    "count": 22929
+  },
+  {
+    "value": "claude-d--dev-CoursIA--95246040-de08-4294-bfae-439380580532",
+    "count": 22603
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--9efeb329-7747-4e1c-897f-45988c2d9640",
+    "count": 22294
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260425-232245--39d7938b-5d41-45c6-9cc3-075b06d44bc0",
+    "count": 22141
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260426-052208--b6c452bf-4513-4f8a-928f-a8ccfc248a0c",
+    "count": 21866
+  },
+  {
+    "value": "claude-d--dev-CoursIA--f5abcc77-98c4-48ef-9a17-39e5a2bd821d",
+    "count": 21240
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260417-172316--eb6482a4-c235-4a51-82a3-84e9c4e0da0a",
+    "count": 21154
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--285c9a01-2f75-4023-8959-e7d836ff058f",
+    "count": 20856
+  },
+  {
+    "value": "claude-d--Dev-Argumentum--d2933ebe-00ff-44f7-a899-2d71e96f0c02",
+    "count": 20686
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--11a09728-774f-488e-8825-4406e9993946",
+    "count": 20526
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--91c6e190-976a-4d7e-937a-ac55057eabb0",
+    "count": 20515
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--bd3d4f91-d957-45d1-b88e-068cd6fea625",
+    "count": 20399
+  },
+  {
+    "value": "claude-d--roo-extensions--ab485bfa-ecd6-4634-842d-3efadd5122f9",
+    "count": 20328
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260417-230730--cb50c3f5-7fb4-454b-9e68-01a4e9962478",
+    "count": 19889
+  },
+  {
+    "value": "claude-d--dev-CoursIA--aea3995e-e6e9-4a7e-8963-d5a9079a9f29",
+    "count": 19641
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--36f2cdc3-4a23-4457-80bd-567d49c6dfda",
+    "count": 19573
+  },
+  {
+    "value": "claude-d--roo-extensions--b730927a-7d77-4ce0-ac70-ba15f4886cd8",
+    "count": 19331
+  },
+  {
+    "value": "claude-d--Dev-2025-Epita-Intelligence-Symbolique--f933c8b9-6e23-4f4a-9a86-57baa11d6fc8",
+    "count": 19004
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--8622aa2f-0fb2-4d95-b29d-cdb1f376c86d",
+    "count": 18948
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260329-170715",
+    "count": 18928
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--f15a8260-5c9f-4984-a9f2-fd6b0c1e3ecc",
+    "count": 18865
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260428-172256--ff112bc3-3832-488c-ae30-1721157cc543",
+    "count": 18800
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--08340994-d7e9-4bea-8b92-2644b8616427",
+    "count": 18716
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260326-162149",
+    "count": 18704
+  },
+  {
+    "value": "claude-d--roo-extensions--842ccfff-8933-4296-90f1-1554ba05dd12",
+    "count": 18554
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260326-162149--47ab8d98-0e72-48e1-b1df-e0135a549342",
+    "count": 18454
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--015ce7ea-5c64-4131-bd70-acaff64f8ccd",
+    "count": 18327
+  },
+  {
+    "value": "claude-d--roo-extensions--56bf4ab1-3553-4d1c-b57f-1cd12c78abb1",
+    "count": 18186
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260419-172230",
+    "count": 18086
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260418-090808--501db420-e01e-4f66-ba2b-d16725ab03d3",
+    "count": 17712
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--4c813f44-55ff-46e7-920d-2147a00793b1",
+    "count": 17704
+  },
+  {
+    "value": "claude-d--roo-extensions--af553076-b8a1-4e07-8cec-426d3d5a32b0",
+    "count": 17487
+  },
+  {
+    "value": "claude-d--Dev-2025-Epita-Intelligence-Symbolique--400b6148-589b-4e92-b953-290d047faee1",
+    "count": 16934
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260321-173806",
+    "count": 16729
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260323-222307--421da410-1461-4053-a273-bd6441aef451",
+    "count": 16614
+  },
+  {
+    "value": "claude-d--dev-CoursIA--e87545fe-d277-479b-b354-8ad029fdd0a4",
+    "count": 16467
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--3c7da483-00c4-409b-a3e8-46cd52dd0ba0",
+    "count": 16389
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260407-232229",
+    "count": 15988
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260418-090808--d204910f-e142-4577-a3db-cf1facc43f92",
+    "count": 15909
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260405-172150--51867f0e-9f7a-4631-9f39-73272c223789",
+    "count": 15594
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260413-232249",
+    "count": 15540
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260326-222202--697a83c5-dfaa-4c9f-bb2a-82a37fa40170",
+    "count": 15500
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260417-112314",
+    "count": 15379
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260405-172150--9787c767-a9be-49e6-95dd-570b966cd5c6",
+    "count": 15376
+  },
+  {
+    "value": "claude-c--dev-CoursIA--997b70c2-c9a6-4481-aa68-77e3b901ad76",
+    "count": 15260
+  },
+  {
+    "value": "claude-d--qdrant--e314bf79-6e7e-4726-a857-21e50f8f0756",
+    "count": 15226
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260326-222202",
+    "count": 15092
+  },
+  {
+    "value": "claude-g--Mon-Drive-Maintenance",
+    "count": 14961
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260422-140731--c0487bd6-e82e-416f-b21a-ba17a2de3ffa",
+    "count": 14898
+  },
+  {
+    "value": "claude-c--dev-CoursIA--59fb9df9-36cf-41bb-9be9-941b87868667",
+    "count": 14697
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260411-223330",
+    "count": 14545
+  },
+  {
+    "value": "claude-c--dev-CoursIA--904a5505-a21d-425c-a702-202cd9c2a022",
+    "count": 14468
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260429-232358--4ab97194-f546-48a0-9a92-efdf15d67f03",
+    "count": 14458
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260405-112144--310d40e9-59eb-4c9a-b705-756be43092a0",
+    "count": 14354
+  },
+  {
+    "value": "claude-c--dev-roo-extensions",
+    "count": 14310
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--cf2e9d70-b03c-4572-b879-87b681ec1673",
+    "count": 14174
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--f17c571f-282e-4fc7-940b-08e8a689e0d3",
+    "count": 14154
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260416-172311",
+    "count": 14135
+  },
+  {
+    "value": "claude-d--roo-extensions--27ab8403-06db-479b-a7df-ceb096f4fa62",
+    "count": 13914
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260417-172316",
+    "count": 13800
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--6c29c1e4-c9bd-455a-976a-0fa28010ab1a",
+    "count": 13681
+  },
+  {
+    "value": "claude-d--dev-CoursIA--168ddb7c-a90b-48a5-a3da-a5946e94f1fc",
+    "count": 13452
+  },
+  {
+    "value": "claude-d--roo-extensions--c9e5c75a-b56e-4a73-a1b1-a3cbf0511853",
+    "count": 13434
+  },
+  {
+    "value": "claude-d--roo-extensions--1fd0a38d-b019-47a7-bb5b-9609e8289c2d",
+    "count": 13236
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--7e7172c1-53d6-4548-93ef-da1b3df4447a",
+    "count": 13230
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260426-110725--f8f203c8-2081-40a2-b3a1-0a7f4cea1d28",
+    "count": 13091
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--4c926f24-b991-406e-b6aa-04e53ad9f695",
+    "count": 12992
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--12f39eda-2ef2-4bd2-b5cc-5852054236cc",
+    "count": 12950
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--29fa1e85-6653-41a2-9bb4-8c603860fbae",
+    "count": 12911
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--9166616f-7438-43c4-b443-91d2b5320806",
+    "count": 12690
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--198f0526-ddf4-4cdf-ba21-154fae6cf950",
+    "count": 12659
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260330-112247",
+    "count": 12332
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260323-222307",
+    "count": 12100
+  },
+  {
+    "value": "claude-d--dev-2025-Epita-Intelligence-Symbolique--8464234e-01c2-4869-89b5-7dbbfa0933b9",
+    "count": 11674
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--a87c128a-cce5-4d64-ae00-75a331fa6920",
+    "count": 11653
+  },
+  {
+    "value": "claude-d--roo-extensions--ffa8ffec-b0e0-485f-b9fb-2a7fe442becb",
+    "count": 11650
+  },
+  {
+    "value": "claude-d--dev-CoursIA--d71cda47-0a5b-4382-b9ca-514b129d11cf",
+    "count": 11613
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260331-172217--8cad09b5-4094-4bd2-9f69-2ed2bd891414",
+    "count": 11556
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260329-110721",
+    "count": 11130
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260430-050743--45742b40-9e6c-4185-abb7-e3a794ba49cd",
+    "count": 10958
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--6faae72d-98e1-42d5-a787-cec97ecc1a66",
+    "count": 10901
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--acb135a3-ba8c-4647-aa67-0401ae63eed9",
+    "count": 10687
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--81dca0df-bee4-4085-8bea-baacfbb9086b",
+    "count": 10647
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260423-080731--a848be94-0cee-4c35-a550-6cc472ad2a91",
+    "count": 10580
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260413-112314",
+    "count": 10560
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--79ba1425-7046-49bb-8fe4-b73b41f063ca",
+    "count": 10443
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260421-052305--5818302e-10a2-4ec4-a00d-46a7db55c30d",
+    "count": 10406
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--83df4132-63bd-4fde-9a95-613569646429",
+    "count": 10239
+  },
+  {
+    "value": "claude-D--dev-2025-MSBNS3IN03-GenAI--10cbd2b6-6dc2-41fc-88c5-15c3162938ca",
+    "count": 10053
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260330-112247--62e1c97e-a95a-4927-8359-7f95f5eaf2d1",
+    "count": 9929
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260409-112229",
+    "count": 9710
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260324-160812",
+    "count": 9576
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260411-112242",
+    "count": 9563
+  },
+  {
+    "value": "claude-d--roo-extensions--57eb866a-6cf0-41c3-896b-fd9ee6888b5f",
+    "count": 9507
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--066c2b84-42de-4e0b-b88e-c019544dd885",
+    "count": 9462
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260428-231418--0cecf0a6-c973-4ca2-8f6a-edf902b41e86",
+    "count": 9394
+  },
+  {
+    "value": "claude-d--vllm",
+    "count": 9374
+  },
+  {
+    "value": "claude-d--dev-CoursIA--1212d57e-9f16-475e-a67c-fce88f39cf9a",
+    "count": 9304
+  },
+  {
+    "value": "claude-c--dev-CoursIA--536346bc-a68a-41dc-a72e-f91cb15bf7a5",
+    "count": 9186
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260407-050724--df4a88b3-a222-45b5-98b6-107335554bb3",
+    "count": 9123
+  },
+  {
+    "value": "claude-d--roo-extensions--ccfe649d-4444-41b9-b64d-6a103ccd76ab",
+    "count": 9008
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--bbd6da69-d7f4-4111-b615-c96df0909377",
+    "count": 8990
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260425-172213--71dbf568-6af2-4710-b3a2-8684d0feb652",
+    "count": 8793
+  },
+  {
+    "value": "claude-g--Mon-Drive-Personnel-Michelle--101352ee-6dd3-4f85-80c7-d8d44a88bd6d",
+    "count": 8605
+  },
+  {
+    "value": "claude-c--dev-CoursIA--d01bf6a0-ecaa-4a9e-a190-52aa823e234a",
+    "count": 8556
+  },
+  {
+    "value": "claude-d--roo-extensions--203e8ef5-db47-4cd9-94fd-3753fbd6f894",
+    "count": 8483
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--c95fd268-476c-4d5a-ae4b-4be6f5cd0084",
+    "count": 8464
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260308-092048",
+    "count": 8464
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--f668e745-7083-4a08-81b9-35eb4b3430af",
+    "count": 8461
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260323-100824",
+    "count": 8401
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--2051b883-57bd-40c6-abb2-c69714144666",
+    "count": 8332
+  },
+  {
+    "value": "claude-d--nanoclaw--50c502a1-82d5-40bb-90a8-e9b19889f624",
+    "count": 8191
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260419-230741--24aab94c-8b3d-4544-adde-575ba941f15c",
+    "count": 8145
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260309-182056",
+    "count": 8138
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260419-232231",
+    "count": 8066
+  },
+  {
+    "value": "claude-d--CoursIA--2db90a57-8ddb-4a6a-92d1-bc20c9868f5c",
+    "count": 8066
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--2ac04242-8948-4157-849d-6407c1ddc6da",
+    "count": 8042
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--aa04d7d1-764c-4bfe-8a11-2a6d2b3a5b8e",
+    "count": 8042
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260331-172217--f95124da-de18-4d20-b8d4-a2c70ca300aa",
+    "count": 8000
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260420-112237--3a864d49-f66a-4d4a-872b-c8e51dcde725",
+    "count": 7996
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260428-080732--38e958e2-149b-4fa8-893b-31d3af83acb4",
+    "count": 7978
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-926-myia-po-2025-20260330-232306--6cb48873-ec3c-4ac1-aabc-3becb0a0f512",
+    "count": 7878
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260424-112826--390b0f8f-203e-44f0-87a8-0638029383be",
+    "count": 7854
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260310-002058",
+    "count": 7791
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--3876a4c8-756a-4f61-9702-314c1af49dd6",
+    "count": 7532
+  },
+  {
+    "value": "claude-d--roo-extensions--05829089-cc91-49b8-b834-01540391334d",
+    "count": 7498
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--79c9c31b-fe30-4370-ae07-c999a644a139",
+    "count": 7495
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260325-100812",
+    "count": 7434
+  },
+  {
+    "value": "claude-d--CoursIA--8ca0fc2e-a608-4ec9-98b5-e8ffcb877dc5",
+    "count": 7416
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260322-220836",
+    "count": 7400
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260324-040813",
+    "count": 7378
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260420-110730--17eb2d57-073b-4b6c-9253-914e3b53f8f5",
+    "count": 7349
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260424-112826--7c21a47e-b80a-49ba-a1d8-ffda090def40",
+    "count": 7347
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260325-040809",
+    "count": 7209
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--9c9746fc-9496-4eb5-abd0-258673691683",
+    "count": 7123
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260326-102221--3be9c6d4-40e3-46af-b816-fa83fb7fb568",
+    "count": 7040
+  },
+  {
+    "value": "claude-d--dev-CoursIA--326d719d-7d56-43e9-a813-6e39dcf31a18",
+    "count": 6969
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--84228db6-8ef5-4bd6-a928-59f280a007b1",
+    "count": 6930
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260424-052255--51de941d-de3a-4958-8e78-bd7ba278abc5",
+    "count": 6920
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260413-092331",
+    "count": 6912
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260408-052159--789c285c-5aa9-480f-90e6-4abab8be9ba6",
+    "count": 6902
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260331-112244--b9afdea2-0c61-4964-81b9-25e09ccbd6ab",
+    "count": 6771
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260424-084106--52572d15-03ad-4145-aa11-f803d6794f6b",
+    "count": 6718
+  },
+  {
+    "value": "claude-d--roo-extensions--f7d2b156-d843-4ba4-918a-abcad865e087",
+    "count": 6673
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260318-162312--3ec66a81-2811-4a27-8650-9f4edf55050c",
+    "count": 6636
+  },
+  {
+    "value": "claude-d--roo-extensions--595db243-56e6-46a1-9726-84b4bb740e4e",
+    "count": 6619
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260420-040725--0f351bb7-4d20-43c6-9847-3d89f28d08c9",
+    "count": 6615
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260326-102221",
+    "count": 6612
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260331-172217--52f9d001-e779-4adc-bd08-ebdf0b0cafeb",
+    "count": 6570
+  },
+  {
+    "value": "claude-d--roo-extensions--5fb32a6b-4b7e-4d9e-8d95-1e29ea7efd2e",
+    "count": 6566
+  },
+  {
+    "value": "claude-d--roo-extensions--8671c13b-0b54-4c84-ac74-2d8802dde017",
+    "count": 6551
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260420-040725--e665289a-6384-4505-bc95-2e2e00c7d0ce",
+    "count": 6549
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260320-222317--284849b0-079b-4201-bf29-5e4c950b52fd",
+    "count": 6512
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260427-112357--5730a05b-897c-4155-93d5-323107fbe4e1",
+    "count": 6485
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260331-112244",
+    "count": 6442
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260325-220826",
+    "count": 6405
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--b49399a6-81b4-493b-911d-e4ba5b10c9ee",
+    "count": 6355
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--d332c39e-7b69-4ad4-b99e-0aed32237612",
+    "count": 6280
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260430-020747--7eef2f26-5dfd-4bf2-a22d-233e411d2a55",
+    "count": 6256
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260423-170719--d6867b6f-7a91-4984-ae20-95d55b25c011",
+    "count": 6216
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--fb5e928f-9aff-41ee-90e8-da38c4361acd",
+    "count": 6170
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--fda4e073-33e7-4cf6-94d5-3360ed00ce76",
+    "count": 6134
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--70001ab3-23e1-4d90-b935-437c41093481",
+    "count": 6086
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260330-172212--d6e44965-c56c-481d-bbd7-0214e33873f1",
+    "count": 6077
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260323-040823",
+    "count": 6048
+  },
+  {
+    "value": "claude-d--dev-2025-Epita-Intelligence-Symbolique--00ac0ae9-4d25-4ddf-a59b-f45b69bf5e82",
+    "count": 6037
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260321-220835",
+    "count": 5985
+  },
+  {
+    "value": "claude-d--roo-extensions--15317623-ecbd-40a6-b1c9-5eff30742aad",
+    "count": 5942
+  },
+  {
+    "value": "claude-d--dev-CoursIA--2801ba1e-b35b-4fba-b968-a974f2bbe354",
+    "count": 5795
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--13e820d5-fa54-4a17-9b51-d311586353bf",
+    "count": 5778
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--66f0f64d-e06a-409a-8df8-1223e895980e",
+    "count": 5667
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260416-172311--4d93d311-e54a-4ae9-98e8-31e01e9bedb2",
+    "count": 5654
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--678bf365-5e9d-4367-8d98-ead700e78f79",
+    "count": 5576
+  },
+  {
+    "value": "claude-d--roo-extensions--9c4198ac-84c1-4eaf-b352-3c724d9ff905",
+    "count": 5554
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--3afd382c-e906-438b-a2a6-15adee6cda3f",
+    "count": 5527
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--8d1fc3be-4ca4-4194-8467-1083e751f7e3",
+    "count": 5400
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--1b061bfa-0d19-4f40-b8c2-f128f6d8745f",
+    "count": 5374
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--e4d35014-1323-43ea-92c3-bdcbe4b69f6a",
+    "count": 5364
+  },
+  {
+    "value": "claude-c--Production-Embeddings--2a725156-361b-4340-94d2-c30f9ebb9a34",
+    "count": 5363
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260421-084106--4b2a5bb5-2eb3-45c7-acb0-c7b05b70d03c",
+    "count": 5334
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260424-080732--b43aa432-7802-4112-86d5-06cabee785a0",
+    "count": 5282
+  },
+  {
+    "value": "claude-d--roo-extensions--a7c36bf1-8d6c-4336-b544-be0cd1cb5c52",
+    "count": 5278
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260309-152144",
+    "count": 5265
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260325-042237--43c82748-0b39-4a8c-a44b-1f67fba9eb6b",
+    "count": 5246
+  },
+  {
+    "value": "claude-c--dev-CoursIA--d7e01af2-55f3-4c9c-b8c7-532801b3c996",
+    "count": 5231
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260430-200749--0d6fab67-0759-484c-b257-d5f8837c81ce",
+    "count": 5227
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260422-151616--9af76623-36f8-434c-9337-a28258fc5471",
+    "count": 5208
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260423-230726--be70c6b0-dc07-4145-a032-b5cea52ba3f9",
+    "count": 5190
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--1fd76e17-3397-4879-99b1-d662ef249fa3",
+    "count": 5175
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260404-232200",
+    "count": 5140
+  },
+  {
+    "value": "claude-c--dev-CoursIA--0769af33-f36d-47e2-b773-a9a0cbd2f622",
+    "count": 5122
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260307-212047",
+    "count": 5012
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--a4de4923-228e-4177-a465-2237a8733127",
+    "count": 4986
+  },
+  {
+    "value": "claude-d--Dev-CoursIA-worktrees-GenAI-Series--6224becd-266b-414d-b6eb-fa5d554d4f0b",
+    "count": 4950
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260320-220824",
+    "count": 4944
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260419-110714--c90b7c2f-92ff-4da9-a1ac-0f0dbfe09895",
+    "count": 4851
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260327-100801",
+    "count": 4850
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260322-040832",
+    "count": 4826
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260422-170719--fb36f5da-049c-4144-98e3-9d8b39d7bab9",
+    "count": 4823
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--49a172eb-6963-4a08-a2b1-9ca1e47d2842",
+    "count": 4818
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260330-052234",
+    "count": 4794
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260308-032054",
+    "count": 4773
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260325-042237",
+    "count": 4758
+  },
+  {
+    "value": "claude-d--dev-CoursIA--ede3e402-553c-4652-a2bb-e8c5ae00d8db",
+    "count": 4745
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260423-232309--d72175b4-c10f-4717-9076-c93e8c36d130",
+    "count": 4698
+  },
+  {
+    "value": "claude-d--roo-extensions--79ce0779-d5be-486f-9865-de1139f9d947",
+    "count": 4668
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--e2199a9e-6d58-423d-b473-3e58a1a4d426",
+    "count": 4475
+  },
+  {
+    "value": "claude-d--Dev-CoursIA-worktrees-GenAI-Series--40639dbd-161a-4ed3-9f6b-0f2fc6d398e8",
+    "count": 4452
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260327-222218",
+    "count": 4420
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260420-110730--4dbc17d2-b017-4136-bf7e-5b993b837590",
+    "count": 4411
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260424-200732--ff3cf861-af47-4b76-94e1-8fbd77757b38",
+    "count": 4377
+  },
+  {
+    "value": "claude-g--Mon-Drive-Suzon--c3df2979-0339-4739-b551-3c17ac3e6491",
+    "count": 4312
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260328-100805",
+    "count": 4284
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--29633d03-7c0e-4101-a341-82c26470778f",
+    "count": 4254
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260423-211615--4cbc5ce7-f816-4219-8f30-f15bc7c01386",
+    "count": 4238
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--f7b7ab23-6ae1-442f-b108-1b39c8fcb30d",
+    "count": 4200
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260331-050724",
+    "count": 4188
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--7820d09f-9ed6-4145-813a-8a2c807299f6",
+    "count": 4144
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260424-080732--159212d0-dc25-46cd-bf89-c4cd5e9b3cac",
+    "count": 4143
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260425-040738--ad984e0b-d180-424c-bf24-09a2b54532f1",
+    "count": 4133
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260328-213206",
+    "count": 4122
+  },
+  {
+    "value": "claude-g--Mon-Drive-MyIA",
+    "count": 4120
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260321-160831",
+    "count": 4114
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260420-052221--6625d73b-e367-418c-add7-3825b419e861",
+    "count": 4087
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260308-031530--c98a85e5-4dbe-469c-b9d7-6ace679db3e0",
+    "count": 4050
+  },
+  {
+    "value": "claude-g--Mon-Drive-Personnel-Michelle--a58fe4d4-10e7-40fe-9060-e3ffd5d28427",
+    "count": 4050
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260320-222317",
+    "count": 4048
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--5bcbc180-7299-4550-8b75-05b35edd087f",
+    "count": 4047
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260426-052208--7649f0b2-e200-45c4-9dd0-aebe94065ba4",
+    "count": 4038
+  },
+  {
+    "value": "claude-d--roo-extensions--36dd2bc1-f09d-4612-afb7-ef7553fad54a",
+    "count": 4029
+  },
+  {
+    "value": "claude-c--Production-Embeddings--85210087-bf38-4380-a311-946633a453f5",
+    "count": 4006
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260331-172217--785ab150-7e04-43b2-9faf-831c6af57118",
+    "count": 3979
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260426-091617--a3c5d2ee-d0a7-4c42-9d87-85d33eb71bf8",
+    "count": 3964
+  },
+  {
+    "value": "claude-d--roo-extensions--7efe1736-3720-48cb-93a7-b48513c01d3f",
+    "count": 3947
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260419-050719--212adc6a-f0eb-40c1-b687-cf7c309f069b",
+    "count": 3931
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260413-232249--c9c817db-ef82-4343-8627-132429367758",
+    "count": 3922
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260407-052206--f37d5a56-3b9d-491d-9e67-dfb479411854",
+    "count": 3919
+  },
+  {
+    "value": "claude-d--roo-extensions--6553da96-5688-4aee-bbd4-e4eb2dcf5899",
+    "count": 3919
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260422-160725--d1f10a30-4b06-4fae-8918-7cd2e812636b",
+    "count": 3894
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260421-052305",
+    "count": 3890
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260330-052234--bd5bd2b0-5f24-48d3-8a88-b3d7e3a64dda",
+    "count": 3886
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260428-160836--862da5ba-26d6-45e7-b65f-64e010c41322",
+    "count": 3850
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--7c95ed41-0de5-4f9e-995c-4d89fb343557",
+    "count": 3838
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--e21133bd-5546-453a-a18b-d454846c889e",
+    "count": 3827
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--f063c5bd-4f92-4778-94c3-040b7ffb46f5",
+    "count": 3779
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260429-085637--9fb0b4a0-92a5-4ee4-a98b-1cc2dbe9f4d9",
+    "count": 3775
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--03ef4fc6-79e9-4356-9c61-dfabf7291d96",
+    "count": 3740
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260426-110725--feaafa85-dc4b-49e7-98b1-0805592b2d00",
+    "count": 3701
+  },
+  {
+    "value": "claude-d--roo-extensions--0133ddf8-a539-46d3-9ea0-41267f4ccdfa",
+    "count": 3685
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260426-052208--d8ba500a-4ecd-4f06-91fe-2eced23c5bac",
+    "count": 3674
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260407-222216--be1a8c76-fcdb-4baf-8059-17414266af6b",
+    "count": 3658
+  },
+  {
+    "value": "claude-d--Open-WebUI-myia-open-webui--40fd1d07-4387-4c08-ac82-b9656dfc7571",
+    "count": 3656
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260327-222218--a47a037b-c7bf-4650-a523-056a95c09a19",
+    "count": 3655
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--a9f8d7b7-a40d-4680-abe3-9d739b734858",
+    "count": 3622
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260412-200755--d430dec5-2086-41d9-a4d8-d64c82dabb45",
+    "count": 3590
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--e9a3e959-8234-4f1b-8c48-944a216956de",
+    "count": 3582
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--83701b16-d736-4c70-aaa6-67d11f864708",
+    "count": 3572
+  },
+  {
+    "value": "claude-d--dev-CoursIA--af80833c-ce24-42d3-a01a-fa11a7300838",
+    "count": 3568
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260418-050713--0e1d8e12-624a-4772-ab31-92fbe34d7c5b",
+    "count": 3568
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--428664f6-7ae9-4401-b9d8-d1141cd09c3f",
+    "count": 3568
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260330-172212",
+    "count": 3567
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--312c549e-ce86-4217-953b-4dd4d911b792",
+    "count": 3564
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--53f544c9-b3e7-4bf8-9d67-1935a7106c77",
+    "count": 3556
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260423-170719--44d011ab-e3a0-4d5c-8fb2-d5e106a1dedc",
+    "count": 3544
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260426-024108--d3d67dbc-7d7c-4a9c-b96a-6bd06f716c4c",
+    "count": 3540
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260310-222123--f3d47f30-4039-4fd5-8854-6865022ec1ff",
+    "count": 3525
+  },
+  {
+    "value": "claude-g--Mon-Drive-Suzon",
+    "count": 3520
+  },
+  {
+    "value": "claude-g--Mon-Drive-Admin-Immobilier",
+    "count": 3500
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260422-172244--a989ea9f-4451-481b-aace-7b5c9ad85a56",
+    "count": 3476
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260327-040807",
+    "count": 3465
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260413-092331--36f61c94-80de-4a73-a672-af73f4c698bc",
+    "count": 3456
+  },
+  {
+    "value": "claude-c--dev-CoursIA--f752e9d9-a945-42f6-af56-3b3d198ff9cc",
+    "count": 3441
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260326-042234--c89f1a09-2690-4fda-a9cc-c8eda169a8f0",
+    "count": 3432
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-859-myia-ai-01-20260326-160810",
+    "count": 3420
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260405-172150--621019c0-5786-43da-944b-55b34acbac21",
+    "count": 3411
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--5b02b470-5282-41e0-8b02-d0d9fb8160c9",
+    "count": 3404
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260419-110714--1a80d439-533e-459b-ba77-6e21beadcf64",
+    "count": 3381
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260428-231418--2733201d-1901-4522-b188-71e46b321862",
+    "count": 3352
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260329-050726",
+    "count": 3333
+  },
+  {
+    "value": "claude-d--roo-extensions--577c929b-301d-4609-9e29-33725062bac3",
+    "count": 3310
+  },
+  {
+    "value": "claude-d--dev-CoursIA--bf0409bc-de6b-4a30-b896-9362a4f9591a",
+    "count": 3190
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--16d2225f-3cef-4ca9-8d45-e09678298b5d",
+    "count": 3174
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260420-170719--350e09f4-9a2b-4835-b5ce-7737e98a2dc1",
+    "count": 3170
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260322-222312--9a61444d-11bd-4e37-9726-14bcf4b0de18",
+    "count": 3166
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260426-020733--5acdb85a-6848-4769-b6b4-e7c5c3938b5c",
+    "count": 3159
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260311-132244--1d7a8e21-8206-4d57-9104-6853ae534bef",
+    "count": 3150
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--fd33b159-c1c3-438c-b762-567833f3b2a6",
+    "count": 3150
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260421-040717--fdbbc3ab-29d5-4b9a-b206-4345461e0b42",
+    "count": 3143
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260420-050719--afb0e843-6b6f-4125-8a2f-725367a7a216",
+    "count": 3118
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-926-myia-po-2025-20260330-232306",
+    "count": 3078
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260411-112242--b2db4536-52b5-432d-b13b-287720a605b2",
+    "count": 3068
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260407-050724",
+    "count": 3060
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260322-222312",
+    "count": 3052
+  },
+  {
+    "value": "claude-d--roo-extensions--be232da9-9209-41f2-b26f-3eeccf15e048",
+    "count": 3034
+  },
+  {
+    "value": "claude-d--2025-Epita-Intelligence-Symbolique--e2a94ddf-ca11-4ac4-8955-9208511ce26e",
+    "count": 3027
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--bebf5492-5483-4038-b32e-511350470c4e",
+    "count": 3015
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-1423-myia-po-2025-20260416-232253--1ef7bb15-db82-4f68-b77d-d21f7ba23ae2",
+    "count": 3001
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260421-100721--c5c2cce0-6a6b-46d0-ad4e-bdacef926107",
+    "count": 3000
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260425-230736--b5e44367-abb8-4b7f-a8db-50884b397248",
+    "count": 2980
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--c8dbe724-f8dd-423f-a952-87938736c7e0",
+    "count": 2979
+  },
+  {
+    "value": "claude-d--roo-extensions--c5dfaf8a-e55b-42c5-90bc-8e3aff7ddbe5",
+    "count": 2936
+  },
+  {
+    "value": "claude-c--dev-CoursIA--199a0b8c-bb41-45fb-b879-9504de605b49",
+    "count": 2932
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260423-024105--d7fc751b-4386-40ba-bdd7-bc8e0eab1a49",
+    "count": 2913
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260309-092059",
+    "count": 2880
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260420-052221",
+    "count": 2872
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--ce849fe5-9616-44ec-9dfb-fc4dc9687830",
+    "count": 2857
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--ec6bc75c-8e51-4018-a47d-138741bf2774",
+    "count": 2850
+  },
+  {
+    "value": "claude-d--roo-extensions--4a5b6a9d-abd0-4a00-a368-289d98f08f07",
+    "count": 2840
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260429-050738--8f2a090c-bd06-411a-81f8-650060a9f8e8",
+    "count": 2839
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--94040d53-13be-40ff-ae7a-121143535974",
+    "count": 2831
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--7718367e-6168-4d44-ac35-f431510ea348",
+    "count": 2806
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--7e03c3f2-6dd7-4608-ae49-d17f5aa5ecf0",
+    "count": 2799
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260501-112243--dc2e48e5-8e34-4337-b55d-68d8230896e8",
+    "count": 2772
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--4798e884-e821-4262-8484-1ce7f9323784",
+    "count": 2752
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--386a42f2-7d41-4282-8c88-192726739f7c",
+    "count": 2748
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260317-222310--844230fe-54f0-4a92-b912-0bb23a8f632a",
+    "count": 2745
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260417-092511--820ef665-30b9-4599-b6e2-07610b155b45",
+    "count": 2740
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--0594f745-3b8b-43e3-9c7c-4467d4965132",
+    "count": 2740
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260404-232200--b8cbc7ee-1185-4128-9dc1-357ffb2919ad",
+    "count": 2736
+  },
+  {
+    "value": "claude-d--roo-extensions--2799c619-f377-4742-ba19-eedfb8a4a3ec",
+    "count": 2714
+  },
+  {
+    "value": "claude-c--Production-Embeddings",
+    "count": 2700
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260421-200733--0d52fbaf-4cb6-4949-8672-1b70496d6a77",
+    "count": 2692
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-1423-myia-po-2025-20260416-232253",
+    "count": 2692
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260428-052410--ecf2be55-f8a8-4fbe-ab43-09df5e2d422c",
+    "count": 2686
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260322-102344--f3abb736-8836-45ca-9a85-e16a1e1c3ce3",
+    "count": 2652
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260426-084106--639cc2c9-8743-4556-893a-c9a7e17b9859",
+    "count": 2649
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--f2781df3-83dd-4ab7-a561-ad87e5e2c6e0",
+    "count": 2644
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--9eabc81a-1d39-45f7-97a4-92be4489b490",
+    "count": 2639
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260421-170721--eea17520-0758-46c1-bc91-4d00541ae975",
+    "count": 2595
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260424-091622--2fbf54ce-3de0-4e16-876f-41c9147f5366",
+    "count": 2584
+  },
+  {
+    "value": "claude-g--Mon-Drive-Personnel-Michelle",
+    "count": 2584
+  },
+  {
+    "value": "claude-d--Dev-2025-Epita-Intelligence-Symbolique--60ca660f-c1cf-4c75-bb38-6016df5479b9",
+    "count": 2562
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--c7432313-d0fd-44fb-947d-cf5dae1868ce",
+    "count": 2545
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260321-042245--41211555-0d37-4a33-9cab-d574b40f65f9",
+    "count": 2535
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--001ebd23-018b-4464-bce1-48919473848f",
+    "count": 2532
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--d9b921fa-5841-42a5-8aa2-4f11cc125201",
+    "count": 2531
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260426-220805--2a5b0d85-b5da-4d23-8549-b2ac06cfe730",
+    "count": 2511
+  },
+  {
+    "value": "claude-d--Dev-2025-Epita-Intelligence-Symbolique--c81d9111-e1e9-4940-b2d8-dd9e1f7c513d",
+    "count": 2510
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260421-110720--72d6a586-d61d-4229-8fc2-5490e0576d30",
+    "count": 2505
+  },
+  {
+    "value": "claude-d--roo-extensions--a9512d74-5168-41da-84fb-2bedb795d988",
+    "count": 2503
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260326-042234",
+    "count": 2496
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--e9a684b6-82cf-44e9-9b00-299a3d13536f",
+    "count": 2493
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260327-220811",
+    "count": 2492
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260328-222550",
+    "count": 2491
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260420-050719--0cfa321a-a450-46f8-8413-2319a697a681",
+    "count": 2448
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--56bb8431-dfea-452c-b00a-3750bc857f04",
+    "count": 2446
+  },
+  {
+    "value": "claude-d--dev-CoursIA--679c83b6-4344-49d4-9707-7a5084851641",
+    "count": 2446
+  },
+  {
+    "value": "claude-c--dev-CoursIA--51ec0f66-b146-47c6-b381-8a98a8d59795",
+    "count": 2419
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260308-111535--6ca7b196-4bc5-4b62-aa11-d3fea0b816d7",
+    "count": 2400
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260331-172217--ce0d2098-b01a-4f03-8235-179cbd188a17",
+    "count": 2364
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260420-170719--b42d82ca-c30c-4441-8cfc-3d818bc0dc0b",
+    "count": 2355
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260328-040806",
+    "count": 2354
+  },
+  {
+    "value": "claude-c--dev-CoursIA--f2a02ab6-11de-4138-9ad5-efd3bb6077fd",
+    "count": 2354
+  },
+  {
+    "value": "claude-d--roo-extensions--c89c678c-6090-425f-9baa-dc8f50c2fa54",
+    "count": 2345
+  },
+  {
+    "value": "claude-c--Users-jsboi--claude--b6c85eec-24c5-48a5-8942-0535ba7ca801",
+    "count": 2339
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260422-160725--44b66699-473f-42a6-a910-531efb63da1e",
+    "count": 2325
+  },
+  {
+    "value": "claude-d--Dev-Argumentum--3387c255-2b3f-4eb4-bf7c-2b562f44e307",
+    "count": 2324
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260418-110718--30554228-703d-46d1-8a28-3bf0d68c8a50",
+    "count": 2323
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260425-050725--31af133f-ae8f-42eb-aa52-b3188e2ca4c0",
+    "count": 2323
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260405-211619",
+    "count": 2322
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260313-222126--97390ebc-7db6-42b9-9241-a047759e6ffc",
+    "count": 2322
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--c2b0b977-d4ab-4729-9f27-587dc05e5d50",
+    "count": 2316
+  },
+  {
+    "value": "claude-c--dev-CoursIA--d7f976ca-a799-45fa-aa2d-25c3a049e7df",
+    "count": 2313
+  },
+  {
+    "value": "claude-d--dev-CoursIA--181e4dd3-1ee9-44ca-9c4e-05ee13a441a1",
+    "count": 2311
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--a648f564-dcc5-4248-ad7c-8423d7bdfc82",
+    "count": 2296
+  },
+  {
+    "value": "claude-d--roo-extensions--e571c486-e23a-4647-a39d-b1c666c159bb",
+    "count": 2296
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--77dbfa12-04e9-4499-8f8f-21ca510bc9f6",
+    "count": 2283
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260330-050725",
+    "count": 2268
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260331-172217--b1a31284-d681-4be8-b7ba-f764d8480cc4",
+    "count": 2268
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260425-080730--58f7a7c6-4a4a-44d0-890d-a1c94133b5ca",
+    "count": 2268
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--873f10e9-f094-496d-a47a-0f245b5c9347",
+    "count": 2250
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260425-084105--73468bbe-a3c5-404d-a7d1-24d724ca5711",
+    "count": 2240
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260404-172136--a0eb2e2a-a722-4306-abc1-fb32d636fc40",
+    "count": 2240
+  },
+  {
+    "value": "claude-g--Mon-Drive-Maintenance--7a719be8-8076-4bde-b103-426627b539c0",
+    "count": 2220
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260505-040802--03c9e4c7-42e2-43fc-9872-509adade56a8",
+    "count": 2210
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260420-040725--6fe3bca2-cb6f-42f9-a26d-e36edd59d1e0",
+    "count": 2206
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260428-151616--b32ac435-9410-482a-bfe0-ed3bab50d010",
+    "count": 2205
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--c3a022f4-6678-4bdc-9357-69dacf6abb69",
+    "count": 2200
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260420-204107--6181856f-df1e-4786-8568-5542c908812c",
+    "count": 2197
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260425-230736--e7aa82fc-bcc7-4d36-b958-eb1a75270cf7",
+    "count": 2197
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260426-050724--13e4eca5-c32a-468d-b60f-575b7036070c",
+    "count": 2187
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--4587a189-de1b-49d2-8198-35c0a7a5b4c8",
+    "count": 2177
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260329-230722",
+    "count": 2172
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--73742f68-c187-49d5-8054-36b86c1fcd36",
+    "count": 2162
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--43ce8269-9d6b-4842-83bd-7a70de67b9bb",
+    "count": 2144
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260425-050725--5031e3ff-dd9f-4aaa-8533-277a0a938d5c",
+    "count": 2136
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260416-020742--dc7c9e81-3457-4fa9-93ee-db2e1a15363a",
+    "count": 2134
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--907c895c-f0cb-42e3-9c0c-5efb80e3348a",
+    "count": 2129
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--5db9ee29-f909-48f8-a8ff-944ef1445180",
+    "count": 2110
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260424-160721--6818f41c-cad0-4f9e-9bda-478ea5199c0d",
+    "count": 2108
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260419-091616--ea25b34a-e87a-4a43-84a5-7ede71fe5659",
+    "count": 2108
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260318-222342--12cdb5e7-ee6c-4d9a-a522-c5383fd0d957",
+    "count": 2100
+  },
+  {
+    "value": "claude-d--roo-extensions--e8b18d05-c52d-4c8f-9ade-11e75ce24456",
+    "count": 2097
+  },
+  {
+    "value": "claude-d--dev-2026-Epita-Programmation-par-Contraintes--044fc53f-274f-40f2-b705-26c446df7275",
+    "count": 2090
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260504-204121--d74ba4a3-0af1-4ade-a949-e52a50fe97de",
+    "count": 2090
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260430-220734--e8c6c620-5e56-48c6-ba49-315e68566c4b",
+    "count": 2069
+  },
+  {
+    "value": "claude-d--Dev-CoursIA-worktrees-GenAI-Series--d5da0489-80c4-4541-8d87-9b2db292f217",
+    "count": 2064
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260308-212056",
+    "count": 2058
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--99158795-9d1d-44a5-900f-19a7c512cf8f",
+    "count": 2058
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260318-162312",
+    "count": 2054
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--81f3a8cc-d6c0-4051-bfbf-4f99045aa24f",
+    "count": 2052
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--e16c3444-c47f-4971-8350-dbeff3cb474d",
+    "count": 2043
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--4c5a7b26-1da3-4074-8291-1e351a7e12cf",
+    "count": 2042
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260322-102344",
+    "count": 2040
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260322-162330--5124ed03-44b4-40f5-8bc1-245f738d96f7",
+    "count": 2028
+  },
+  {
+    "value": "claude-d--roo-extensions--66f1c684-4501-4017-a0d9-8e7673beb63a",
+    "count": 2001
+  },
+  {
+    "value": "claude-d--roo-extensions--dfd4f980-2b53-4f90-b171-3ec5f1a92263",
+    "count": 1998
+  },
+  {
+    "value": "claude-d--dev-CoursIA--10c898c8-ac31-4f7b-8935-95e50b324cc9",
+    "count": 1992
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-859-myia-ai-01-20260326-040757",
+    "count": 1981
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260422-024106--273b4b3b-db57-44ed-96a7-0ccad61ed7f7",
+    "count": 1977
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260430-232239--439e94f1-8185-4fcc-ba99-a0a66c38a614",
+    "count": 1974
+  },
+  {
+    "value": "claude-d--vllm--35d0a724-9496-4fd1-b7b4-dcaaed4596fd",
+    "count": 1972
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--e6bd33d1-29b7-4fe7-8398-b1cf42d38909",
+    "count": 1965
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260429-080908--f0a53e28-32c7-4087-a8b9-9756f70ffe37",
+    "count": 1954
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260404-172136",
+    "count": 1954
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260413-232249--f1a78ce4-4743-4f32-b9f8-5c4074db0c34",
+    "count": 1952
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260307-071553--70ec37b8-71e5-43f0-adc5-9f4a20df0a52",
+    "count": 1950
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--4685b332-c9af-4184-b54a-16eec4c6459d",
+    "count": 1944
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260323-160825",
+    "count": 1944
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--6488545e-46d3-4d39-902c-053315e57b2b",
+    "count": 1941
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260425-024106--c4e9f566-54df-4e13-8458-ef31c0309bba",
+    "count": 1930
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--ac83f611-4080-48ad-935e-33215b4bda6a",
+    "count": 1930
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--cf0a0d75-1671-4b3d-82d9-9f0f0bba2e76",
+    "count": 1930
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260403-211629",
+    "count": 1928
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260430-100740--b5b42d45-b752-4958-a0a8-ec9a36dceb0b",
+    "count": 1926
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260424-144108--6ef3efa6-42cf-4260-a2bf-e3615520a8d5",
+    "count": 1915
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-1363-myia-ai-01-20260417-110731--9ecdb93b-8c71-4991-bffd-bf08ef218d46",
+    "count": 1905
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--a12d104f-ac48-4de0-830a-b6c18d67e4b2",
+    "count": 1870
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--63311e2d-154f-4fe1-b888-9d3499ed904c",
+    "count": 1860
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260426-050724--49e0133f-e9fa-409f-af0b-9af727481083",
+    "count": 1856
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260322-160833",
+    "count": 1848
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260310-171255",
+    "count": 1848
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--8dfd41c1-0732-46ce-8153-2396316ae189",
+    "count": 1834
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--b0723de0-8758-428d-a14b-4e9d0a5ea336",
+    "count": 1832
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260305-071539--08191431-14eb-477a-9fd1-6ffa713cbe06",
+    "count": 1825
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260413-232249--44b35508-9975-4290-a57c-f1175ca152ee",
+    "count": 1812
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--5b0b147f-8117-45d2-9d92-86ac1f9542eb",
+    "count": 1812
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260430-110737--98112d04-5af1-4b53-9542-4b460c898f2e",
+    "count": 1806
+  },
+  {
+    "value": "claude-g--Mon-Drive-Maintenance--174daf22-db05-49a8-a200-e4a7ed224c11",
+    "count": 1788
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260328-222550--c22221c5-ca6f-4092-850e-6bb186a5d02c",
+    "count": 1786
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260505-091632--c3d7d433-0065-44a4-8355-f6c4a81bf402",
+    "count": 1777
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260314-123813",
+    "count": 1768
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260312-072215--d52ac46a-3736-4194-b98d-ba2b5a0098cf",
+    "count": 1764
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260324-222235--b4f45012-7a52-4fe5-ad8c-ffd3a72fc58d",
+    "count": 1763
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260312-012221--b5057e3a-c124-4aa4-8f20-6067ae773587",
+    "count": 1760
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--31458a86-8a20-4f16-9936-1e4c5db51b7e",
+    "count": 1752
+  },
+  {
+    "value": "claude-d--roo-extensions--daf3b5ff-b0b0-4de8-a1c1-32ecfe36af79",
+    "count": 1750
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--549867e6-4fad-4381-a6e6-1cdd79a2ff4e",
+    "count": 1747
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260420-084106--3cb174a7-4276-41c9-a122-d1d014337974",
+    "count": 1744
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260313-141302",
+    "count": 1744
+  },
+  {
+    "value": "claude-d--roo-extensions--802ec188-1aa5-4890-ba31-ca72cf7fbe34",
+    "count": 1743
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260420-144106--bfb1fdf0-16c4-4438-b6e7-9b424d266f3d",
+    "count": 1741
+  },
+  {
+    "value": "claude-d--roo-extensions--216e5069-3830-40d6-a035-c8a7633d9358",
+    "count": 1734
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260429-100723--af2da636-b309-4a8d-8e70-eddeac334a6b",
+    "count": 1729
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260324-222235",
+    "count": 1720
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--8d615510-0a20-4e18-a928-a49936f96f60",
+    "count": 1716
+  },
+  {
+    "value": "claude-d--Dev-Argumentum--268a03a2-5150-430d-a2ee-0a8efe4f2f43",
+    "count": 1715
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260417-092511",
+    "count": 1715
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260421-110720--ffe01891-6e2e-4f0d-8c1f-46500908eb95",
+    "count": 1708
+  },
+  {
+    "value": "claude-d--roo-extensions--fde4cf7b-3801-4bcf-a4bb-89a149f893ff",
+    "count": 1708
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--9ce6c6f7-59eb-4afa-ae0c-03e3f7d6c13a",
+    "count": 1705
+  },
+  {
+    "value": "claude-d--roo-extensions--a89b7f16-c2a2-4d4f-8f8e-3312704f99c6",
+    "count": 1685
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260307-114924--7d8b6586-e432-4c5b-a0d9-916c923084d7",
+    "count": 1683
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--673eb922-9f78-41d7-98c4-54b6a2acdf6c",
+    "count": 1682
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260426-040729--0a2b2e93-fdd0-42b6-9788-08031c20057d",
+    "count": 1671
+  },
+  {
+    "value": "claude-D--dev-2025-MSBNS3IN03-GenAI",
+    "count": 1670
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260501-024107--14b30250-e55d-4d5c-8fad-cf1fdfa5e4c2",
+    "count": 1669
+  },
+  {
+    "value": "claude-d--roo-extensions--a56f6d8f-3177-468c-a752-0676014aeef0",
+    "count": 1660
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--8a8aeede-e0f1-408d-a61d-0dc21e14fbe9",
+    "count": 1656
+  },
+  {
+    "value": "claude-d--roo-extensions--39e2ddf4-e56d-49d5-8419-e3046ae7006b",
+    "count": 1643
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260327-160801",
+    "count": 1638
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--ac469eec-58bf-401d-a0e7-c5b64add576f",
+    "count": 1620
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--c566312e-7c59-445a-99b5-56f516c8b976",
+    "count": 1615
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260430-204120--411a6095-29bc-477a-bb4a-cf4190856781",
+    "count": 1614
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260313-102418--616e603b-730c-4e0a-bae9-ddf20d299561",
+    "count": 1596
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260312-201244",
+    "count": 1595
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260505-170739--f54850b9-613a-4aa9-a82c-d9652e532877",
+    "count": 1592
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260420-080732--9173d762-96e2-4731-99cf-54f5dd1e371b",
+    "count": 1591
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260330-091628",
+    "count": 1560
+  },
+  {
+    "value": "claude-d--Dev-CoursIA--2e3d9da5-d527-48fc-adf3-7ad9c2085783",
+    "count": 1548
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--fa326cd5-8d16-4c27-ab7f-db1a8ad228ed",
+    "count": 1547
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260421-052305--28284d0a-423c-4038-a430-2b01864c1694",
+    "count": 1540
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260420-112237",
+    "count": 1539
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260430-140745--1dbde110-5c9d-4bc3-a1ea-72698c6f76b5",
+    "count": 1534
+  },
+  {
+    "value": "claude-d--roo-extensions--2ae9a2e7-410c-4e76-8f39-3b4a13dda952",
+    "count": 1533
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260418-230727--e5705486-f3eb-4ce8-ba14-77d929ea2791",
+    "count": 1530
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--80d6dfc1-ccaa-4486-98ea-9e33adfa594e",
+    "count": 1526
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--10392a9f-57e3-4015-8fe5-5f1fd4b72792",
+    "count": 1512
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--048e2a36-8a50-4567-8a3d-ccbd8e4a4bca",
+    "count": 1503
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260331-172217--3bce63e4-b404-47e1-bce5-d555ba231b34",
+    "count": 1494
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260312-141257",
+    "count": 1488
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260424-100731--be03a28a-d755-41a7-b558-706a1dc80a86",
+    "count": 1486
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260321-222347--d54a9ecd-eac8-4952-a386-426067735d89",
+    "count": 1482
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260331-024150",
+    "count": 1480
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--be1206bf-4e41-497a-bfdc-848fc27f4186",
+    "count": 1469
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260407-222216",
+    "count": 1467
+  },
+  {
+    "value": "claude-d--roo-extensions--70a761a7-f860-4c50-bf0a-10f340a7f3a2",
+    "count": 1467
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--fe9ac551-dc93-4dc2-a7d7-87627dd40924",
+    "count": 1461
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260421-170721--6ace61e9-8329-495f-9480-78013f2c5f05",
+    "count": 1459
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260311-012158--bc98ac3c-ee82-4911-8f80-f4927b8f82f8",
+    "count": 1450
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260331-172217--c6e78a27-83a0-4e7a-b9bf-b268e53cad29",
+    "count": 1450
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260430-160830--1a69aa3c-cdb9-42ca-81e1-9cd7dbfd49d0",
+    "count": 1442
+  },
+  {
+    "value": "claude-d--roo-extensions--495c9d71-4ed7-447e-9eff-bc242cd0d3b3",
+    "count": 1438
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--2e88d831-a9bd-4023-b721-7913e88cf63c",
+    "count": 1432
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260426-020733--1ca32ccc-de1a-4eb7-8d20-e75487ef8313",
+    "count": 1425
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--69b43efb-c150-4de5-b357-2bc13a8e1880",
+    "count": 1424
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260306-155322--c307539e-63dc-47c9-b749-f3f6986b2889",
+    "count": 1421
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260316-183722",
+    "count": 1420
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--84092b07-a7ac-4f1a-8ac8-e026cefb24c5",
+    "count": 1418
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--c316c82e-a4fc-459b-9930-d379ffc71e01",
+    "count": 1416
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260421-031615--e4d1cfa6-7e05-404d-b32e-c64c2f532ec4",
+    "count": 1406
+  },
+  {
+    "value": "claude-d--roo-extensions--57389c6d-561f-48d9-87c2-1cd5a01a3ab9",
+    "count": 1403
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260429-220752--07c8931e-18e9-4e3f-b99b-f993ecffc108",
+    "count": 1400
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--5fa8b35f-f07f-466c-a7f0-270ef3de4e91",
+    "count": 1397
+  },
+  {
+    "value": "claude-d--roo-extensions--440465e6-30bc-4057-b3a8-dc78ba37cbf7",
+    "count": 1394
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--8299793c-a0f2-4f13-a882-0a99b9e0c3ea",
+    "count": 1391
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--2e9f3970-87c8-49c7-930a-185e8a42ceba",
+    "count": 1386
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260331-110723",
+    "count": 1383
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260421-151616--e00f1b36-5278-4b8b-a80d-781075d7628e",
+    "count": 1379
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260312-222511--6e87f275-b8a6-4ef9-a418-0af5b6e39a30",
+    "count": 1376
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--b48b1a73-770a-40a7-8628-a512c9ef9dd2",
+    "count": 1375
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260426-204118--ac304a61-0a15-4870-8b79-90995ccbd69f",
+    "count": 1371
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260423-052256--5355cd98-d1e2-46d7-b7be-e06e5e497541",
+    "count": 1367
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--0a1f8c13-015a-4809-aa0f-b30aeed631c6",
+    "count": 1364
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260307-031646--61a5111c-2d50-4c5a-80eb-d9a47ec0ff08",
+    "count": 1363
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260420-031615--48b60b34-1915-483d-bc0f-74a95331971f",
+    "count": 1358
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260308-002101",
+    "count": 1357
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260426-031616--1464ca91-635e-4af1-a913-d714087cf03b",
+    "count": 1356
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260322-162330",
+    "count": 1352
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260418-230727--46fa0cbf-919a-4eb4-b3a6-090c2260d6aa",
+    "count": 1352
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--4f3beed3-70e1-48aa-88d6-714f271492cf",
+    "count": 1350
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-679-myia-po-2025-20260313-194241--9a9ced48-4e6c-41a0-be4d-808cc3118542",
+    "count": 1350
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260429-040741--7d17d9f6-4b83-47ee-b649-199641258da8",
+    "count": 1343
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260423-151614--dfb69472-f039-45ad-a8dc-f19cd4de16db",
+    "count": 1342
+  },
+  {
+    "value": "claude-d--Dev-CoursIA-worktrees-GenAI-Series--6db330d8-0e4b-4a07-b3e0-3dacc349e915",
+    "count": 1341
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--4ee07c6f-d467-40d2-9df3-8a112b6db764",
+    "count": 1340
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260407-144121--805f0def-d4b8-42ec-977b-7b265661b11e",
+    "count": 1338
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260421-091616--a6b370ec-21ea-426a-a2c8-f17034ad7ae0",
+    "count": 1335
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--478a7875-846c-4b1f-b7da-9196449122d1",
+    "count": 1334
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260416-101357",
+    "count": 1331
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260308-231423--a523c695-f88b-4762-a8e8-c047a441ca00",
+    "count": 1325
+  },
+  {
+    "value": "claude-d--dev-CoursIA--d1beacac-ab80-46bb-80a4-6c0348fb56b2",
+    "count": 1324
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--23c43a1b-43b2-4db1-ad6e-cfbd8d024774",
+    "count": 1322
+  },
+  {
+    "value": "claude-d--roo-extensions--389da844-5afc-4728-90b7-287ca274b23c",
+    "count": 1320
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260312-042232--f909674d-41c7-44eb-8044-869ae8873daa",
+    "count": 1320
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260318-042306--4836c849-477f-41e6-b741-d37d824f1f6e",
+    "count": 1320
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260331-172217--1a607ab1-f608-40f6-9356-a7a18620fdbd",
+    "count": 1305
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--03ffb4fc-97d5-4ab8-a70e-5551a8f72a42",
+    "count": 1305
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260321-042245",
+    "count": 1300
+  },
+  {
+    "value": "claude-d--roo-extensions--bb2cdce7-7334-42f0-ab3a-b722c2adb26e",
+    "count": 1296
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260425-080730--126e231c-7cef-4aa0-94d0-0e38ab22c3d8",
+    "count": 1295
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260320-162330--dd693da4-beec-4839-89dd-08647d47a655",
+    "count": 1292
+  },
+  {
+    "value": "claude-d--roo-extensions--5ed011c4-6317-418e-880b-f1b13d877088",
+    "count": 1290
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260320-050910--5d390a1f-090e-4970-9fde-9fba111971fc",
+    "count": 1287
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-5-myia-ai-01-20260505-230748--e6dec372-fa7d-4f22-934b-3c195306348d",
+    "count": 1286
+  },
+  {
+    "value": "claude-d--roo-extensions--e8ab637e-97df-44ec-bddf-01946f454586",
+    "count": 1285
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260429-112319--343647f3-8bc7-4a44-aeca-893b09801739",
+    "count": 1282
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260425-031625--38fcd113-7a23-4fd6-970c-d4537e11f565",
+    "count": 1280
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260418-110718--c8f17ac8-d0c8-4e02-a302-24a022b4382e",
+    "count": 1275
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260310-092104",
+    "count": 1274
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260314-042222--8aceb2e0-db4d-467f-9a29-820516fa5b11",
+    "count": 1271
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260429-232358--a9f192ec-e690-4a81-8022-221ae0971db2",
+    "count": 1271
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--9a33bc77-9b65-45f1-b8de-e6a02f447a25",
+    "count": 1268
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260306-114415--7cb62c5d-31aa-46c6-bd01-384c9cfe57f4",
+    "count": 1260
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260318-102310--36ae97bc-476b-4bb1-94d0-0fbe21f65470",
+    "count": 1260
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260421-100721--d63d6d02-3f16-4db2-a631-e6236772d98d",
+    "count": 1258
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260429-151616--7222ad88-7984-43cf-8513-0460cebd91c4",
+    "count": 1258
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260410-232238--3169748f-3fad-4087-83b6-13d0b4ea836c",
+    "count": 1256
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--36ed5be2-e64d-4dea-9bc6-3e12e980ab85",
+    "count": 1250
+  },
+  {
+    "value": "claude-d--roo-extensions--64f76e72-fcd1-4de0-b7c5-1b74a0350e2f",
+    "count": 1248
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260319-102321--338ab920-3ffa-4e84-a295-e1c773c2c16e",
+    "count": 1247
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260422-170719--7b42e477-1cdb-48e4-8656-1f9c9a63f2cc",
+    "count": 1239
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--e8d86b37-b2e9-4e47-9ba4-14005197bb44",
+    "count": 1227
+  },
+  {
+    "value": "claude-d--roo-extensions--f6bd4094-5b8c-4aa9-9a84-5b6e7a55ff54",
+    "count": 1226
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260421-050724--80cf827d-69c9-4509-9f37-8652c49388cc",
+    "count": 1219
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260321-222347",
+    "count": 1209
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--c631f2a0-bda2-49a2-a70b-38bf7fe67065",
+    "count": 1208
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--7c05939d-cc62-4317-b975-e531d1a03f7c",
+    "count": 1205
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--742a04a0-9fdb-42f5-8397-3e469a7813f5",
+    "count": 1204
+  },
+  {
+    "value": "claude-d--roo-extensions--693f78c9-79d6-4d9d-a947-1a989761281d",
+    "count": 1204
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260306-071502--03acca99-f779-4654-9c15-d8a084472d65",
+    "count": 1204
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260316-063734",
+    "count": 1204
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260420-230720--9489d0dc-7029-42a9-962f-375b00bb4c05",
+    "count": 1200
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260315-183726",
+    "count": 1197
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260313-162148--7c4be8c1-5524-4b2e-99cf-6ce85889fe20",
+    "count": 1188
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--db2bfc91-a4ca-4b02-8c7b-02dbd892b978",
+    "count": 1181
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260310-141246",
+    "count": 1180
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260419-040721--80899d16-20f2-4c32-a111-bb398760b196",
+    "count": 1179
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260312-051242",
+    "count": 1179
+  },
+  {
+    "value": "claude-d--roo-extensions--d9be3032-543e-4ee4-9432-0db15fb640d9",
+    "count": 1178
+  },
+  {
+    "value": "claude-d--roo-extensions--13008eab-929d-455e-b516-45ec436a092a",
+    "count": 1176
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-web1-20260430-200749--95a324f0-a6e5-4f4b-9022-366cf56ee53c",
+    "count": 1170
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260424-110726--2bbf7c8e-635f-45d7-a6a2-8eece87af10e",
+    "count": 1165
+  },
+  {
+    "value": "claude-d--roo-extensions--15fd80e9-7560-4313-81ec-b61f0276f52a",
+    "count": 1164
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260506-052444--7862b90f-0168-4e24-b413-ae604dc07c4c",
+    "count": 1164
+  },
+  {
+    "value": "claude-d--roo-extensions--2fd72bc6-9328-4189-abbf-74290ddf1a34",
+    "count": 1161
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260429-031626--66e6aed4-b738-4a13-a6ab-55021f11bbac",
+    "count": 1160
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260419-024108--78ef7604-53fe-4c5a-9f50-410dc684c893",
+    "count": 1160
+  },
+  {
+    "value": "claude-d--Dev-roo-extensions--53fd448e-0538-485e-bc94-da1c57221724",
+    "count": 1160
+  },
+  {
+    "value": "claude-d--roo-extensions--c1f8fc59-0159-4d18-9204-037182170c1d",
+    "count": 1156
+  },
+  {
+    "value": "claude-d--nanoclaw--05327d4c-0bb2-455e-aaac-ac5eff0bb0ef",
+    "count": 1152
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260422-160725--378f20a6-a895-414e-88e0-a3d2b8668cf0",
+    "count": 1133
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--193daa6f-9c7e-4fc6-a2f8-d3b3e69b98bd",
+    "count": 1133
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260420-024108--f7ff7ac0-23d9-4bb2-9203-dcdc1a4fca96",
+    "count": 1125
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260307-191519--5e6ca09c-e8e4-45a1-b4e3-bec99788d362",
+    "count": 1122
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260307-151450--a44439aa-b688-4756-b258-d2ee406af9ec",
+    "count": 1122
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260413-172316",
+    "count": 1120
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260413-172316--2b469f60-c8ae-4cec-9f66-7040524c7220",
+    "count": 1120
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260429-110727--92eed741-942c-4669-861a-52be9167cc6f",
+    "count": 1113
+  },
+  {
+    "value": "claude-d--roo-extensions--badfca0d-edc2-467b-bc89-b8c618fcc18d",
+    "count": 1112
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2026-20260504-211648--6fd3eeb5-1421-4a0e-bde7-5c55a1bf63fe",
+    "count": 1108
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260407-230722--469212ae-6e0b-44d1-8fa0-cf19be2c3d8a",
+    "count": 1107
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260406-100732",
+    "count": 1106
+  },
+  {
+    "value": "claude-d--roo-extensions--0d8a6df9-5233-4fbb-9457-56388085d57f",
+    "count": 1104
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260306-231457--014556a0-ceb1-41aa-85d7-b9961bc1a63c",
+    "count": 1100
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260410-232238",
+    "count": 1099
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--d3721099-c6a0-4686-9d43-4f4b8c0b39bf",
+    "count": 1096
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260425-040738--a9003f97-f3ab-448b-b6af-f9a5be5f8e32",
+    "count": 1094
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260424-230725--0fff289c-448f-4884-9f0f-f2d6e3c29273",
+    "count": 1092
+  },
+  {
+    "value": "claude-D--roo-extensions--claude-worktrees-wt-worker-myia-ai-01-20260406-230722",
+    "count": 1089
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--61ca754b-0d6a-4cc3-9b4f-1b5ca4733b96",
+    "count": 1086
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260505-040802--1a862147-485b-42ff-9a52-0b9f4c630ab4",
+    "count": 1081
+  },
+  {
+    "value": "claude-d--roo-extensions--659d6c17-bd85-4ff7-9011-2fe2d6c41f1b",
+    "count": 1080
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--c26cbb5f-9a15-45f8-95b9-58c35c3ff03c",
+    "count": 1067
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--e15faa8b-a76e-40ca-878b-950a5ef1ae44",
+    "count": 1065
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--483f9db4-01e0-4231-9d73-f6f8bbcc3285",
+    "count": 1059
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--35ec1a14-031d-4a29-8b5c-83f7086c6bee",
+    "count": 1055
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260505-220744--933ea1ea-b5c0-44fd-a995-6244cbe927e0",
+    "count": 1051
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260425-204107--8e3b8580-c882-4b1b-80df-9e33322314c1",
+    "count": 1049
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260310-111444--a3aab13c-8424-4620-8ea1-491dc6da18f5",
+    "count": 1040
+  },
+  {
+    "value": "claude-D--Dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2023-20260421-084106--8c6324f5-b395-4ff0-8ef6-a5416dd11b88",
+    "count": 1040
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260317-222310",
+    "count": 1037
+  },
+  {
+    "value": "claude-d--dev-roo-extensions--a206f619-fcc0-4d95-80d4-330481a84a74",
+    "count": 1036
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260327-162225",
+    "count": 1034
+  },
+  {
+    "value": "claude-c--dev-roo-extensions--904d1b88-b534-4b75-93e3-99cdcd72b10a",
+    "count": 1034
+  },
+  {
+    "value": "claude-d--dev-CoursIA--5639ebcd-3976-4f68-8758-12a742e8578d",
+    "count": 1023
+  },
+  {
+    "value": "claude-d--dev-CoursIA--2a049f82-9d03-4460-ae24-19cd10297dd7",
+    "count": 1020
+  },
+  {
+    "value": "claude-C--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2024-20260430-220734--b6a49829-244b-4365-9b17-f7ca04c5af7b",
+    "count": 1012
+  },
+  {
+    "value": "claude-d--qdrant--4ae824ff-5d7f-4559-8500-f590440e5e98",
+    "count": 1005
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260416-101357--ea741404-94a3-4d55-acf5-738f080a5bdc",
+    "count": 1001
+  },
+  {
+    "value": "claude-d--dev-CoursIA--b494088c-a89d-4dc1-8fe0-ea741b1b8260",
+    "count": 1001
+  },
+  {
+    "value": "claude-D--dev-roo-extensions--claude-worktrees-wt-worker-myia-po-2025-20260329-112218",
+    "count": 1000
+  },
+  {
+    "value": "claude-d--roo-extensions--0da9fb7f-e26d-4e05-a4dd-37ab8985aa0b",
+    "count": 1000
+  }
+]

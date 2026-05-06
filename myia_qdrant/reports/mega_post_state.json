@@ -1,0 +1,10 @@
+{
+  "optimizer_status": "ok",
+  "disk_used_gb": "722",
+  "status": "yellow",
+  "ts": "2026-05-06T14:22:20.0991989+02:00",
+  "mega_task_remaining": 47482,
+  "segments_count": 1156,
+  "indexed_vectors_count": 56985097,
+  "points_count": 55025179
+}
