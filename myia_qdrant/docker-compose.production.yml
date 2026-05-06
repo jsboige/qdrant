@@ -33,8 +33,8 @@ services:
       - "6334:6334"  # GRPC API
     
     volumes:
-      - \\wsl.localhost\Ubuntu\home\jesse\qdrant_data\storage:/qdrant/storage
-      - \\wsl.localhost\Ubuntu\home\jesse\qdrant_data\snapshots:/qdrant/snapshots
+      - \\wsl.localhost\Ubuntu\mnt\qdrant-e\qdrant_data\storage:/qdrant/storage
+      - \\wsl.localhost\Ubuntu\mnt\qdrant-e\qdrant_data\snapshots:/qdrant/snapshots
       - ./config/production.optimized.yaml:/qdrant/config/production.yaml
     
     # CRITIQUE: Limites de ressources ajustées pour 10M+ vecteurs (2560 dims)
