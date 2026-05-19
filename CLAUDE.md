@@ -25,6 +25,21 @@ myia_qdrant/           # All MyIA customizations (configs, scripts, docs)
 └── docker-compose.*.yml  # Docker Compose files
 ```
 
+## ⚠️ Operational Tooling — Discovery Before Build (MANDATORY)
+
+**`myia_qdrant/` IS the canonical home for Qdrant-specific tooling on this machine.** Before proposing, delegating, or building any new operational script (backup, restore, monitor, migration, snapshot, verify, etc.), you MUST:
+
+1. **List existing scripts** : `Get-ChildItem d:\qdrant\myia_qdrant\scripts\ -Recurse -Filter *.ps1` — these are CONSOLIDATED (cf. `CONSOLIDATION_REPORT.md`), not legacy.
+2. **Grep for the function name** before re-implementing : `Grep -path d:/qdrant/myia_qdrant -pattern "New-QdrantSnapshot\|Backup-\|Restore-"`.
+3. **Check schtasks separately** : a script existing on disk does NOT mean it runs. `schtasks /query | findstr -i qdrant` to verify scheduling.
+4. **Reject duplication in adjacent repos** : if another agent proposes putting Qdrant tooling in `roo-extensions/scripts/qdrant/` or similar, push back — it belongs here in the fork.
+
+**Why this rule exists (Incident 2026-05-19) :** A backup PR was built in `roo-extensions/scripts/qdrant/` (PR #2283, 633 LOC) duplicating `qdrant_backup.ps1` (353 LOC, consolidated 2025-10-13). The original was complete — it just lacked a scheduled task. **Result : two parallel codepaths across two repos for the same operation.** The right action would have been : install a schtask pointing at the existing `qdrant_backup.ps1` + add GDrive push.
+
+**Subtle gap pattern :** A consolidated script with logs from October 2025 + zero logs since = the script works, the scheduling was never wired up. **Look for that gap before building.** Cf. `myia_qdrant/backups/backup_*.log` mtimes.
+
+**Companion rule from global CLAUDE.md :** "Consolider != Archiver" — same spirit, applied to tooling lifecycle, not just file deletion.
+
 ## Common Operations
 
 ### Container Management
@@ -57,12 +72,17 @@ curl http://localhost:6335/healthz   # Students
 
 ### Backup & Recovery
 ```powershell
-# Backup before any change
-.\myia_qdrant\scripts\qdrant_backup.ps1
+# Manual backup (use this — script exists since Oct 2025, supports prod + students)
+.\myia_qdrant\scripts\qdrant_backup.ps1 -Environment production
+.\myia_qdrant\scripts\qdrant_backup.ps1 -Environment students -SkipSnapshot
 
 # Safe restart with backup
 .\myia_qdrant\scripts\qdrant_restart.ps1
 ```
+
+**Scheduled backup status (2026-05-19) :** `Qdrant-Snapshot-Daily` schtask installed by roo-extensions PR #2283. Calls a duplicate script in `roo-extensions/scripts/qdrant/`, NOT the canonical `qdrant_backup.ps1` in this fork. Pending consolidation. Until then: the canonical script + the schtask coexist; verify both are healthy.
+
+**Lesson from 2026-05-16 data loss :** `qdrant_backup.ps1` existed and worked, but no schtask was ever set up to run it. Last automatic backup logs date from **2025-10-08** (~7 months before the wipe). Always check BOTH script existence AND schtask presence — a consolidated script without scheduling is a half-built safety net.
 
 ### E2E Semantic Search Test
 Validates the full pipeline: embedding service -> Qdrant search.
