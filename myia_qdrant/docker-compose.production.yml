@@ -10,7 +10,23 @@ services:
     
     # Grace period pour arrêt propre (flush des données)
     stop_grace_period: 60s
-    
+
+    # ANTI-SPLIT-BRAIN GATE (2026-05-21) : refuse de démarrer si le sentinelle VHDX est absent.
+    # Le sentinelle vit SUR le VHDX (/qdrant/storage/.qdrant_vhdx_sentinel). Si /qdrant/storage
+    # est le rootfs leftover vide (VHDX non monté), le sentinelle est absent → exit 1 au lieu de
+    # servir un store vide et réindexer dans le vide (mécanisme de la perte de données 2026-05-16).
+    # `exec ./entrypoint.sh` : entrypoint.sh devient PID 1 → SIGTERM/arrêt gracieux préservés.
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        if [ ! -f /qdrant/storage/.qdrant_vhdx_sentinel ]; then
+          echo "[SENTINEL] FATAL: /qdrant/storage/.qdrant_vhdx_sentinel absent -- VHDX non monte. Refus de demarrer (anti-split-brain: indexerait dans le vide)." >&2
+          exit 1
+        fi
+        echo "[SENTINEL] OK: sentinelle VHDX present, demarrage Qdrant."
+        exec ./entrypoint.sh
+
     env_file:
       - .env.production
     

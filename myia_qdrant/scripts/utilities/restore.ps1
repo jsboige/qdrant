@@ -1,3 +1,21 @@
+# ============================================================================
+# DEPRECATED / DISARMED 2026-05-21 -- DO NOT USE. SUPERSEDED BY:
+#   d:\qdrant\myia_qdrant\scripts\qdrant_snapshot_restore.ps1
+# ----------------------------------------------------------------------------
+# This script is a DATA-DESTROYING FOOTGUN and is intentionally neutralized:
+#   * line ~22: `docker-compose down -v` REMOVES the volumes -> wipes the store.
+#   * `$latestSnapshot` is referenced but never assigned (undefined).
+#   * the trailing `finally {` has no matching `try` -> the file is a PARSE ERROR
+#     today (so it cannot run). If someone "fixes" that parse error, the `down -v`
+#     above would arm and could destroy data. Hence the hard `exit 1` below.
+# Kept on disk (not deleted) for forensic reference only. The body below is dead
+# code -- the canonical restore is the sister script named above (uploads via
+# PUT /collections/<c>/snapshots/upload, optional -RecreateCollection, verifies
+# point count, never touches volumes).
+# ============================================================================
+Write-Error "utilities/restore.ps1 is DEPRECATED and DISARMED (data-destroying down -v). Use qdrant_snapshot_restore.ps1 instead."
+exit 1
+
 # This script restores the most recent Qdrant snapshot.
 # It handles stopping the service, purging data, restarting, and applying the snapshot.
 

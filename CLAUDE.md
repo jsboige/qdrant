@@ -71,18 +71,44 @@ curl http://localhost:6335/healthz   # Students
 ```
 
 ### Backup & Recovery
-```powershell
-# Manual backup (use this — script exists since Oct 2025, supports prod + students)
-.\myia_qdrant\scripts\qdrant_backup.ps1 -Environment production
-.\myia_qdrant\scripts\qdrant_backup.ps1 -Environment students -SkipSnapshot
 
+**CANONICAL backup (guarded, consolidated into the fork 2026-05-21):**
+
+```powershell
+# Snapshots roo_tasks_semantic_index -> GDrive offsite + D:\qdrant-backups local.
+# Poison-guard (abort if points < MinPoints), size-guard (skip retention if new < 50% of largest),
+# 7 daily + 4 weekly Mondays retention PER destination, idempotent per day.
+.\myia_qdrant\scripts\qdrant_snapshot_backup.ps1                  # all defaults
+.\myia_qdrant\scripts\qdrant_snapshot_backup.ps1 -SharedPath -    # local-only (skip offsite)
+
+# Restore (SAFE by default — uploads into the named collection, never touches volumes):
+.\myia_qdrant\scripts\qdrant_snapshot_restore.ps1 -SnapshotPath <file> -Collection <name>
+.\myia_qdrant\scripts\qdrant_snapshot_restore.ps1 -SnapshotPath <file> -Collection <name> -RecreateCollection -Force  # DESTRUCTIVE drop first
+```
+
+`qdrant_snapshot_backup.ps1` is wired to schtask **`Qdrant-Snapshot-Daily`** (~03:17 daily, repointed from the roo-extensions duplicate on 2026-05-21). It is the single canonical backup codepath. Reads the API key from `.env.production` (`QDRANT__SERVICE__API_KEY`), never prints it.
+
+**Backup landscape (verified 2026-05-21):**
+
+| Layer | Script | Target | Status |
+|-------|--------|--------|--------|
+| **Offsite + Local (ACTIVE, guarded)** | `myia_qdrant/scripts/qdrant_snapshot_backup.ps1` | GDrive `$ROOSYNC_SHARED_PATH/qdrant-snapshots/<machine>/roo_tasks_semantic_index/<date>/` **and** `D:\qdrant-backups/<machine>/...` | **Canonical.** schtask `Qdrant-Snapshot-Daily`. Poison-guard + size-guard. Still `roo_tasks` ONLY (1 of 71 colls — the irreplaceable one; the ~70 `ws-*` code indexes are regenerable). 3 healthy offsite snapshots (05-19/20/21, ~4.5–4.9 GB); local layer populated 05-21. |
+| **roo-extensions duplicate (DORMANT)** | `roo-extensions/scripts/qdrant/backup-snapshot.ps1` | (same GDrive path) | No longer scheduled (schtask repointed to the fork). Kept until cross-repo cleanup; **do not re-point to it** (no poison-guard, reads single-underscore `QDRANT_API_KEY`). |
+| **Old local (DEPRECATED, BROKEN)** | `myia_qdrant/scripts/qdrant_backup.ps1` | same-disk VHDX `/qdrant/snapshots` + config export | Deprecated header added. Broken for production (`.env` vs `.env.production`; stale compose path). Kept only for its un-ported students path + config/collection-list export. |
+| **Local distro copy** | `C:\ProgramData\maint-scripts\backup_vhdx_simple.ps1` | `D:\WSL-recovery\ext4.vhdx.bak` | NOT scheduled. Copies the **Ubuntu rootfs vhdx** (open-webui homes etc.), NOT qdrant data — qdrant lives on `E:\wsl-data\qdrant.vhdx`. |
+
+**Restore:** use `myia_qdrant/scripts/qdrant_snapshot_restore.ps1` (canonical; round-trip tested 2026-05-21). `roo-extensions/scripts/qdrant/restore-snapshot.ps1` also works (it was the port source). `myia_qdrant/scripts/utilities/restore.ps1` is **DEPRECATED + DISARMED** (early `exit 1`) — it was a footgun (`docker-compose down -v` destroys volumes; `finally` with no `try`; undefined `$latestSnapshot`); kept on disk for forensics only.
+
+```powershell
 # Safe restart with backup
 .\myia_qdrant\scripts\qdrant_restart.ps1
 ```
 
-**Scheduled backup status (2026-05-19) :** `Qdrant-Snapshot-Daily` schtask installed by roo-extensions PR #2283. Calls a duplicate script in `roo-extensions/scripts/qdrant/`, NOT the canonical `qdrant_backup.ps1` in this fork. Pending consolidation. Until then: the canonical script + the schtask coexist; verify both are healthy.
+**Mount-drift recovery (DEFINITIVE, 2026-05-21):** if qdrant binds the empty rootfs leftover instead of the VHDX (collections drop to ~1), the fix is **`docker compose -f myia_qdrant/docker-compose.production.yml down && up -d`** (RECREATE — forces fresh bind resolution). `docker restart`/`start` REUSE the stale bind captured at container-creation time and do NOT fix it. Once created via `compose up` with the VHDX mounted, even a policy-restart keeps the correct bind (verified after the benign 04:25 self-restart on 05-21). This is the Phase-6 method in `C:\ProgramData\maint-scripts\mount_qdrant_vhdx.ps1`.
 
-**Lesson from 2026-05-16 data loss :** `qdrant_backup.ps1` existed and worked, but no schtask was ever set up to run it. Last automatic backup logs date from **2025-10-08** (~7 months before the wipe). Always check BOTH script existence AND schtask presence — a consolidated script without scheduling is a half-built safety net.
+**Lesson from 2026-05-16 data loss :** the offsite schtask only started **2026-05-19** (PR #2283) — at the moment of the wipe there was NO backup at all. The canonical `qdrant_backup.ps1` had no schtask (last logs 2025-10-08). Always check BOTH script existence AND schtask presence — a consolidated script without scheduling is a half-built safety net.
+
+**Anti-split-brain (IMPLEMENTED 2026-05-21, user mandate 2026-05-20):** the production `docker-compose.production.yml` now has an **entrypoint gate**: it checks for a sentinel file `/qdrant/storage/.qdrant_vhdx_sentinel` (which lives ON the VHDX) and `exit 1`s if absent — so when the VHDX is unmounted and the bind resolves to the empty rootfs leftover, qdrant REFUSES to start instead of serving an empty store and re-indexing into the void (the exact mechanism of the 2026-05-16 loss — "on ne réindexe pas dans le vide"). `exec ./entrypoint.sh` keeps entrypoint.sh as PID 1 so SIGTERM/graceful-stop are preserved. Gate proven both ways (present → `[SENTINEL] OK`; absent → FATAL `exit 1`). The poison-guard now also lives in `qdrant_snapshot_backup.ps1` (abort `exit 2` + skip retention if point-count < `-MinPoints`, default 100000), so a refusing/empty qdrant can never rotate good snapshots out.
 
 ### E2E Semantic Search Test
 Validates the full pipeline: embedding service -> Qdrant search.

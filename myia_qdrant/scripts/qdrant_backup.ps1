@@ -3,6 +3,21 @@
 # ============================================================================
 # Date: 2025-10-13
 # Auteur: Consolidation automatique
+#
+# >>> DEPRECATED for PRODUCTION snapshots (2026-05-21) <<<
+#   For the critical collection (roo_tasks_semantic_index) offsite+local snapshot
+#   backup, use the GUARDED canonical script instead:
+#       d:\qdrant\myia_qdrant\scripts\qdrant_snapshot_backup.ps1
+#   (poison-guard on point count, size-guard, GDrive offsite + D:\qdrant-backups
+#    local, 7d+4w retention). It is the script wired to schtask Qdrant-Snapshot-Daily.
+#
+#   This script is BROKEN for production as-is: it reads EnvFile=".env" but only
+#   ".env.production" exists (ApiKey empty -> exit 1), and ComposeFile points at the
+#   stale "docker-compose.production.optimized.yml" (actual: docker-compose.production.yml).
+#   Its students path and config/collection-list export are NOT yet ported to the new
+#   script, so it is kept (not deleted) for that reason. Fix the env/compose paths
+#   before relying on it for students.
+# ----------------------------------------------------------------------------
 # 
 # Remplace:
 #   - backup_before_migration.ps1
