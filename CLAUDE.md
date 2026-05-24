@@ -157,7 +157,8 @@ Production config (`config/production.optimized.yaml`):
 - 12 CPUs max, 60G RAM (Docker limits — raised from 24G → 40G → 60G on 2026-04-18; 40G saturated at 96%)
 - `indexing_threshold_kb: 6000` (index at ~1000 points)
 - HNSW on disk, 10 indexing threads max
-- Binary quantization with `always_ram: true` on `roo_tasks_semantic_index` (~7.6 GB in RAM for 23.8M × 2560 dims)
+- **TurboQuant 4-bit** quantization with `always_ram: true` on `roo_tasks_semantic_index` (migrated 2026-05-24 on engine v1.18.1; PATCH `{"quantization_config":{"turbo":{"bits":"bits4","always_ram":true}}}`). 8× compression, **score-recall@10 = 1.0** vs exact (no quality loss); rescore is a query-time param (`params.quantization.rescore`), not collection config. Replaced the binary 1-bit config that was lost in the 2026-05-16 recreate (collection ran un-quantized until this migration). Footprint ~2.6 GB for the current 461K-point collection.
+- Engine pinned to **`qdrant/qdrant:v1.18.1`** (was `:latest` frozen at 1.17.1) — TurboQuant requires ≥ 1.18.0.
 - GRPC timeout: 60s
 
 ## Upstream Sync

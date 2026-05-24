@@ -4,7 +4,10 @@
 
 services:
   qdrant:
-    image: qdrant/qdrant:latest
+    # Pinned to v1.18.1 (2026-05-24): TurboQuant quantization (milestone 48) requires >= 1.18.0.
+    # Upgraded from :latest (which was frozen at 1.17.1). Pinning makes recreates deterministic and
+    # documents the TurboQuant version floor; bump deliberately, not via a mutable tag.
+    image: qdrant/qdrant:v1.18.1
     container_name: qdrant_production
     restart: always
     
@@ -58,7 +61,9 @@ services:
       resources:
         limits:
           # Limite RAM: 60 GB (augmenté de 40G pour marge suffisante — 40G saturait à 96%)
-          # Binary quantization 1-bit sur 2560 dims: ~7.6 GB en RAM + HNSW on-disk + payload indexes + f32 originals + 49 autres collections
+          # TurboQuant 4-bit (always_ram) sur 2560 dims (migré 2026-05-24, engine v1.18.1) :
+          # quantized in-RAM + HNSW on-disk + payload indexes + f32 originals (gardés pour rescore) + ~70 autres collections.
+          # Marge large : footprint observé ~2.6 GB pour roo_tasks (461K pts post-recreate), bien sous la limite.
           memory: 60G
 
           # Limite CPU: 12 cœurs (augmenté de 8 pour meilleur parallélisme search)
