@@ -244,26 +244,31 @@ $ErrorActionPreference = "Continue"
 #   1) docker info (engine ready)
 #   2) Test-Path UNC vers le mountpoint qdrant (user-distro proxy ready)
 # Lecon 28/05 (2 containers REMOVED en 8h apres hard crashes Windows): le proxy plan9 UNC
-# revient AVANT la socket Docker bind-mount service (/run/guest-services/distro-services/ubuntu.sock).
-# Sans elle, `compose up` echoue:
+# revient AVANT la socket Docker bind-mount service. Sans elle, `compose up` echoue:
 #   "Error response from daemon: accessing specified distro mount service: stat
-#    /run/guest-services/distro-services/ubuntu.sock: no such file or directory"
+#    .../ubuntu.sock: no such file or directory"
 # -> container reste a l'etat REMOVED, schtask exit 8, watchdog WARN sans remediation.
-# FIX: verifier explicitement la presence de la socket avant de proceder a compose down/up.
+# Lecon 06/06 (Docker Desktop 29.5.x): la socket a DEMENAGE de
+#   /run/guest-services/distro-services/ubuntu.sock (ancien) vers
+#   /mnt/wsl/docker-desktop/shared-sockets/guest-services/distro-services/ubuntu.sock (nouveau).
+# L'ancien probe Test-Path UNC sur /run timeoutait toujours (exit 7) sous 29.5.x meme
+# integration OK. FIX: tester les DEUX chemins via `wsl test -S` (fiable cross-version).
 $dockerReady = $false
 $uncProbe = "\\wsl.localhost\$Distro\mnt\qdrant-e\qdrant_data\storage\raft_state.json"
-$sockProbe = "\\wsl.localhost\$Distro\run\guest-services\distro-services\ubuntu.sock"
+$sockNew = "/mnt/wsl/docker-desktop/shared-sockets/guest-services/distro-services/ubuntu.sock"
+$sockOld = "/run/guest-services/distro-services/ubuntu.sock"
 for ($i = 0; $i -lt $DockerWaitSec; $i++) {
     Start-Sleep -Seconds 2
     $null = & docker.exe ps -q 2>&1
     if ($LASTEXITCODE -ne 0) { continue }
     if (-not (Test-Path $uncProbe -ErrorAction SilentlyContinue)) { continue }
-    if (-not (Test-Path $sockProbe -ErrorAction SilentlyContinue)) { continue }
+    & wsl.exe -d $Distro -- bash -c "test -S '$sockNew' || test -S '$sockOld'" 2>$null
+    if ($LASTEXITCODE -ne 0) { continue }
     $dockerReady = $true
     break
 }
 if (-not $dockerReady) {
-    FailExit -Code 7 -EventId 2009 -Message "Docker engine + user-distro proxy + bind-mount service non prets apres ${DockerWaitSec}s (UNC probe: $uncProbe ; SOCK probe: $sockProbe). Mount Ubuntu OK mais qdrant ne peut pas demarrer."
+    FailExit -Code 7 -EventId 2009 -Message "Docker engine + user-distro proxy + bind-mount service non prets apres ${DockerWaitSec}s (UNC probe: $uncProbe ; SOCK probe linux: $sockNew | $sockOld). Mount Ubuntu OK mais qdrant ne peut pas demarrer."
 }
 Log "Docker + user-distro proxy + bind-mount service ready (apres $($i*2)s)"
 
