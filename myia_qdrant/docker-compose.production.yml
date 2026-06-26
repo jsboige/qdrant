@@ -4,10 +4,12 @@
 
 services:
   qdrant:
-    # Pinned to v1.18.1 (2026-05-24): TurboQuant quantization (milestone 48) requires >= 1.18.0.
-    # Upgraded from :latest (which was frozen at 1.17.1). Pinning makes recreates deterministic and
-    # documents the TurboQuant version floor; bump deliberately, not via a mutable tag.
-    image: qdrant/qdrant:v1.18.1
+    # Pinned to v1.18.2 (2026-06-26): patch over v1.18.1 — security fixes (REST auth whitelist bypass
+    # on crafted paths, OOB heap read via malicious snapshot) + optimizer infinite-loop fix (multi-vectors
+    # + prevent_unoptimized) + cleanup of unfinished segment optimizations on cancel/restart.
+    # No breaking change, no migration (same 1.18 minor; TurboQuant format unchanged, recall@10=1.0 preserved).
+    # TurboQuant quantization (milestone 48) requires >= 1.18.0. Bump deliberately, not via a mutable tag.
+    image: qdrant/qdrant:v1.18.2
     container_name: qdrant_production
     restart: always
     

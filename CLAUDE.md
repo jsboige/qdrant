@@ -164,7 +164,7 @@ Production config (`config/production.optimized.yaml`):
 - `indexing_threshold_kb: 6000` (index at ~1000 points)
 - HNSW on disk, 10 indexing threads max
 - **TurboQuant 4-bit** quantization with `always_ram: true` on `roo_tasks_semantic_index` (migrated 2026-05-24 on engine v1.18.1; PATCH `{"quantization_config":{"turbo":{"bits":"bits4","always_ram":true}}}`). 8× compression, **score-recall@10 = 1.0** vs exact (no quality loss); rescore is a query-time param (`params.quantization.rescore`), not collection config. Replaced the binary 1-bit config that was lost in the 2026-05-16 recreate (collection ran un-quantized until this migration). Footprint ~2.6 GB for the current 461K-point collection.
-- Engine pinned to **`qdrant/qdrant:v1.18.1`** (was `:latest` frozen at 1.17.1) — TurboQuant requires ≥ 1.18.0.
+- Engine pinned to **`qdrant/qdrant:v1.18.2`** (bumped 2026-06-26 from v1.18.1; TurboQuant requires ≥ 1.18.0). v1.18.2 is a patch within the 1.18 minor — security fixes (REST auth whitelist bypass on crafted paths, OOB heap read via malicious snapshot) + optimizer infinite-loop fix; no breaking change, no migration, TurboQuant format unchanged (recall@10=1.0 preserved). **Students** (`docker-compose.students.yml`) is now pinned to the same **v1.18.2** (was the mutable `:latest` tag frozen on the locally-cached 1.17.1 — pinning removes the surprise-jump risk on any recreate).
 - GRPC timeout: 60s
 
 ## Upstream Sync
