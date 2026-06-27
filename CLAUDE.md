@@ -116,6 +116,25 @@ Device letters are UNSTABLE (sde→sdg→sdf across reboots) — always resolve 
 
 **Anti-split-brain (IMPLEMENTED 2026-05-21, user mandate 2026-05-20):** the production `docker-compose.production.yml` now has an **entrypoint gate**: it checks for a sentinel file `/qdrant/storage/.qdrant_vhdx_sentinel` (which lives ON the VHDX) and `exit 1`s if absent — so when the VHDX is unmounted and the bind resolves to the empty rootfs leftover, qdrant REFUSES to start instead of serving an empty store and re-indexing into the void (the exact mechanism of the 2026-05-16 loss — "on ne réindexe pas dans le vide"). `exec ./entrypoint.sh` keeps entrypoint.sh as PID 1 so SIGTERM/graceful-stop are preserved. Gate proven both ways (present → `[SENTINEL] OK`; absent → FATAL `exit 1`). The poison-guard now also lives in `qdrant_snapshot_backup.ps1` (abort `exit 2` + skip retention if point-count < `-MinPoints`, default 100000), so a refusing/empty qdrant can never rotate good snapshots out.
 
+### VHDX Compaction (offline, reclaim slack)
+
+`E:\wsl-data\qdrant.vhdx` is a **dynamic** VHDX bloated to **~877 GB** on disk while the inner ext4 uses only **~104 GB** (residue of the 53M points before the −94.6% dedup). `fstrim` already deallocates blocks; only an **offline `Optimize-VHD -Mode Full`** physically shrinks the file (~700 GB reclaimable). `qdrant_students` uses Docker volumes, NOT the VHDX — unaffected.
+
+**Run it via the detached scheduled-task launcher — never via `Start-Process -Verb RunAs` from a session** (an elevated child of an agent session is not robust for a long op: it died 2× mid-gate on 2026-06-07, leaving qdrant down + watchdog disabled). A scheduled task runs detached under the Task Scheduler service (proven by `Mount-Qdrant-VHDX`).
+
+```powershell
+# Day-of, full compaction (1 UAC; task runs detached, robust):
+.\myia_qdrant\scripts\host\run_compact_via_task.ps1
+.\myia_qdrant\scripts\host\run_compact_via_task.ps1 -DryRun        # validate teardown/remount, skip Optimize
+.\myia_qdrant\scripts\host\run_compact_via_task.ps1 -RegisterOnly  # prepare task, don't trigger
+```
+
+The launcher deploys current scripts to `C:\ProgramData\maint-scripts\`, registers one-shot task `Compact-Qdrant-VHDX` (`MYIA/Interactive/Highest`, `PT8H`), and triggers it. The compaction ([`compact_qdrant_vhdx.ps1`](myia_qdrant/scripts/host/compact_qdrant_vhdx.ps1)) is a 7-phase guarded sequence: disable watchdog → `compose down` → **GATE 1** (waits for Docker to be fully quit — operator acts via the tray) → `fstrim` → detach VHDX (purge `qdrant_data` shims + umount + `wsl --unmount` + `Dismount-VHD`) → `Optimize-VHD -Mode Full` (RO mount, dismount in finally) → **GATE 2** (waits for Docker relaunch) → re-attach via `mount_qdrant_vhdx.ps1` → `finally` re-enables the watchdog ALWAYS → validates 72 collections + roo_tasks green. The agent **tails the log** (`C:\ProgramData\maint-scripts\logs\compact-qdrant-vhdx-*.log`) and relays the two Docker gates to the operator. If the script dies before its finally (watchdog left disabled), recover with [`recover_mount_after_compact.ps1`](myia_qdrant/scripts/host/recover_mount_after_compact.ps1).
+
+> **Storage-root path (avoid the false-drift trap):** the store root is `/mnt/qdrant-e` **directly** — collections at `/mnt/qdrant-e/collections`, sentinel at `/mnt/qdrant-e/.qdrant_vhdx_sentinel` (= `/qdrant/storage/.qdrant_vhdx_sentinel` in the container). There is **no** `storage/` subdir; checking `/mnt/qdrant-e/storage/...` reports a false empty mount.
+
+`Optimize-VHD` only removes already-free/deallocated blocks; allocated data is never touched. The dynamic ceiling (880 GB) is unchanged and the file auto-regrows. **DEFERRED 2026-06-07** by user — to be run on a daytime maintenance window.
+
 ### E2E Semantic Search Test
 Validates the full pipeline: embedding service -> Qdrant search.
 Use after any change to Qdrant config, embedding service, or RooSync env.
