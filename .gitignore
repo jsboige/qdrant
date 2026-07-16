@@ -63,3 +63,11 @@ QdrantValidator/[Oo]bj/
 
 # Key rotation scratch area (never commit)
 .rotation/
+
+# Ephemeral migration / task-run artifacts (completed one-off runs, kept on disk, out of git)
+myia_qdrant/reports/*.jsonl
+myia_qdrant/reports/*.err
+myia_qdrant/**/*.pre-migration-*
+myia_qdrant/backups/quarantine-removed-*.txt
+myia_qdrant/scripts/utilities/run-chunk-id-migration.ps1
+/unpause-result.txt
