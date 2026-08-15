@@ -179,18 +179,42 @@ if ($missing.Count -eq 0) {
 }
 
 # Fan out the source file (existing or freshly downloaded) to every missing destination.
-if ($sourceFile) {
-    $snapLeaf = Split-Path $sourceFile -Leaf
-    foreach ($d in $missing) {
-        $dayDir = "$($d.Root)/$today"
-        if ($PSCmdlet.ShouldProcess("$dayDir/$snapLeaf", "copy snapshot to $($d.Name)")) {
-            if (-not (Test-Path $dayDir)) { New-Item -ItemType Directory -Path $dayDir -Force | Out-Null }
-            Copy-Item -Path $sourceFile -Destination "$dayDir/$snapLeaf" -Force
-            Write-Log "Copied to $($d.Name): $dayDir/$snapLeaf"
+# The copy is the step that actually moves the data, and it was the one fatal step with no catch.
+# On 2026-08-15 it threw between the copy and its success log: $ErrorActionPreference='Stop' killed
+# the script, and the hidden launcher (wscript //B) discarded stderr. The only surviving trace was
+# the scheduler's exit code 1 -- an empty day directory offsite, a 26 GB temp file left behind
+# because the cleanup below never ran, and no way to know what the error had been.
+$copyFailed = $false
+try {
+    if ($sourceFile) {
+        $snapLeaf = Split-Path $sourceFile -Leaf
+        foreach ($d in $missing) {
+            $dayDir = "$($d.Root)/$today"
+            if ($PSCmdlet.ShouldProcess("$dayDir/$snapLeaf", "copy snapshot to $($d.Name)")) {
+                if (-not (Test-Path $dayDir)) { New-Item -ItemType Directory -Path $dayDir -Force | Out-Null }
+                try {
+                    Copy-Item -Path $sourceFile -Destination "$dayDir/$snapLeaf" -Force
+                } catch {
+                    $copyFailed = $true
+                    Write-Log "FATAL: copy to $($d.Name) failed ($dayDir/$snapLeaf): $($_.Exception.GetType().Name): $($_.Exception.Message)" 'ERROR'
+                    throw
+                }
+                Write-Log "Copied to $($d.Name): $dayDir/$snapLeaf"
+            }
+        }
+    }
+} finally {
+    # Keep the temp when the copy failed: the server-side snapshot is already deleted by then, so
+    # this file is the only remaining copy of today's backup. Deleting it to reclaim disk would
+    # destroy the very thing the run exists to produce. Say where it is instead.
+    if ($tmp -and (Test-Path $tmp)) {
+        if ($copyFailed) {
+            Write-Log "Temp KEPT (copy failed; this is the only remaining copy of today's snapshot): $tmp" 'WARN'
+        } else {
+            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
         }
     }
 }
-if ($tmp -and (Test-Path $tmp)) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
 
 # ========== RETENTION (per destination), with SIZE-GUARD ==========
 
