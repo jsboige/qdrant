@@ -156,7 +156,10 @@ if ($missing.Count -eq 0) {
     # No destination has today's: create a fresh server snapshot and download once.
     if ($PSCmdlet.ShouldProcess("$QdrantUrl/collections/$Collection/snapshots", 'POST create snapshot')) {
         try {
-            $createResp = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots" -Headers $headers -Method Post -TimeoutSec 600
+            # 1800s: at ~2M pts / 26 GB the snapshot builds in ~8 min but on 2026-08-20 the HTTP
+            # response came back past 600s (run failed while the snapshot completed server-side)
+            # -- the old margin is gone as the collection grows.
+            $createResp = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots" -Headers $headers -Method Post -TimeoutSec 1800
         } catch { Write-Log "FATAL: snapshot creation failed: $($_.Exception.Message)" 'ERROR'; exit 1 }
         $snapName = $createResp.result.name
         if ([string]::IsNullOrWhiteSpace($snapName)) { Write-Log 'FATAL: snapshot response missing name' 'ERROR'; exit 1 }
