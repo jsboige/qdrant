@@ -123,6 +123,26 @@ if ($pts -lt $MinPoints) {
     exit 2
 }
 
+# ========== ORPHAN CLEANUP ==========
+# The server-side delete below only runs at the END of a successful run, so every failed/
+# interrupted run leaves its snapshot behind (2026-08-22: 9 orphans / ~151 GB accumulated
+# since May). Purge server-side snapshots older than 48h up-front; the margin avoids racing
+# a concurrent live run. Offsite history is unaffected (retention runs on its own tree).
+
+try {
+    $orphList = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots" -Headers $headers -Method Get -TimeoutSec 60
+    $orphCutoff = (Get-Date).AddHours(-48)
+    foreach ($s in @($orphList.result)) {
+        try { $ct = [datetime]::Parse($s.creation_time, [Globalization.CultureInfo]::InvariantCulture) } catch { continue }
+        if ($ct -lt $orphCutoff) {
+            try {
+                $null = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots/$($s.name)" -Headers $headers -Method Delete -TimeoutSec 300
+                Write-Log "Orphan cleanup: deleted server-side snapshot $($s.name) ($([math]::Round($s.size/1GB,2)) GB, created $($s.creation_time))"
+            } catch { Write-Log "WARN: orphan delete failed $($s.name): $($_.Exception.Message)" 'WARN' }
+        }
+    }
+} catch { Write-Log "WARN: orphan cleanup list failed (non-fatal): $($_.Exception.Message)" 'WARN' }
+
 # ========== IDEMPOTENCY (per-destination) ==========
 # Skip server snapshot only if EVERY destination already has today's. If some have it and some
 # don't, copy the existing file to the missing ones (no need to re-snapshot the server).
