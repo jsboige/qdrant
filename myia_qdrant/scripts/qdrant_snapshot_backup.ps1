@@ -214,6 +214,21 @@ if ($missing.Count -eq 0) {
 $copyFailed = $false
 try {
     if ($sourceFile) {
+        # Post-reboot GoogleDriveFS race: on 2026-08-28 the 03:17 run hit
+        # DirectoryNotFoundException on G:\ (Drive not remounted yet ~45 min after a 02:30
+        # reboot) and died keeping the temp as the only copy. Bounded wait for each
+        # destination root before attempting the copy.
+        foreach ($d in $missing) {
+            $waited = 0
+            while (-not (Test-Path $d.Root) -and $waited -lt 600) {
+                Start-Sleep -Seconds 30
+                $waited += 30
+                Write-Log "Waiting for $($d.Name) destination root (not yet mounted, ${waited}s): $($d.Root)" 'WARN'
+            }
+            if (-not (Test-Path $d.Root)) {
+                Write-Log "Destination root STILL absent after ${waited}s wait: $($d.Root) — copy will likely fail" 'ERROR'
+            }
+        }
         $snapLeaf = Split-Path $sourceFile -Leaf
         foreach ($d in $missing) {
             $dayDir = "$($d.Root)/$today"
