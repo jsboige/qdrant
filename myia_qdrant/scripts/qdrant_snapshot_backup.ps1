@@ -123,6 +123,30 @@ if ($pts -lt $MinPoints) {
     exit 2
 }
 
+# ========== ORPHAN CLEANUP ==========
+# The server-side delete below only runs at the END of a successful run, so every failed/
+# interrupted run leaves its snapshot behind (2026-08-22: 9 orphans / ~151 GB accumulated
+# since May). Purge server-side snapshots older than 48h up-front; the margin avoids racing
+# a concurrent live run. Offsite history is unaffected (retention runs on its own tree).
+
+try {
+    $orphList = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots" -Headers $headers -Method Get -TimeoutSec 60
+    $orphCutoff = (Get-Date).AddHours(-48)
+    $orphDeleted = 0
+    foreach ($s in @($orphList.result)) {
+        try { $ct = [datetime]::Parse($s.creation_time, [Globalization.CultureInfo]::InvariantCulture) } catch { continue }
+        if ($ct -lt $orphCutoff) {
+            try {
+                $null = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots/$($s.name)" -Headers $headers -Method Delete -TimeoutSec 300
+                $orphDeleted++
+                Write-Log "Orphan cleanup: deleted server-side snapshot $($s.name) ($([math]::Round($s.size/1GB,2)) GB, created $($s.creation_time))"
+            } catch { Write-Log "WARN: orphan delete failed $($s.name): $($_.Exception.Message)" 'WARN' }
+        }
+    }
+    # Always log the summary: a silent success is indistinguishable from "block never ran".
+    Write-Log "Orphan cleanup: $orphDeleted deleted of $(@($orphList.result).Count) server-side snapshot(s) (cutoff 48h)"
+} catch { Write-Log "WARN: orphan cleanup list failed (non-fatal): $($_.Exception.Message)" 'WARN' }
+
 # ========== IDEMPOTENCY (per-destination) ==========
 # Skip server snapshot only if EVERY destination already has today's. If some have it and some
 # don't, copy the existing file to the missing ones (no need to re-snapshot the server).
@@ -156,7 +180,10 @@ if ($missing.Count -eq 0) {
     # No destination has today's: create a fresh server snapshot and download once.
     if ($PSCmdlet.ShouldProcess("$QdrantUrl/collections/$Collection/snapshots", 'POST create snapshot')) {
         try {
-            $createResp = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots" -Headers $headers -Method Post -TimeoutSec 600
+            # 1800s: at ~2M pts / 26 GB the snapshot builds in ~8 min but on 2026-08-20 the HTTP
+            # response came back past 600s (run failed while the snapshot completed server-side)
+            # -- the old margin is gone as the collection grows.
+            $createResp = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots" -Headers $headers -Method Post -TimeoutSec 1800
         } catch { Write-Log "FATAL: snapshot creation failed: $($_.Exception.Message)" 'ERROR'; exit 1 }
         $snapName = $createResp.result.name
         if ([string]::IsNullOrWhiteSpace($snapName)) { Write-Log 'FATAL: snapshot response missing name' 'ERROR'; exit 1 }
@@ -179,18 +206,57 @@ if ($missing.Count -eq 0) {
 }
 
 # Fan out the source file (existing or freshly downloaded) to every missing destination.
-if ($sourceFile) {
-    $snapLeaf = Split-Path $sourceFile -Leaf
-    foreach ($d in $missing) {
-        $dayDir = "$($d.Root)/$today"
-        if ($PSCmdlet.ShouldProcess("$dayDir/$snapLeaf", "copy snapshot to $($d.Name)")) {
-            if (-not (Test-Path $dayDir)) { New-Item -ItemType Directory -Path $dayDir -Force | Out-Null }
-            Copy-Item -Path $sourceFile -Destination "$dayDir/$snapLeaf" -Force
-            Write-Log "Copied to $($d.Name): $dayDir/$snapLeaf"
+# The copy is the step that actually moves the data, and it was the one fatal step with no catch.
+# On 2026-08-15 it threw between the copy and its success log: $ErrorActionPreference='Stop' killed
+# the script, and the hidden launcher (wscript //B) discarded stderr. The only surviving trace was
+# the scheduler's exit code 1 -- an empty day directory offsite, a 26 GB temp file left behind
+# because the cleanup below never ran, and no way to know what the error had been.
+$copyFailed = $false
+try {
+    if ($sourceFile) {
+        # Post-reboot GoogleDriveFS race: on 2026-08-28 the 03:17 run hit
+        # DirectoryNotFoundException on G:\ (Drive not remounted yet ~45 min after a 02:30
+        # reboot) and died keeping the temp as the only copy. Bounded wait for each
+        # destination root before attempting the copy.
+        foreach ($d in $missing) {
+            $waited = 0
+            while (-not (Test-Path $d.Root) -and $waited -lt 600) {
+                Start-Sleep -Seconds 30
+                $waited += 30
+                Write-Log "Waiting for $($d.Name) destination root (not yet mounted, ${waited}s): $($d.Root)" 'WARN'
+            }
+            if (-not (Test-Path $d.Root)) {
+                Write-Log "Destination root STILL absent after ${waited}s wait: $($d.Root) — copy will likely fail" 'ERROR'
+            }
+        }
+        $snapLeaf = Split-Path $sourceFile -Leaf
+        foreach ($d in $missing) {
+            $dayDir = "$($d.Root)/$today"
+            if ($PSCmdlet.ShouldProcess("$dayDir/$snapLeaf", "copy snapshot to $($d.Name)")) {
+                if (-not (Test-Path $dayDir)) { New-Item -ItemType Directory -Path $dayDir -Force | Out-Null }
+                try {
+                    Copy-Item -Path $sourceFile -Destination "$dayDir/$snapLeaf" -Force
+                } catch {
+                    $copyFailed = $true
+                    Write-Log "FATAL: copy to $($d.Name) failed ($dayDir/$snapLeaf): $($_.Exception.GetType().Name): $($_.Exception.Message)" 'ERROR'
+                    throw
+                }
+                Write-Log "Copied to $($d.Name): $dayDir/$snapLeaf"
+            }
+        }
+    }
+} finally {
+    # Keep the temp when the copy failed: the server-side snapshot is already deleted by then, so
+    # this file is the only remaining copy of today's backup. Deleting it to reclaim disk would
+    # destroy the very thing the run exists to produce. Say where it is instead.
+    if ($tmp -and (Test-Path $tmp)) {
+        if ($copyFailed) {
+            Write-Log "Temp KEPT (copy failed; this is the only remaining copy of today's snapshot): $tmp" 'WARN'
+        } else {
+            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
         }
     }
 }
-if ($tmp -and (Test-Path $tmp)) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
 
 # ========== RETENTION (per destination), with SIZE-GUARD ==========
 
