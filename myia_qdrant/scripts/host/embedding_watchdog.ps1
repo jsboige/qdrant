@@ -240,7 +240,7 @@ if ($alertNow) {
 - Fautes: $($faults -join ' ; ')
 - Qdrant: $qStatus (roo_tasks ~2M pts, backup 03:17 OK — PAS un down qdrant)
 - Depuis: $sinceStr
-- Action: restart Docker po-2026 (user jsboige, WinRM maint-admin) — pattern 17/08/2026, 3e episode en 24h (SPOF embeddings sur po-2026)
+- Action RECOMMANDEE (ce watchdog n'execute RIEN — detection+alerte seulement, cf. header) : restart Docker po-2026 par le user (WinRM maint-admin) — pattern 17/08/2026 (SPOF embeddings sur po-2026). NB : les episodes recents se sont souvent retablis SEULS en <10 min — verifier l'etat AVANT de restart
 - Re-alerte auto dans $ReAlertMinutes min si persiste
 — $MachineId embedding_watchdog.ps1
 "@
