@@ -233,12 +233,33 @@ try {
         foreach ($d in $missing) {
             $dayDir = "$($d.Root)/$today"
             if ($PSCmdlet.ShouldProcess("$dayDir/$snapLeaf", "copy snapshot to $($d.Name)")) {
-                if (-not (Test-Path $dayDir)) { New-Item -ItemType Directory -Path $dayDir -Force | Out-Null }
-                try {
-                    Copy-Item -Path $sourceFile -Destination "$dayDir/$snapLeaf" -Force
-                } catch {
+                # Bounded retry: the root pre-wait above only covers "root absent at start".
+                # On 2026-09-03 G: was MOUNTED but DriveFS degraded deeper (small reads OK,
+                # big write threw DirectoryNotFoundException) -- a state a pre-check cannot
+                # see. Retry the copy itself; DriveFS settled within minutes on both observed
+                # classes (2026-08-28 mount race, 2026-09-03 degraded mount).
+                $maxAttempts = 3
+                $copied = $false
+                for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+                    try {
+                        if (-not (Test-Path $dayDir)) { New-Item -ItemType Directory -Path $dayDir -Force | Out-Null }
+                        Copy-Item -Path $sourceFile -Destination "$dayDir/$snapLeaf" -Force
+                        $copied = $true
+                        break
+                    } catch {
+                        Write-Log "copy to $($d.Name) attempt $attempt/$maxAttempts failed: $($_.Exception.GetType().Name): $($_.Exception.Message)" 'ERROR'
+                        if ($attempt -lt $maxAttempts) {
+                            # A partial destination locked by DriveFS would fail the next
+                            # overwrite too -- clear it (best effort) before waiting.
+                            Remove-Item -LiteralPath "$dayDir/$snapLeaf" -Force -ErrorAction SilentlyContinue
+                            Write-Log "retrying copy to $($d.Name) in 300s (DriveFS may settle)..." 'WARN'
+                            Start-Sleep -Seconds 300
+                        }
+                    }
+                }
+                if (-not $copied) {
                     $copyFailed = $true
-                    Write-Log "FATAL: copy to $($d.Name) failed ($dayDir/$snapLeaf): $($_.Exception.GetType().Name): $($_.Exception.Message)" 'ERROR'
+                    Write-Log "FATAL: copy to $($d.Name) failed after $maxAttempts attempts ($dayDir/$snapLeaf)" 'ERROR'
                     throw
                 }
                 Write-Log "Copied to $($d.Name): $dayDir/$snapLeaf"
