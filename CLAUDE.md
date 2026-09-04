@@ -75,10 +75,11 @@ curl http://localhost:6335/healthz   # Students
 **CANONICAL backup (guarded, consolidated into the fork 2026-05-21):**
 
 ```powershell
-# Snapshots roo_tasks_semantic_index -> GDrive offsite + D:\qdrant-backups local.
+# Snapshots roo_tasks_semantic_index -> GDrive offsite (scheduled) / + D:\qdrant-backups local (manual runs only).
 # Poison-guard (abort if points < MinPoints), size-guard (skip retention if new < 50% of largest),
+# bounded retry on copy failure (3x300s, DriveFS degradation), orphan cleanup (>48h server-side),
 # 7 daily + 4 weekly Mondays retention PER destination, idempotent per day.
-.\myia_qdrant\scripts\qdrant_snapshot_backup.ps1                  # all defaults
+.\myia_qdrant\scripts\qdrant_snapshot_backup.ps1                  # all defaults (offsite + local)
 .\myia_qdrant\scripts\qdrant_snapshot_backup.ps1 -SharedPath -    # local-only (skip offsite)
 
 # Restore (SAFE by default — uploads into the named collection, never touches volumes):
@@ -86,13 +87,14 @@ curl http://localhost:6335/healthz   # Students
 .\myia_qdrant\scripts\qdrant_snapshot_restore.ps1 -SnapshotPath <file> -Collection <name> -RecreateCollection -Force  # DESTRUCTIVE drop first
 ```
 
-`qdrant_snapshot_backup.ps1` is wired to schtask **`Qdrant-Snapshot-Daily`** (~03:17 daily, repointed from the roo-extensions duplicate on 2026-05-21). It is the single canonical backup codepath. Reads the API key from `.env.production` (`QDRANT__SERVICE__API_KEY`), never prints it.
+`qdrant_snapshot_backup.ps1` is wired to schtask **`Qdrant-Snapshot-Daily`** (~03:17 daily, via hidden launcher `C:\ProgramData\claude-hidden-launchers\Qdrant-Snapshot-Daily.vbs` which passes `-LocalCopyDir "" -SharedPath "G:\Mon Drive\Backups-Cloud"` — i.e. **the scheduled run is OFFSITE-ONLY**; the `D:\qdrant-backups` local leg exists only on manual runs with defaults, last populated 2026-07-14). It is the single canonical backup codepath. Reads the API key from `.env.production` (`QDRANT__SERVICE__API_KEY`), never prints it.
 
-**Backup landscape (verified 2026-05-21):**
+**Backup landscape (verified 2026-09-04):**
 
 | Layer | Script | Target | Status |
 |-------|--------|--------|--------|
-| **Offsite + Local (ACTIVE, guarded)** | `myia_qdrant/scripts/qdrant_snapshot_backup.ps1` | GDrive `$ROOSYNC_SHARED_PATH/qdrant-snapshots/<machine>/roo_tasks_semantic_index/<date>/` **and** `D:\qdrant-backups/<machine>/...` | **Canonical.** schtask `Qdrant-Snapshot-Daily`. Poison-guard + size-guard. Still `roo_tasks` ONLY (1 of 71 colls — the irreplaceable one; the ~70 `ws-*` code indexes are regenerable). 3 healthy offsite snapshots (05-19/20/21, ~4.5–4.9 GB); local layer populated 05-21. |
+| **Offsite (ACTIVE, guarded)** | `myia_qdrant/scripts/qdrant_snapshot_backup.ps1` | GDrive `G:\Mon Drive\Backups-Cloud\qdrant-snapshots\<machine>\roo_tasks_semantic_index\<date>\` (⚠️ NOT `$ROOSYNC_SHARED_PATH` — that env resolves to the stale `.shared-state` tree) | **Canonical.** schtask `Qdrant-Snapshot-Daily`, offsite-only. Poison-guard + size-guard + bounded copy-retry + orphan-cleanup. Still `roo_tasks` ONLY (1 of 71 colls — the irreplaceable one; the ~70 `ws-*` code indexes are regenerable). Daily ~30 GB snapshots, retention 7d+4w healthy (kept=10). |
+| **Local copy (MANUAL ONLY)** | same script, defaults | `D:\qdrant-backups/<machine>/...` | NOT scheduled (`-LocalCopyDir ""` in the launcher VBS, re-verified 2026-08-16 + 2026-09-04). Last populated 2026-07-14 by a manual run. |
 | **roo-extensions duplicate (DORMANT)** | `roo-extensions/scripts/qdrant/backup-snapshot.ps1` | (same GDrive path) | No longer scheduled (schtask repointed to the fork). Kept until cross-repo cleanup; **do not re-point to it** (no poison-guard, reads single-underscore `QDRANT_API_KEY`). |
 | **Old local (DEPRECATED, BROKEN)** | `myia_qdrant/scripts/qdrant_backup.ps1` | same-disk VHDX `/qdrant/snapshots` + config export | Deprecated header added. Broken for production (`.env` vs `.env.production`; stale compose path). Kept only for its un-ported students path + config/collection-list export. |
 | **Local distro copy** | `C:\ProgramData\maint-scripts\backup_vhdx_simple.ps1` | `D:\WSL-recovery\ext4.vhdx.bak` | NOT scheduled. Copies the **Ubuntu rootfs vhdx** (open-webui homes etc.), NOT qdrant data — qdrant lives on `E:\wsl-data\qdrant.vhdx`. |
