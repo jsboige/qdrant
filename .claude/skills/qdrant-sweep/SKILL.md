@@ -43,7 +43,7 @@ Le log du jour (`myia_qdrant/backups/snapshot-logs/snapshot-backup-<yyyyMMdd>.lo
 
 ## 6. IP dynamique (Livebox Orange, *.myia.io via Gandi)
 
-`dns_qdrant` ≠ `public_ip4` = **rotation IP** → c'EST ça la panne externe (pas le service) : poster [ERROR] + rappeler le workaround LAN (192.168.0.47:6333 direct). La schtask `Gandi-DNS-Updater` (ex-`Update-Gandi-DNS`, recréée 22/08) tourne toutes les 15 min **mais son token est rejeté 403 depuis son premier run** — [ASK] user en attente (régénérer le token dans `C:\ProgramData\maint-scripts\gandi-token.txt`). Tant qu'il n'est pas fixé, **ce sweep 6h est le filet** (détection < 6 h).
+`dns_qdrant` ≠ `public_ip4` = **rotation IP** → c'EST ça la panne externe (pas le service) : poster [ERROR] + rappeler le workaround LAN (192.168.0.47:6333 direct). Vérifier aussi que la schtask `Gandi-DNS-Updater` (toutes les 15 min) termine **sans `ERREUR`** dans `C:\ProgramData\maint-scripts\logs\update-gandi-dns.log` — historique instable (403 jusqu'au 05/09, puis token absent après un fix one-shot : les records DNS étaient corrects mais l'auto-update restait désarmé ; état courant dans la mémoire lane [[dr-me-migration-dynamic-ip]]). Tant qu'une erreur persiste, **ce sweep 6h est le filet** (détection < 6 h).
 
 ## 7. Inbox & dashboards
 
