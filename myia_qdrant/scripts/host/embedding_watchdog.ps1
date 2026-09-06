@@ -155,6 +155,9 @@ function Get-DateTimeValue {
 
 function Write-State {
     param($State)
+    # -DryRun ne doit RIEN persister : un dry-run qui ecrit state=down fait poster
+    # un faux "[DONE] chemin semantique RESTAURE" au run vert suivant (constate 06/09).
+    if ($DryRun) { Log "DryRun: etat NON persiste ($($State.state))" "INFO"; return }
     $State | ConvertTo-Json | Set-Content -Path $stateFile -Encoding UTF8
 }
 
@@ -209,7 +212,7 @@ if ($exitCode -eq 0) {
         $downSince = Get-DateTimeValue $st.since
         $downMin = if ($downSince) { [Math]::Round((($now - $downSince).TotalMinutes)) } else { '?' }
         $body = @"
-**[DONE][WATCHDOG] Chemin semantique RESTAURE — backend embeddings de retour**
+**[DONE][WATCHDOG] Chemin semantique RESTAURE — sondes backend + proxy de nouveau vertes**
 - Probes: backend :8004 = $($b.code)/$($b.ms)ms · proxy = $($p.code)/$($p.ms)ms · qdrant = $qStatus
 - Down depuis: $($st.since) — duree: $downMin min
 — $MachineId embedding_watchdog.ps1
@@ -235,12 +238,24 @@ if ($alertNow) {
     $faults = @()
     if (-not $backendUp) { $faults += "backend :8004 = $($b.code) (timeout/$($b.ms)ms)" }
     if (-not $proxyUp)   { $faults += "proxy embeddings.myia.io = $($p.code) (timeout/$($p.ms)ms)" }
+    # --- Diagnostic differencie (2026-09-06) ---
+    # Le titre ET l'action dependent de QUELLE sonde est en faute. Un proxy en timeout
+    # alors que le backend repond 200 n'est PAS un down embeddings : c'est le chemin
+    # public (IIS po-2023 / NAT-lien du site). Trois faux [ERROR] "restart Docker po-2026"
+    # ont pollue global la nuit du 05->06/09 pendant une saturation NAT Livebox.
+    if ($exitCode -eq 2) {
+        $headline = "[WARN][WATCHDOG] Proxy embeddings.myia.io INJOIGNABLE — backend :8004 SAIN ($($b.code)/$($b.ms)ms). Chemin semantique LAN intact."
+        $reco     = "NE PAS redemarrer Docker po-2026 (le backend repond). Suspecter le chemin public : IIS po-2023, NAT/lien du site. Verifier AVANT d'escalader : ping du 1er saut (192.168.0.254) + une cible hors-hairpin (cloudflare) — si elles sont lentes aussi, c'est le reseau du site, pas un service."
+    } else {
+        $headline = "[ERROR][WATCHDOG] Backend embeddings DOWN — chemin semantique fleet coupe. Qdrant: $qStatus"
+        $reco     = "restart Docker po-2026 par le user (WinRM maint-admin) — pattern 17/08/2026 (SPOF embeddings sur po-2026). NB : les episodes recents se sont souvent retablis SEULS en <10 min — verifier l'etat AVANT de restart"
+    }
     $body = @"
-**[ERROR][WATCHDOG] Backend embeddings DOWN — chemin semantique fleet coupe. Qdrant: $qStatus**
+**$headline**
 - Fautes: $($faults -join ' ; ')
 - Qdrant: $qStatus (roo_tasks ~2M pts, backup 03:17 OK — PAS un down qdrant)
 - Depuis: $sinceStr
-- Action RECOMMANDEE (ce watchdog n'execute RIEN — detection+alerte seulement, cf. header) : restart Docker po-2026 par le user (WinRM maint-admin) — pattern 17/08/2026 (SPOF embeddings sur po-2026). NB : les episodes recents se sont souvent retablis SEULS en <10 min — verifier l'etat AVANT de restart
+- Action RECOMMANDEE (ce watchdog n'execute RIEN — detection+alerte seulement, cf. header) : $reco
 - Re-alerte auto dans $ReAlertMinutes min si persiste
 — $MachineId embedding_watchdog.ps1
 "@
