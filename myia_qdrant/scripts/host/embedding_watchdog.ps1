@@ -220,12 +220,26 @@ if ($exitCode -eq 0) {
         Append-Dashboard $DashboardQdrant $body
         Append-Dashboard $DashboardGlobal $body
     }
-    Write-State @{ state = 'up'; since = ''; lastAlert = '' }
+    Write-State @{ state = 'up'; since = ''; lastAlert = ''; pending = '' }
     Log "State UP. No alert." "INFO"
     exit 0
 }
 
 # DOWN (exit 1-3)
+
+# --- Debounce 2 runs (2026-09-06) ---
+# La latence du proxy s'installe PILE sur le seuil (8-10 s pour un timeout a 10 s) :
+# 49 mesures entre 8 et 10 s contre 41 au-dela le 06/09 => l'etat oscillait et a
+# produit 40 posts (19 alertes + 21 retablissements) sur le dashboard global en 8 h,
+# noyant le signal pour toute la flotte. On exige donc DEUX observations
+# consecutives en faute avant de declarer DOWN. Cout : detection retardee d'un
+# cycle (5 min) sur une alerte dont l'action recommandee est de toute facon manuelle.
+if (-not $ForceDown -and $st.state -ne 'down' -and -not $st.pending) {
+    Write-State @{ state = 'up'; since = ''; lastAlert = ''; pending = $now.ToString('yyyy-MM-ddTHH:mm:ss.fffZ') }
+    Log "1re observation en faute (exit=$exitCode) - debounce : pas d'alerte, confirmation au prochain run." "WARN"
+    exit $exitCode
+}
+
 $alertNow = $true
 if ($st.state -eq 'down' -and $st.lastAlert) {
     $last = Get-DateTimeValue $st.lastAlert
@@ -261,7 +275,7 @@ if ($alertNow) {
 "@
     Append-Dashboard $DashboardQdrant $body
     Append-Dashboard $DashboardGlobal $body
-    Write-State @{ state = 'down'; since = $sinceStr; lastAlert = $now.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ') }
+    Write-State @{ state = 'down'; since = $sinceStr; lastAlert = $now.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ'); pending = '' }
     Log ("ALERT posted (exit=$exitCode). State=down since=$sinceStr") "ERROR"
 } else {
     Log "DOWN persistant, re-alerte pas due (cooldown $ReAlertMinutes min). Silence." "WARN"
