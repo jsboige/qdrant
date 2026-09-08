@@ -43,7 +43,9 @@ Le log du jour (`myia_qdrant/backups/snapshot-logs/snapshot-backup-<yyyyMMdd>.lo
 
 ## 6. IP dynamique (Livebox Orange, *.myia.io via Gandi)
 
-`dns_qdrant` ≠ `public_ip4` = **rotation IP** → c'EST ça la panne externe (pas le service) : poster [ERROR] + rappeler le workaround LAN (192.168.0.47:6333 direct). Vérifier aussi que la schtask `Gandi-DNS-Updater` (toutes les 15 min) termine **sans `ERREUR`** dans `C:\ProgramData\maint-scripts\logs\update-gandi-dns.log` — historique instable (403 jusqu'au 05/09, puis token absent après un fix one-shot : les records DNS étaient corrects mais l'auto-update restait désarmé ; état courant dans la mémoire lane [[dr-me-migration-dynamic-ip]]). Tant qu'une erreur persiste, **ce sweep 6h est le filet** (détection < 6 h).
+`dns_qdrant` ≠ `public_ip4` = **rotation IP** → c'EST ça la panne externe (pas le service) : poster [ERROR] + rappeler le workaround LAN (192.168.0.47:6333 direct).
+
+Santé de l'updater : lire le log **canonique** `D:\roo-extensions\outputs\gandi-dns\gandi-dns-<yyyyMMdd>.log` (schtask `Gandi-DNS-Updater`, 15 min, PAT dans le trousseau Windows `Gandi-LiveDNS-PAT`) — attendu : `Rien a faire : apex et IP publique concordent` + `Fin (exit=0)`. ⚠️ **NE PAS** prendre `C:\ProgramData\maint-scripts\logs\update-gandi-dns.log` pour l'état canonique : c'est le **legacy** (token fichier, quarantainé 04/09) — ses `ERREUR: Aucun token Gandi` ne disent RIEN du canonique. Du 05/09 au 08/09 les sweeps ont mal attribué ce log (« auto-update désarmé » = FAUX — canonique sain, établi 08/09 avec roo-extensions, [[dr-me-migration-dynamic-ip]]). Canonique en erreur → [ASK] roo-extensions ; le check DNS↔IP du sweep reste la vérification indépendante. Ne JAMAIS provisionner de fichier token (ré-armerait le duplicat legacy).
 
 ## 7. Inbox & dashboards
 
