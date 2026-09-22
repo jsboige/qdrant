@@ -259,7 +259,7 @@ if ($alertNow) {
     # ont pollue global la nuit du 05->06/09 pendant une saturation NAT Livebox.
     if ($exitCode -eq 2) {
         $headline = "[WARN][WATCHDOG] Proxy embeddings.myia.io INJOIGNABLE — backend :8004 SAIN ($($b.code)/$($b.ms)ms). Chemin semantique LAN intact."
-        $reco     = "NE PAS redemarrer Docker po-2026 (le backend repond). Suspecter le chemin public : IIS po-2023, NAT/lien du site. Verifier AVANT d'escalader : ping du 1er saut (192.168.0.254) + une cible hors-hairpin (cloudflare) — si elles sont lentes aussi, c'est le reseau du site, pas un service."
+        $reco     = "NE PAS redemarrer Docker po-2026 (le backend repond). Suspecter le chemin public : IIS po-2023, NAT/lien du site. Verifier AVANT d'escalader : ping du 1er saut (passerelle 192.168.0.1 — resoudre Get-NetRoute 0.0.0.0/0 si doute ; l'ancien 192.168.0.254 est une IP morte) + une cible hors-hairpin (cloudflare) — si elles sont lentes aussi, c'est le reseau du site, pas un service."
     } else {
         $headline = "[ERROR][WATCHDOG] Backend embeddings DOWN — chemin semantique fleet coupe. Qdrant: $qStatus"
         $reco     = "restart Docker po-2026 par le user (WinRM maint-admin) — pattern 17/08/2026 (SPOF embeddings sur po-2026). NB : les episodes recents se sont souvent retablis SEULS en <10 min — verifier l'etat AVANT de restart"
