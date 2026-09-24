@@ -198,6 +198,17 @@ if ($needMount) {
 & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "mount --make-shared $MountPoint" 2>&1 | Out-Null
 Log "$MountPoint marque shared (propagation cross-distro)"
 
+# --- Alias /srv (DD 29.5.x, 24/09/2026) ---
+# Le proxy cross-distro de Docker Desktop 29.5.x classe les sources sous /mnt/* comme
+# drvfs-automount : un bind \\wsl.localhost\Ubuntu\mnt\... echoue a la CREATION de
+# conteneur ("timed out waiting ... to be automounted"), alors qu'un chemin hors /mnt
+# (ex. /srv) passe comme chemin ordinaire. Le compose utilise donc l'alias
+# \\wsl.localhost\Ubuntu\srv\qdrant-e\... (overlay docker-compose.production.pathfix.yml).
+# Idempotent : bind deja present -> no-op.
+$aliasPoint = "/srv/qdrant-e"
+& wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "mkdir -p $aliasPoint && (mountpoint -q $aliasPoint || mount --bind $MountPoint $aliasPoint) && mount --make-shared $aliasPoint" 2>&1 | Out-Null
+Log "Alias $aliasPoint -> $MountPoint (bind, shared) verifie"
+
 # --- Phase 5: Verification PAR DEVICE (label), pas seulement compte collections ---
 # Lecon 24/05: le rootfs leftover contient ~14 collection dirs stale -> un simple
 # count>0 PASSE meme quand le bind est sur le rootfs (faux positif). On exige que
@@ -340,8 +351,13 @@ done
     # is in a transient state. Phase-6 socket probe catches the common case; this catches
     # the narrow window where the sock exists but the service is mid-init.
     $upOk = $false
+    # Overlay pathfix (DD 29.5.x) : binds via l'alias /srv — SANS lui, compose up
+    # echoue sur "timed out waiting ... to be automounted" (voir bloc alias Phase 4b).
+    $overlayPath = Join-Path (Split-Path $ComposePath -Parent) "docker-compose.production.pathfix.yml"
+    $composeArgs = @("compose", "-f", $ComposePath)
+    if (Test-Path $overlayPath) { $composeArgs += @("-f", $overlayPath) }
     for ($attempt = 1; $attempt -le 3; $attempt++) {
-        $upOutput = & docker.exe compose -f $ComposePath up -d 2>&1
+        $upOutput = & docker.exe @composeArgs up -d 2>&1
         $upOutput | ForEach-Object { Log "  up[$attempt]: $_" }
         if ($LASTEXITCODE -eq 0) { $upOk = $true; break }
         $upJoined = ($upOutput | Out-String)

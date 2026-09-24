@@ -1,0 +1,12 @@
+# PATHFIX 2026-09-24 — contournement Docker Desktop 29.5.x :
+# les binds \\wsl.localhost\Ubuntu\mnt\* echouent a la creation de conteneur
+# (proxy cross-distro "waiting to be automounted" : chemins /mnt/* traites
+# comme drvfs automount inexistant). Alias du montage VHDX sous /srv/qdrant-e
+# (bind cree par mount_qdrant_vhdx / fstab) -> chemin hors /mnt, traite comme
+# chemin ordinaire. Overlay : utiliser AVEC docker-compose.production.yml.
+services:
+  qdrant:
+    volumes:
+      - \\wsl.localhost\Ubuntu\srv\qdrant-e\qdrant_data\storage:/qdrant/storage
+      - \\wsl.localhost\Ubuntu\srv\qdrant-e\qdrant_data\snapshots:/qdrant/snapshots
+      - ./config/production.optimized.yaml:/qdrant/config/production.yaml
