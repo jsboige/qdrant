@@ -4,12 +4,15 @@
 
 services:
   qdrant:
-    # Pinned to v1.18.2 (2026-06-26): patch over v1.18.1 — security fixes (REST auth whitelist bypass
-    # on crafted paths, OOB heap read via malicious snapshot) + optimizer infinite-loop fix (multi-vectors
-    # + prevent_unoptimized) + cleanup of unfinished segment optimizations on cancel/restart.
-    # No breaking change, no migration (same 1.18 minor; TurboQuant format unchanged, recall@10=1.0 preserved).
+    # Pinned to v1.19.2 (2026-10-05; was v1.18.2 since 2026-06-26): minor upgrade — TurboQuant
+    # Hadamard rotation ~3x faster (1.19.0) + batched 4-bit SIMD rework (1.19.1) directly benefit
+    # the turbo-quantized roo_tasks collection; security fix (reject '.'/'..' collection names);
+    # data-consistency fixes (Gridstore write-tear prevention, CoW flush before payload index build).
+    # No migration: quantization on-disk format unchanged, `always_ram` deprecated but still parsed
+    # (verified in upstream source lib/segment/src/types.rs). Pre-upgrade snapshot:
+    # D:\qdrant-backups\pre-upgrade-v1192. Recall bench: myia_qdrant/reports/tq_recall_bench.py.
     # TurboQuant quantization (milestone 48) requires >= 1.18.0. Bump deliberately, not via a mutable tag.
-    image: qdrant/qdrant:v1.18.2
+    image: qdrant/qdrant:v1.19.2
     container_name: qdrant_production
     restart: always
     

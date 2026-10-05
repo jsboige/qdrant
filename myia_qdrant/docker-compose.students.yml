@@ -1,9 +1,9 @@
 services:
   qdrant_students:
-    # Pinned to v1.18.2 (2026-06-26): was the mutable `:latest` tag, frozen on the locally-cached
-    # 1.17.1 image (never re-pulled). Pinning removes the risk of a surprise jump on any recreate.
-    # Aligned with production. Students data = regenerable per-workspace `ws-*` code indexes.
-    image: qdrant/qdrant:v1.18.2
+    # Pinned to v1.19.2 (2026-10-05, aligned with production; was v1.18.2 since 2026-06-26,
+    # itself a pin replacing the mutable `:latest` tag). Students data = regenerable
+    # per-workspace `ws-*` code indexes. Bump deliberate, never a mutable tag.
+    image: qdrant/qdrant:v1.19.2
     container_name: qdrant_students
     restart: always
     
