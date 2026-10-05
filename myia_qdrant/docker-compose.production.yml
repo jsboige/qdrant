@@ -4,12 +4,13 @@
 
 services:
   qdrant:
-    # Pinned to v1.18.2 (2026-06-26): patch over v1.18.1 — security fixes (REST auth whitelist bypass
-    # on crafted paths, OOB heap read via malicious snapshot) + optimizer infinite-loop fix (multi-vectors
-    # + prevent_unoptimized) + cleanup of unfinished segment optimizations on cancel/restart.
-    # No breaking change, no migration (same 1.18 minor; TurboQuant format unchanged, recall@10=1.0 preserved).
-    # TurboQuant quantization (milestone 48) requires >= 1.18.0. Bump deliberately, not via a mutable tag.
-    image: qdrant/qdrant:v1.18.2
+    # Pinned to v1.19.2 (2026-10-06, final deploy after same-night deploy/rollback/forensics).
+    # TurboQuant perf (Hadamard ~3x, batched SIMD 4-bit), security (collection-name path fix),
+    # data-consistency fixes. NO recall regression vs v1.18.2: the apparent 1.0 -> 0.96 drop was a
+    # stale baseline — pristine pre-upgrade data benched 0.916 on 1.18.2 too. Current true baseline
+    # is ~0.95 +/- 0.03 at 2.48M pts (last archived 1.0 was 461K pts, May 2026) — engine-independent,
+    # tracked as registry question. Full forensics: CLAUDE.md engine note (2026-10-06).
+    image: qdrant/qdrant:v1.19.2
     container_name: qdrant_production
     restart: always
     
