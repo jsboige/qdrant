@@ -8,7 +8,9 @@ use collection::operations::snapshot_ops::{
 };
 use collection::operations::verification::VerificationPass;
 use collection::shards::replica_set::replica_set_state::ReplicaState;
-use collection::shards::shard::ShardId;
+use collection::shards::shard::{PeerId, ShardId};
+use collection::shards::shard_holder::recovery_guard::RecoveryProgressHandle;
+use collection::shards::shard_holder::shard_not_found_error;
 use collection::shards::transfer::RecoveryStage;
 use shard::snapshots::snapshot_data::SnapshotData;
 use shard::snapshots::snapshot_manifest::{RecoveryType, SnapshotManifest};
@@ -165,6 +167,7 @@ pub async fn recover_shard_snapshot(
     checksum: Option<String>,
     client: HttpClient,
     api_key: Option<String>,
+    from_peer_id: Option<PeerId>,
 ) -> Result<(), StorageError> {
     let collection_pass = auth
         .check_global_access(AccessRequirements::new().manage(), "recover_shard_snapshot")?
@@ -187,12 +190,27 @@ pub async fn recover_shard_snapshot(
         let (collection, download_dir) =
             cancel::future::cancel_on_token(cancel.clone(), pre_recovery_task).await??;
 
-        // Once recovery tracking starts, `finish_shard_recovery` must run on all paths
-        let recovery_progress = collection
-            .shards_holder()
-            .read()
-            .await
-            .start_shard_recovery(shard_id);
+        // Waits for a recovery of this shard already in progress, then holds it excluded
+        // for the whole recovery below and reports progress meanwhile. An abandoned
+        // recovery keeps running - `recover_shard_snapshot_impl` is not cancel safe - and
+        // would otherwise restore on top of the recovery that replaced it, discarding
+        // writes the caller made after being told it had succeeded.
+        let recovery_guard = cancel::future::cancel_on_token(
+            cancel.clone(),
+            collection.start_shard_recovery(shard_id),
+        )
+        .await??;
+
+        // For shard transfers, drop the existing shard and clear its on-disk data
+        // before downloading the new snapshot so we don't need space for both copies.
+        // Safe because the shard is in `PartialSnapshot` state for the duration of
+        // the transfer and will not serve user requests. Not done for user-triggered
+        // URL recovery, where the shard may still be active.
+        if matches!(snapshot_priority, SnapshotPriority::ShardTransfer) {
+            collection
+                .clear_local_shard_for_snapshot_recovery(shard_id, from_peer_id)
+                .await?;
+        }
 
         let download_task = async {
             let DownloadResult {
@@ -209,9 +227,7 @@ pub async fn recover_shard_snapshot(
                         return Err(StorageError::bad_input(description));
                     }
 
-                    recovery_progress
-                        .lock()
-                        .set_stage(RecoveryStage::Downloading);
+                    recovery_guard.set_stage(RecoveryStage::Downloading);
 
                     let client = client.client(api_key.as_deref())?;
                     snapshots::download::download_snapshot(
@@ -220,6 +236,7 @@ pub async fn recover_shard_snapshot(
                         &download_dir,
                         collection.snapshots_path(),
                         checksum.is_some(),
+                        Some(recovery_guard.progress_handle()),
                     )
                     .await?
                 }
@@ -282,16 +299,14 @@ pub async fn recover_shard_snapshot(
             snapshot_data,
             snapshot_priority,
             RecoveryType::Full,
+            Some(recovery_guard.progress_handle()),
             cancel,
         )
         .await;
 
-        // Finish tracking recovery progress
-        collection
-            .shards_holder()
-            .read()
-            .await
-            .finish_shard_recovery(shard_id);
+        // `recovery_guard` is dropped here (and on every early return above), releasing
+        // the shard for the next queued recovery and stopping progress tracking.
+        drop(recovery_guard);
 
         result
     })
@@ -303,6 +318,7 @@ pub async fn recover_shard_snapshot(
 /// # Cancel safety
 ///
 /// This function is *not* cancel safe.
+#[allow(clippy::too_many_arguments)]
 pub async fn recover_shard_snapshot_impl(
     toc: &TableOfContent,
     collection: &Collection,
@@ -310,6 +326,7 @@ pub async fn recover_shard_snapshot_impl(
     snapshot_data: SnapshotData,
     priority: SnapshotPriority,
     recovery_type: RecoveryType,
+    recovery_progress: Option<RecoveryProgressHandle>,
     cancel: cancel::CancellationToken,
 ) -> Result<(), StorageError> {
     let _recover_tracker_guard = toc
@@ -332,18 +349,28 @@ pub async fn recover_shard_snapshot_impl(
             toc.is_distributed(),
             // Default temporary path to storage dir, to allow faster recovery within the same volume
             &toc.optional_temp_or_storage_temp_path()?,
+            recovery_progress,
             cancel,
         )
         .await?
         .await?;
 
-    let state = collection.state().await;
-    let shard_info = state.shards.get(&shard).unwrap(); // TODO: Handle `unwrap`?..
+    // Partial snapshot recovery changes payload schema without a consensus operation
+    if recovery_type.is_partial() {
+        toc.mark_collection_dirty(collection.name());
+    }
+
+    let shard_holder = collection.shards_holder();
+    let replicas = shard_holder
+        .read()
+        .await
+        .get_shard(shard)
+        .ok_or_else(|| shard_not_found_error(shard))?
+        .peers();
 
     // TODO: Unify (and de-duplicate) "recovered shard state notification" logic in `_do_recover_from_snapshot` with this one!
 
-    let other_active_replicas: Vec<_> = shard_info
-        .replicas
+    let other_active_replicas: Vec<_> = replicas
         .iter()
         .map(|(&peer, &state)| (peer, state))
         .filter(|&(peer, state)| {

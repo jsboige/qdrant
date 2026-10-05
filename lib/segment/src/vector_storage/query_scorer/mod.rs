@@ -7,7 +7,6 @@ use crate::data_types::vectors::TypedMultiDenseVectorRef;
 use crate::spaces::metric::Metric;
 use crate::types::{MultiVectorComparator, MultiVectorConfig};
 use crate::vector_storage::VectorOffset;
-use crate::vector_storage::common::VECTOR_READ_BATCH_SIZE;
 
 pub mod custom_query_scorer;
 pub mod metric_query_scorer;
@@ -15,31 +14,39 @@ pub mod multi_custom_query_scorer;
 pub mod multi_metric_query_scorer;
 pub mod sparse_custom_query_scorer;
 pub mod sparse_metric_query_scorer;
+pub mod turbo_custom_query_scorer;
+pub mod turbo_multi_custom_query_scorer;
+pub mod turbo_multi_query_scorer;
+pub mod turbo_query_scorer;
 
 pub trait QueryScorer {
-    type TVector: ?Sized;
-
     fn score_stored(&self, idx: PointOffsetType) -> ScoreType;
 
     /// Score a batch of points
     ///
-    /// Enable underlying storage to optimize pre-fetching of data
-    fn score_stored_batch(&self, ids: &[PointOffsetType], scores: &mut [ScoreType]) {
-        debug_assert!(ids.len() <= VECTOR_READ_BATCH_SIZE);
-        debug_assert_eq!(ids.len(), scores.len());
-
-        // no specific implementation for batch scoring
-        for (idx, id) in ids.iter().enumerate() {
-            scores[idx] = self.score_stored(*id);
-        }
-    }
-
-    fn score(&self, v2: &Self::TVector) -> ScoreType;
+    /// Enables underlying storage to optimize pre-fetching of data
+    fn score_stored_batch(&self, ids: &[PointOffsetType], scores: &mut [ScoreType]);
 
     fn score_internal(&self, point_a: PointOffsetType, point_b: PointOffsetType) -> ScoreType;
 
     type SupportsBytes: TBool;
     fn score_bytes(&self, _: Self::SupportsBytes, bytes: &[u8]) -> ScoreType;
+}
+
+/// Reference implementation of [`QueryScorer::score_stored_batch`].
+///
+/// Kept as a free function instead of a default trait method so every scorer has to opt in
+/// explicitly. Currently unused, as all scorers provide their own batch implementation.
+pub fn default_score_stored_batch<Q: QueryScorer + ?Sized>(
+    this: &Q,
+    ids: &[u32],
+    scores: &mut [f32],
+) {
+    debug_assert_eq!(ids.len(), scores.len());
+
+    for (idx, id) in ids.iter().enumerate() {
+        scores[idx] = this.score_stored(*id);
+    }
 }
 
 pub trait QueryScorerBytes {
@@ -110,7 +117,7 @@ fn score_multi<T: PrimitiveVectorElement, TMetric: Metric<T>>(
 /// TODO: For example
 ///
 /// - If the whole batch is less than one page - don't use prefetch
-/// - If one vector is bigger then the prefetch size - don't use prefetch
+/// - If one vector is bigger than the prefetch size - don't use prefetch
 /// - ???
 pub fn is_read_with_prefetch_efficient<O: VectorOffset>(ids: &[O]) -> bool {
     let mut min = usize::MAX;

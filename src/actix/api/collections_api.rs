@@ -144,12 +144,15 @@ async fn update_collection(
 ) -> impl Responder {
     let timing = Instant::now();
     let name = collection.collection_name.clone();
+    let update_collection_op = UpdateCollectionOperation::new(name, operation.into_inner());
+
+    let Ok(update_collection_op) = update_collection_op else {
+        return process_response(update_collection_op, timing, None);
+    };
+
     let response = dispatcher
         .submit_collection_meta_op(
-            CollectionMetaOperations::UpdateCollection(UpdateCollectionOperation::new(
-                name,
-                operation.into_inner(),
-            )),
+            CollectionMetaOperations::UpdateCollection(update_collection_op),
             auth,
             query.timeout(),
         )
@@ -297,6 +300,28 @@ fn get_optimizations(
     })
 }
 
+#[get("/collections/{collection_name}/memory")]
+fn get_collection_memory(
+    dispatcher: web::Data<Dispatcher>,
+    collection: Path<CollectionPath>,
+    ActixAuth(auth): ActixAuth,
+) -> impl Future<Output = HttpResponse> {
+    helpers::time(async move {
+        let pass = new_unchecked_verification_pass();
+        let collection_pass = auth.check_collection_access(
+            &collection.collection_name,
+            AccessRequirements::new(),
+            "get_collection_memory",
+        )?;
+        Ok(dispatcher
+            .toc(&auth, &pass)
+            .get_collection(&collection_pass)
+            .await?
+            .memory_report()
+            .await?)
+    })
+}
+
 // Configure services
 pub fn config_collections_api(cfg: &mut web::ServiceConfig) {
     // Ordering of services is important for correct path pattern matching
@@ -312,6 +337,7 @@ pub fn config_collections_api(cfg: &mut web::ServiceConfig) {
         .service(get_collection_aliases)
         .service(get_cluster_info)
         .service(get_optimizations)
+        .service(get_collection_memory)
         .service(update_collection_cluster);
 }
 

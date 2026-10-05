@@ -259,6 +259,7 @@ fn aggregate_shard_transfers(
             sync: _,
             method: _,
             comment: _,
+            failed: _,
         } = base_transfer;
 
         get_transfers(peer_id)?.iter().find(|t| {
@@ -433,7 +434,8 @@ fn get_collection_telemetry<'a>(
             CollectionTelemetryEnum::Full(coll) if coll.id == collection_id => {
                 Some(Box::as_ref(coll))
             }
-            _ => None,
+            CollectionTelemetryEnum::Full(_) => None,
+            CollectionTelemetryEnum::Aggregated(_) => None,
         })
 }
 

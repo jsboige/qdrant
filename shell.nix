@@ -44,7 +44,7 @@ mkShell {
     pkgs.jq # used in ./tests and ./tools
     pkgs.just # for lib/edge/Justfile
     pkgs.maturin # mentioned in lib/edge/python/README.md
-    pkgs.nixfmt-rfc-style # to format this file
+    pkgs.nixfmt # to format this file
     pkgs.npins # used in tools/nix/update.py
     pkgs.python3 # used in ./tests, ./tools, lib/edge
     pkgs.sccache # mentioned in shellHook
@@ -61,7 +61,7 @@ mkShell {
   hardeningDisable = [ "fortify" ];
 
   shellHook = ''
-    # Caching for C/C++ deps, particularly for librocksdb-sys
+    # Caching for C/C++ deps
     export CC="ccache $CC"
     export CXX="ccache $CXX"
 
@@ -72,14 +72,6 @@ mkShell {
     # Caching for lindera-unidic
     [ "''${LINDERA_CACHE+x}" ] ||
       export LINDERA_CACHE="''${XDG_CACHE_HOME:-$HOME/.cache}/lindera"
-
-    # Fix for older macOS
-    # https://github.com/rust-rocksdb/rust-rocksdb/issues/776
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-      export CFLAGS="$CFLAGS -mmacosx-version-min=10.13"
-      export CXXFLAGS="-mmacosx-version-min=10.13"
-      export MACOSX_DEPLOYMENT_TARGET="10.13"
-    fi
 
     export LD_LIBRARY_PATH=${
       pkgs.lib.makeLibraryPath [

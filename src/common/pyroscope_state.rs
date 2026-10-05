@@ -36,7 +36,7 @@ pub mod pyro {
 
             log::info!(
                 "Starting pyroscope CPU agent with identifier {}",
-                &config.identifier
+                config.identifier
             );
             // TODO: Add more tags like peerId and peerUrl
             let agent = PyroscopeAgentBuilder::new(
@@ -61,7 +61,7 @@ pub mod pyro {
 
             log::info!(
                 "Starting pyroscope heap agent with identifier {}",
-                &config.identifier
+                config.identifier
             );
             let agent = PyroscopeAgentBuilder::new(
                 config.url.clone(),
@@ -80,8 +80,7 @@ pub mod pyro {
 
         fn is_jemalloc_profiling_enabled() -> bool {
             std::env::var("MALLOC_CONF")
-                .map(|conf| conf.split(',').any(|opt| opt.trim() == "prof:true"))
-                .unwrap_or(false)
+                .is_ok_and(|conf| conf.split(',').any(|opt| opt.trim() == "prof:true"))
         }
 
         pub fn from_config(config: Option<PyroscopeConfig>) -> Option<Self> {

@@ -96,7 +96,6 @@ impl ShaderBuilderParameters for GpuInsertResources {
 }
 
 impl GpuInsertResources {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         gpu_vector_storage: &GpuVectorStorage,
         groups_count: usize,
@@ -180,7 +179,6 @@ impl GpuInsertResources {
 }
 
 impl<'a> GpuInsertContext<'a> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         gpu_vector_storage: &'a GpuVectorStorage,
         // Parallel inserts count.
@@ -458,7 +456,7 @@ impl<'a> GpuInsertContext<'a> {
     pub fn log_measurements(&self) {
         log::debug!(
             "Gpu graph patches time: {:?}, count {:?}, avg {:?}",
-            &self.patches_timer,
+            self.patches_timer,
             self.patches_count,
             self.patches_timer
                 .checked_div(self.patches_count as u32)
@@ -466,7 +464,7 @@ impl<'a> GpuInsertContext<'a> {
         );
         log::debug!(
             "Gpu graph update entries time: {:?}, count {:?}, avg {:?}",
-            &self.updates_timer,
+            self.updates_timer,
             self.updates_count,
             self.updates_timer
                 .checked_div(self.updates_count as u32)
@@ -492,7 +490,7 @@ mod tests {
     use crate::index::hnsw_index::links_container::LinksContainer;
     use crate::types::Distance;
     use crate::vector_storage::dense::volatile_dense_vector_storage::new_volatile_dense_vector_storage;
-    use crate::vector_storage::{DEFAULT_STOPPED, VectorStorage};
+    use crate::vector_storage::{DEFAULT_STOPPED, VectorStorage, VectorStorageRead};
 
     #[derive(Copy, Clone, FromBytes, Immutable, IntoBytes, KnownLayout)]
     #[repr(C)]
@@ -757,7 +755,7 @@ mod tests {
             };
             let search_result = test
                 .graph_layers_builder
-                .search_on_level(entry, 0, ef, &mut scorer, &DEFAULT_STOPPED)
+                .search_on_level(&[entry], 0, ef, &mut scorer, &DEFAULT_STOPPED)
                 .unwrap()
                 .into_sorted_vec();
             for (cpu, (gpu_1, gpu_2)) in search_result
@@ -977,7 +975,7 @@ mod tests {
             };
             let search_result = test
                 .graph_layers_builder
-                .search_on_level(entry, 0, ef, &mut scorer, &DEFAULT_STOPPED)
+                .search_on_level(&[entry], 0, ef, &mut scorer, &DEFAULT_STOPPED)
                 .unwrap();
 
             let scorer_fn = |a, b| scorer.score_internal(a, b);

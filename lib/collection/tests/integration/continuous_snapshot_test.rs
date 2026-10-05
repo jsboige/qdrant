@@ -113,7 +113,7 @@ async fn test_continuous_snapshot() {
                 // Delete all points
                 let delete_points =
                     CollectionUpdateOperations::PointOperation(PointOperations::DeletePoints {
-                        ids: (0..points_count).map(|i| i.into()).collect(),
+                        ids: (0..points_count).map(u64::into).collect(),
                     });
                 let hw_counter = HwMeasurementAcc::new();
                 collection
@@ -162,6 +162,7 @@ async fn test_continuous_snapshot() {
                         .retrieve(
                             retrieve_point,
                             None,
+                            None,
                             &ShardSelectorInternal::All,
                             None,
                             hw_counter,
@@ -207,6 +208,7 @@ async fn test_continuous_snapshot() {
                     let retrieve_result = collection
                         .retrieve(
                             retrieve_point,
+                            None,
                             None,
                             &ShardSelectorInternal::All,
                             None,

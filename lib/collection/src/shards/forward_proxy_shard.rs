@@ -5,29 +5,32 @@ use std::time::{Duration, Instant};
 use ahash::HashSet;
 use async_trait::async_trait;
 use common::counter::hardware_accumulator::HwMeasurementAcc;
+use common::flags::feature_flags;
 use common::tar_ext;
 use common::types::{DeferredBehavior, TelemetryDetail};
 use parking_lot::Mutex as ParkingMutex;
 use segment::data_types::facets::{FacetParams, FacetResponse};
 use segment::index::field_index::CardinalityEstimation;
 use segment::types::{
-    ExtendedPointId, Filter, PointIdType, ScoredPoint, SizeStats, SnapshotFormat, WithPayload,
-    WithPayloadInterface, WithVector,
+    ExtendedPointId, Filter, PointIdType, ScoredPoint, SizeStats, SnapshotFormat, StrictModeConfig,
+    WithPayload, WithPayloadInterface, WithVector,
 };
 use shard::count::CountRequestInternal;
 use shard::retrieve::record_internal::RecordInternal;
 use shard::scroll::ScrollRequestInternal;
 use shard::search::CoreSearchRequestBatch;
 use shard::snapshots::snapshot_manifest::SnapshotManifest;
-use tokio::runtime::Handle;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use super::shard::ShardId;
 use super::update_tracker::UpdateTracker;
 use crate::collection_manager::optimizers::TrackerLog;
+use crate::common::adaptive_handle::AdaptiveSearchHandle;
+use crate::common::memory_reporter::CollectionMemoryReport;
 use crate::hash_ring::HashRingRouter;
 use crate::operations::point_ops::{
-    PointInsertOperationsInternal, PointOperations, PointStructPersisted, PointSyncOperation,
+    PointInsertOperationsInternal, PointOperations, PointStructPersisted, PointStructRawPersisted,
+    PointSyncOperation, PointSyncRawOperation,
 };
 use crate::operations::types::{
     CollectionError, CollectionInfo, CollectionResult, CountResult, OptimizersStatus,
@@ -201,37 +204,95 @@ impl ForwardProxyShard {
         batch_size: usize,
         hashring_filter: Option<&HashRingRouter>,
         merge_points: bool,
-        runtime_handle: &Handle,
+        runtime_handle: &AdaptiveSearchHandle,
     ) -> CollectionResult<PreparedTransferBatch> {
         debug_assert!(batch_size > 0);
         let update_lock = self.update_lock.clone().lock_owned().await;
 
+        // When any named vector uses a TurboQuant (`Turbo4`) storage datatype,
+        // ship storage-native (raw) vector bytes instead of decoded floats.
+        // This avoids a lossy TQ decode -> encode round-trip on the receiving
+        // node, which would drift the encoding and degrade recall. The feature flag
+        // extends that to every collection, where it is a plain saving.
+        let transfer_raw = feature_flags().transfer_raw_points
+            || self
+                .wrapped_shard
+                .collection_config
+                .read()
+                .await
+                .has_turbo_vector_storage();
+
         let read_start = Instant::now();
-        let (points, next_page_offset) = match hashring_filter {
-            Some(hashring_filter) => {
-                self.read_batch_with_hashring(offset, batch_size, hashring_filter, runtime_handle)
+        let (point_operation, next_page_offset, count) = if transfer_raw {
+            let (mut points, next_page_offset) = match hashring_filter {
+                Some(hashring_filter) => {
+                    self.read_batch_with_hashring_raw(
+                        offset,
+                        batch_size,
+                        hashring_filter,
+                        runtime_handle,
+                    )
                     .await?
+                }
+                None => {
+                    self.read_batch_raw(offset, batch_size, self.filter.as_deref(), runtime_handle)
+                        .await?
+                }
+            };
+
+            // A raw read hands out the payload as its stored blob. Shipping it is
+            // feature-flagged for the same reason as raw points: the receiving node has
+            // to understand it first.
+            if !feature_flags().transfer_raw_payloads {
+                for point in &mut points {
+                    point.decode_payload_raw()?;
+                }
             }
-            None => {
-                self.read_batch(offset, batch_size, self.filter.as_deref(), runtime_handle)
+
+            let count = points.len();
+            let point_operation = if !merge_points {
+                PointOperations::SyncPointsRaw(PointSyncRawOperation {
+                    from_id: offset,
+                    to_id: next_page_offset,
+                    points,
+                })
+            } else {
+                PointOperations::UpsertPointsRaw(points)
+            };
+            (point_operation, next_page_offset, count)
+        } else {
+            let (points, next_page_offset) = match hashring_filter {
+                Some(hashring_filter) => {
+                    self.read_batch_with_hashring(
+                        offset,
+                        batch_size,
+                        hashring_filter,
+                        runtime_handle,
+                    )
                     .await?
-            }
+                }
+                None => {
+                    self.read_batch(offset, batch_size, self.filter.as_deref(), runtime_handle)
+                        .await?
+                }
+            };
+            let count = points.len();
+            let point_operation = if !merge_points {
+                PointOperations::SyncPoints(PointSyncOperation {
+                    from_id: offset,
+                    to_id: next_page_offset,
+                    points,
+                })
+            } else {
+                PointOperations::UpsertPoints(PointInsertOperationsInternal::PointsList(points))
+            };
+            (point_operation, next_page_offset, count)
         };
         let read_duration = read_start.elapsed();
 
         // Only wait on last batch
         let wait = next_page_offset.is_none();
-        let count = points.len();
 
-        let point_operation = if !merge_points {
-            PointOperations::SyncPoints(PointSyncOperation {
-                from_id: offset,
-                to_id: next_page_offset,
-                points,
-            })
-        } else {
-            PointOperations::UpsertPoints(PointInsertOperationsInternal::PointsList(points))
-        };
         let operation = CollectionUpdateOperations::PointOperation(point_operation);
 
         Ok(PreparedTransferBatch {
@@ -261,7 +322,7 @@ impl ForwardProxyShard {
         offset: Option<PointIdType>,
         batch_size: usize,
         filter: Option<&Filter>,
-        runtime_handle: &Handle,
+        runtime_handle: &AdaptiveSearchHandle,
     ) -> CollectionResult<(Vec<PointStructPersisted>, Option<PointIdType>)> {
         let limit = batch_size + 1;
 
@@ -276,7 +337,7 @@ impl ForwardProxyShard {
                 runtime_handle,
                 None,                           // No timeout
                 HwMeasurementAcc::disposable(), // Internal operation, no need to measure hardware here.
-                DeferredBehavior::IncludeAll, // We must transfer deferred points too so we include them in this scroll operation.
+                DeferredBehavior::WithDeferred, // We must transfer deferred points too so we include them in this scroll operation.
             )
             .await?;
 
@@ -313,7 +374,7 @@ impl ForwardProxyShard {
         offset: Option<PointIdType>,
         batch_size: usize,
         hashring_filter: &HashRingRouter,
-        runtime_handle: &Handle,
+        runtime_handle: &AdaptiveSearchHandle,
     ) -> CollectionResult<(Vec<PointStructPersisted>, Option<PointIdType>)> {
         // Oversample batch size to account for points that will be filtered out by the hash ring
         let oversample_factor = match &hashring_filter {
@@ -345,7 +406,7 @@ impl ForwardProxyShard {
                 runtime_handle,
                 None,                           // No timeout
                 HwMeasurementAcc::disposable(), // Internal operation, no need to measure hardware here.
-                DeferredBehavior::IncludeAll, // We must transfer deferred points too so we include them in this scroll op.
+                DeferredBehavior::WithDeferred, // We must transfer deferred points too so we include them in this scroll op.
             )
             .await?;
 
@@ -373,7 +434,7 @@ impl ForwardProxyShard {
                 runtime_handle,
                 None,                           // No timeout
                 HwMeasurementAcc::disposable(), // Internal operation, no need to measure hardware here.
-                DeferredBehavior::IncludeAll,
+                DeferredBehavior::WithDeferred,
             )
             .await?;
 
@@ -381,6 +442,103 @@ impl ForwardProxyShard {
             .into_iter()
             .map(PointStructPersisted::try_from)
             .collect::<Result<Vec<PointStructPersisted>, String>>()?;
+
+        Ok((points, next_page_offset))
+    }
+
+    /// Byte-blob analogue of [`Self::read_batch`]: reads a transfer batch as
+    /// storage-native raw vector bytes. Used when the collection has a
+    /// TurboQuant storage, to avoid a lossy quantization round-trip.
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is cancel safe.
+    async fn read_batch_raw(
+        &self,
+        offset: Option<PointIdType>,
+        batch_size: usize,
+        filter: Option<&Filter>,
+        runtime_handle: &AdaptiveSearchHandle,
+    ) -> CollectionResult<(Vec<PointStructRawPersisted>, Option<PointIdType>)> {
+        let limit = batch_size + 1;
+
+        let mut batch = self
+            .wrapped_shard
+            .local_scroll_by_id_raw(
+                offset,
+                limit,
+                &WithVector::Bool(true),
+                filter,
+                runtime_handle,
+                None,                           // No timeout
+                HwMeasurementAcc::disposable(), // Internal operation, no need to measure hardware here.
+                DeferredBehavior::WithDeferred, // We must transfer deferred points too so we include them in this scroll operation.
+            )
+            .await?;
+
+        let next_page_offset = (batch.len() >= limit).then(|| batch.pop().unwrap().id);
+
+        Ok((batch, next_page_offset))
+    }
+
+    /// Byte-blob analogue of [`Self::read_batch_with_hashring`]. See
+    /// [`Self::read_batch_raw`].
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is cancel safe.
+    async fn read_batch_with_hashring_raw(
+        &self,
+        offset: Option<PointIdType>,
+        batch_size: usize,
+        hashring_filter: &HashRingRouter,
+        runtime_handle: &AdaptiveSearchHandle,
+    ) -> CollectionResult<(Vec<PointStructRawPersisted>, Option<PointIdType>)> {
+        // Oversample batch size to account for points that will be filtered out by the hash ring
+        let oversample_factor = match &hashring_filter {
+            HashRingRouter::Single(_) => 1,
+            HashRingRouter::Resharding { old: _, new } => new.len().max(1),
+        };
+        let limit = (batch_size * oversample_factor) + 1;
+
+        // Read only point IDs without point data, then apply the hash ring filter, then read the
+        // actual (raw) point data for the preselection only. See `read_batch_with_hashring`.
+        let mut batch = self
+            .wrapped_shard
+            .local_scroll_by_id(
+                offset,
+                limit,
+                &WithPayloadInterface::Bool(false),
+                &WithVector::Bool(false),
+                None,
+                runtime_handle,
+                None,                           // No timeout
+                HwMeasurementAcc::disposable(), // Internal operation, no need to measure hardware here.
+                DeferredBehavior::WithDeferred, // We must transfer deferred points too so we include them in this scroll op.
+            )
+            .await?;
+
+        let next_page_offset = (batch.len() >= limit).then(|| batch.pop().unwrap().id);
+
+        // Make preselection of point IDs by hash ring
+        let ids: Vec<PointIdType> = batch
+            .into_iter()
+            .map(|point| point.id)
+            .filter(|point_id| hashring_filter.is_in_shard(point_id, self.remote_shard.id))
+            .collect();
+
+        // Read actual raw vectors and payloads for preselection of points
+        let points = self
+            .wrapped_shard
+            .retrieve_raw(
+                &ids,
+                &WithVector::Bool(true),
+                runtime_handle,
+                None,                           // No timeout
+                HwMeasurementAcc::disposable(), // Internal operation, no need to measure hardware here.
+                DeferredBehavior::WithDeferred,
+            )
+            .await?;
 
         Ok((points, next_page_offset))
     }
@@ -411,8 +569,9 @@ impl ForwardProxyShard {
         self.wrapped_shard.on_optimizer_config_update().await
     }
 
-    pub async fn on_strict_mode_config_update(&mut self) {
-        self.wrapped_shard.on_strict_mode_config_update().await
+    pub fn on_strict_mode_config_update(&mut self, new_strict_mode: &StrictModeConfig) {
+        self.wrapped_shard
+            .on_strict_mode_config_update(new_strict_mode)
     }
 
     pub fn trigger_optimizers(&self) {
@@ -462,6 +621,10 @@ impl ForwardProxyShard {
 
     pub async fn set_normal_wal_retention(&self) {
         self.wrapped_shard.set_normal_wal_retention().await;
+    }
+
+    pub async fn memory_report(&self) -> CollectionResult<CollectionMemoryReport> {
+        self.wrapped_shard.memory_report().await
     }
 }
 
@@ -516,10 +679,10 @@ impl ShardOperation for ForwardProxyShard {
                         &WithPayloadInterface::Bool(false),
                         &WithVector::Bool(false),
                         Some(&filter.with_point_ids(point_ids)),
-                        &Handle::current(),
+                        &self.wrapped_shard.search_runtime,
                         None,                           // No timeout
                         HwMeasurementAcc::disposable(), // Internal operation, no need to measure hardware here?
-                        DeferredBehavior::IncludeAll,
+                        DeferredBehavior::WithDeferred,
                     )
                     .await?
                     .into_iter()
@@ -553,7 +716,7 @@ impl ShardOperation for ForwardProxyShard {
 
             op.map(|op| OperationWithClockTag::new(op, operation.clock_tag))
         } else if let Some(point_ids) = points_matching_filter_before {
-            let mut modified_operation = operation.clone();
+            let mut modified_operation = operation;
             modified_operation
                 .operation
                 .retain_point_ids(|point_id| point_ids.contains(point_id));
@@ -608,7 +771,7 @@ impl ShardOperation for ForwardProxyShard {
     async fn scroll_by(
         &self,
         request: Arc<ScrollRequestInternal>,
-        search_runtime_handle: &Handle,
+        search_runtime_handle: &AdaptiveSearchHandle,
         timeout: Option<Duration>,
         hw_measurement_acc: HwMeasurementAcc,
     ) -> CollectionResult<Vec<RecordInternal>> {
@@ -625,7 +788,7 @@ impl ShardOperation for ForwardProxyShard {
         with_payload_interface: &WithPayloadInterface,
         with_vector: &WithVector,
         filter: Option<&Filter>,
-        search_runtime_handle: &Handle,
+        search_runtime_handle: &AdaptiveSearchHandle,
         timeout: Option<Duration>,
         hw_measurement_acc: HwMeasurementAcc,
         deferred_behavior: DeferredBehavior,
@@ -653,7 +816,7 @@ impl ShardOperation for ForwardProxyShard {
     async fn core_search(
         &self,
         request: Arc<CoreSearchRequestBatch>,
-        search_runtime_handle: &Handle,
+        search_runtime_handle: &AdaptiveSearchHandle,
         timeout: Option<Duration>,
         hw_measurement_acc: HwMeasurementAcc,
     ) -> CollectionResult<Vec<Vec<ScoredPoint>>> {
@@ -666,7 +829,7 @@ impl ShardOperation for ForwardProxyShard {
     async fn count(
         &self,
         request: Arc<CountRequestInternal>,
-        search_runtime_handle: &Handle,
+        search_runtime_handle: &AdaptiveSearchHandle,
         timeout: Option<Duration>,
         hw_measurement_acc: HwMeasurementAcc,
         deferred_behavior: DeferredBehavior,
@@ -688,7 +851,7 @@ impl ShardOperation for ForwardProxyShard {
         request: Arc<PointRequestInternal>,
         with_payload: &WithPayload,
         with_vector: &WithVector,
-        search_runtime_handle: &Handle,
+        search_runtime_handle: &AdaptiveSearchHandle,
         timeout: Option<Duration>,
         hw_measurement_acc: HwMeasurementAcc,
         deferred_behavior: DeferredBehavior,
@@ -710,7 +873,7 @@ impl ShardOperation for ForwardProxyShard {
     async fn query_batch(
         &self,
         requests: Arc<Vec<ShardQueryRequest>>,
-        search_runtime_handle: &Handle,
+        search_runtime_handle: &AdaptiveSearchHandle,
         timeout: Option<Duration>,
         hw_measurement_acc: HwMeasurementAcc,
     ) -> CollectionResult<Vec<ShardQueryResponse>> {
@@ -723,7 +886,7 @@ impl ShardOperation for ForwardProxyShard {
     async fn facet(
         &self,
         request: Arc<FacetParams>,
-        search_runtime_handle: &Handle,
+        search_runtime_handle: &AdaptiveSearchHandle,
         timeout: Option<Duration>,
         hw_measurement_acc: HwMeasurementAcc,
     ) -> CollectionResult<FacetResponse> {

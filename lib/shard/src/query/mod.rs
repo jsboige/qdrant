@@ -137,31 +137,56 @@ pub enum ScoringQuery {
 }
 
 impl ScoringQuery {
-    /// Whether the query needs the prefetches results from all shards to compute the final score
-    ///
-    /// If false, there is a single list of scored points which contain the final score.
-    pub fn needs_intermediate_results(&self) -> bool {
-        match self {
-            Self::Fusion(fusion) => match fusion {
-                // We need the ranking information of each prefetch
-                FusionInternal::Rrf { k: _, weights: _ } => true,
-                // We need the score distribution information of each prefetch
-                FusionInternal::Dbsf => true,
-            },
-            // MMR is a nearest neighbors search before computing diversity at collection level
-            Self::Mmr(_) => false,
-            Self::Vector(_) | Self::OrderBy(_) | Self::Formula(_) | Self::Sample(_) => false,
-        }
-    }
-
     /// Get the vector name if it is scored against a vector
     pub fn get_vector_name(&self) -> Option<&VectorName> {
         match self {
-            Self::Vector(query) => Some(query.get_vector_name()),
-            Self::Mmr(mmr) => Some(&mmr.using),
-            _ => None,
+            ScoringQuery::Vector(query) => Some(query.get_vector_name()),
+            ScoringQuery::Mmr(mmr) => Some(&mmr.using),
+            ScoringQuery::Fusion(_)
+            | ScoringQuery::OrderBy(_)
+            | ScoringQuery::Formula(_)
+            | ScoringQuery::Sample(_) => None,
         }
     }
+}
+
+/// Returns the expected order of results, depending on the type of query.
+///
+/// `get_distance` resolves the distance of a named vector, for queries scored by raw vector
+/// distance.
+pub fn query_result_order<E>(
+    query: Option<&ScoringQuery>,
+    get_distance: impl FnOnce(&VectorName) -> Result<Distance, E>,
+) -> Result<Option<Order>, E> {
+    let order = match query {
+        Some(scoring_query) => match scoring_query {
+            ScoringQuery::Vector(query_enum) => {
+                if query_enum.is_distance_scored() {
+                    Some(get_distance(query_enum.get_vector_name())?.distance_order())
+                } else {
+                    Some(Order::LargeBetter)
+                }
+            }
+            ScoringQuery::Fusion(fusion) => match fusion {
+                FusionInternal::Rrf { k: _, weights: _ } | FusionInternal::Dbsf => {
+                    Some(Order::LargeBetter)
+                }
+            },
+            // Score boosting formulas are always have descending order,
+            // Euclidean scores can be negated within the formula
+            ScoringQuery::Formula(_formula) => Some(Order::LargeBetter),
+            ScoringQuery::OrderBy(order_by) => Some(Order::from(order_by.direction())),
+            // Random sample does not require ordering
+            ScoringQuery::Sample(SampleInternal::Random) => None,
+            // MMR candidates are ordered by vector distance at shard level
+            ScoringQuery::Mmr(mmr) => Some(get_distance(&mmr.using)?.distance_order()),
+        },
+        None => {
+            // Order by ID
+            Some(Order::SmallBetter)
+        }
+    };
+    Ok(order)
 }
 
 #[derive(Clone, Debug, PartialEq, Hash, Serialize)]

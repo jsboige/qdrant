@@ -6,6 +6,7 @@ use common::types::PointOffsetType;
 use crate::types::{Condition, FieldCondition, PointIdType, VectorNameBuf};
 
 pub mod bool_index;
+mod deleted_mask;
 pub(super) mod facet_index;
 mod field_index_base;
 pub mod full_text_index;
@@ -15,14 +16,18 @@ mod histogram;
 mod immutable_point_to_values;
 pub mod index_selector;
 pub mod map_index;
+mod memory_reporter;
 pub mod null_index;
 pub mod numeric_index;
+mod numeric_point;
+mod on_disk_point_to_values;
+pub mod schema_transition;
 mod stat_tools;
-mod stored_point_to_values;
 #[cfg(test)]
 mod tests;
 mod utils;
 
+pub use facet_index::FacetIndex;
 pub use field_index_base::*;
 
 use crate::utils::maybe_arc::MaybeArc;
@@ -87,6 +92,26 @@ impl CardinalityEstimation {
         }
     }
 
+    /// Bound `min`, `exp` and `max` by `population`: a filter selects no more
+    /// points than exist. A payload index can count points the id tracker has
+    /// already dropped: append-only deletion tombstones a point and leaves its
+    /// payload and field indexes in place. Scaled down unbounded, such an `exp`
+    /// would stay above a `max` capped at the population.
+    pub fn bounded_by(self, population: usize) -> Self {
+        let Self {
+            primary_clauses,
+            min,
+            exp,
+            max,
+        } = self;
+        Self {
+            primary_clauses,
+            min: min.min(population),
+            exp: exp.min(population),
+            max: max.min(population),
+        }
+    }
+
     /// Push a primary clause to the estimation
     pub fn with_primary_clause(mut self, clause: PrimaryCondition) -> Self {
         self.primary_clauses.push(clause);
@@ -107,19 +132,52 @@ impl CardinalityEstimation {
                     Condition::Field(field_condition) => {
                         primary_field_condition.as_ref() == field_condition
                     }
-                    _ => false,
+                    Condition::IsEmpty(_)
+                    | Condition::IsNull(_)
+                    | Condition::HasId(_)
+                    | Condition::HasVector(_)
+                    | Condition::Slice(_)
+                    | Condition::Nested(_)
+                    | Condition::Filter(_)
+                    | Condition::CustomIdChecker(_) => false,
                 },
                 PrimaryCondition::Ids(ids) => match condition {
                     Condition::HasId(has_id) => ids.point_ids.deref() == has_id.has_id.deref(),
-                    _ => false,
+                    Condition::Field(_)
+                    | Condition::IsEmpty(_)
+                    | Condition::IsNull(_)
+                    | Condition::HasVector(_)
+                    | Condition::Slice(_)
+                    | Condition::Nested(_)
+                    | Condition::Filter(_)
+                    | Condition::CustomIdChecker(_) => false,
                 },
                 PrimaryCondition::HasVector(has_vector) => match condition {
                     Condition::HasVector(vector_condition) => {
                         has_vector == &vector_condition.has_vector
                     }
-                    _ => false,
+                    Condition::Field(_)
+                    | Condition::IsEmpty(_)
+                    | Condition::IsNull(_)
+                    | Condition::HasId(_)
+                    | Condition::Slice(_)
+                    | Condition::Nested(_)
+                    | Condition::Filter(_)
+                    | Condition::CustomIdChecker(_) => false,
                 },
             })
+    }
+
+    /// Expected number of filter evaluations if we were to scan every point.
+    ///
+    /// When there is no primary clause, we can't walk an index to avoid evaluating
+    /// every point, so we must scan every point.
+    pub fn full_scan_evals(&self, available_points: usize) -> usize {
+        if self.primary_clauses.is_empty() {
+            available_points
+        } else {
+            self.exp
+        }
     }
 }
 

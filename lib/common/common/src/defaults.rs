@@ -7,7 +7,7 @@ use semver::Version;
 use crate::cpu;
 
 /// Current Qdrant version string
-pub const QDRANT_VERSION_STRING: &str = "1.17.1";
+pub const QDRANT_VERSION_STRING: &str = "1.19.2";
 
 /// Current Qdrant semver version
 pub static QDRANT_VERSION: LazyLock<Version> =
@@ -93,16 +93,64 @@ pub fn search_thread_count(max_search_threads: usize) -> usize {
         return max_search_threads;
     }
 
-    // At least one thread, but not more than number of CPUs - 1 if there are more than 2 CPU
-    // Example:
-    // Num CPU = 1 -> 1 thread
-    // Num CPU = 2 -> 2 thread - if we use one thread with 2 cpus, its too much un-utilized resources
-    // Num CPU = 3 -> 2 thread
-    // Num CPU = 4 -> 3 thread
-    // Num CPU = 5 -> 4 thread
-    match cpu::get_num_cpus() {
-        0..=1 => 1,
-        2 => 2,
-        num_cpu @ 3.. => num_cpu - 1,
+    // For high-IO loads, it is beneficial to have more search threads than CPU cores,
+    // as they will often be waiting on IO.
+    // At the same time, the impact from thread context switching doesn't seem to be as big,
+    // so it should be safe to spawn more workers than CPUs.
+    const CPU_OVERCOMMIT_FACTOR: usize = 4;
+
+    cpu::get_num_cpus().max(1) * CPU_OVERCOMMIT_FACTOR
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_count_for_hnsw_bounds_and_transitions() {
+        // Enforces minimum bound of 1 thread for 0 CPUs
+        assert_eq!(thread_count_for_hnsw(0), 1);
+
+        // Linear scaling below 8 CPUs
+        assert_eq!(thread_count_for_hnsw(4), 4);
+
+        // Cap of 8 threads at upper bound of first threshold (48 CPUs)
+        assert_eq!(thread_count_for_hnsw(48), 8);
+
+        // Step up to 12 threads at transition boundary (49 CPUs)
+        assert_eq!(thread_count_for_hnsw(49), 12);
+        assert_eq!(thread_count_for_hnsw(64), 12);
+
+        // Cap at 16 threads for high-CPU systems (>= 65 CPUs)
+        assert_eq!(thread_count_for_hnsw(65), 16);
+        assert_eq!(thread_count_for_hnsw(128), 16);
+        assert_eq!(thread_count_for_hnsw(256), 16);
+    }
+
+    #[test]
+    fn test_default_cpu_budget_unallocated_thresholds() {
+        // Low CPU systems reserve 0 CPUs
+        assert_eq!(default_cpu_budget_unallocated(0), 0);
+        assert_eq!(default_cpu_budget_unallocated(2), 0);
+
+        // Step thresholds
+        assert_eq!(default_cpu_budget_unallocated(3), -1);
+        assert_eq!(default_cpu_budget_unallocated(32), -1);
+
+        assert_eq!(default_cpu_budget_unallocated(33), -2);
+        assert_eq!(default_cpu_budget_unallocated(48), -2);
+
+        assert_eq!(default_cpu_budget_unallocated(49), -3);
+        assert_eq!(default_cpu_budget_unallocated(64), -3);
+
+        assert_eq!(default_cpu_budget_unallocated(65), -4);
+        assert_eq!(default_cpu_budget_unallocated(96), -4);
+
+        assert_eq!(default_cpu_budget_unallocated(97), -6);
+        assert_eq!(default_cpu_budget_unallocated(128), -6);
+
+        // Dynamic scaling beyond 128 CPUs (num_cpu / 16)
+        assert_eq!(default_cpu_budget_unallocated(129), -8);
+        assert_eq!(default_cpu_budget_unallocated(160), -10);
     }
 }

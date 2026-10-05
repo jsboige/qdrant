@@ -1,3 +1,8 @@
+// Deprecated storage placement params (`on_disk`, `always_ram`, `on_disk_payload`) are still
+// handled here for backward compatibility with the new `memory` parameter
+#![allow(deprecated)]
+
+use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
@@ -9,22 +14,158 @@ use common::budget::ResourceBudget;
 use common::load_concurrency::LoadConcurrencyConfig;
 use common::mmap;
 use segment::types::Distance;
+use storage::content_manager::CollectionContainer;
+use storage::content_manager::alias_mapping::AliasPersistence;
 use storage::content_manager::collection_meta_ops::{
-    ChangeAliasesOperation, CollectionMetaOperations, CreateAlias, CreateCollection,
-    CreateCollectionOperation, DeleteAlias, RenameAlias,
+    AliasOperations, ChangeAliasesOperation, CollectionMetaOperations, CreateAlias,
+    CreateCollection, CreateCollectionOperation, DeleteAlias, RenameAlias,
 };
 use storage::content_manager::consensus::operation_sender::OperationSender;
-use storage::content_manager::toc::TableOfContent;
+use storage::content_manager::consensus_state_machine::Action;
+use storage::content_manager::errors::StorageError;
+use storage::content_manager::toc::{ALIASES_PATH, TableOfContent};
 use storage::dispatcher::Dispatcher;
 use storage::rbac::{Access, AccessRequirements, Auth};
 use storage::types::{PerformanceConfig, StorageConfig};
-use tempfile::Builder;
-use tokio::runtime::Runtime;
+use tempfile::{Builder, TempDir};
+use tokio::runtime::Handle;
 
 const FULL_ACCESS: Auth = Auth::new_internal(Access::full("For test"));
 
 #[test]
 fn test_alias_operation() {
+    let (_storage_dir, handle, dispatcher) = new_dispatcher();
+
+    create_collection(&handle, &dispatcher, "test");
+
+    change_aliases(
+        &handle,
+        &dispatcher,
+        vec![
+            CreateAlias {
+                collection_name: "test".to_string(),
+                alias_name: "test_alias".to_string(),
+            }
+            .into(),
+        ],
+    )
+    .unwrap();
+
+    change_aliases(
+        &handle,
+        &dispatcher,
+        vec![
+            CreateAlias {
+                collection_name: "test".to_string(),
+                alias_name: "test_alias2".to_string(),
+            }
+            .into(),
+            DeleteAlias {
+                alias_name: "test_alias".to_string(),
+            }
+            .into(),
+            RenameAlias {
+                old_alias_name: "test_alias2".to_string(),
+                new_alias_name: "test_alias3".to_string(),
+            }
+            .into(),
+        ],
+    )
+    .unwrap();
+
+    // Nothing to verify here.
+    let pass = new_unchecked_verification_pass();
+
+    let _ = handle
+        .block_on(
+            dispatcher.toc(&FULL_ACCESS, &pass).get_collection(
+                &FULL_ACCESS
+                    .check_collection_access("test_alias3", AccessRequirements::new(), "test")
+                    .unwrap(),
+            ),
+        )
+        .unwrap();
+}
+
+#[test]
+fn change_aliases_reject_mid_list() {
+    let (storage_dir, handle, dispatcher) = new_dispatcher();
+
+    create_collection(&handle, &dispatcher, "test");
+
+    change_aliases(
+        &handle,
+        &dispatcher,
+        vec![
+            CreateAlias {
+                collection_name: "test".to_string(),
+                alias_name: "test_alias".to_string(),
+            }
+            .into(),
+        ],
+    )
+    .unwrap();
+
+    // Second action renames an alias that does not exist, so the operation is rejected
+    let error = change_aliases(
+        &handle,
+        &dispatcher,
+        vec![
+            CreateAlias {
+                collection_name: "test".to_string(),
+                alias_name: "new_alias".to_string(),
+            }
+            .into(),
+            RenameAlias {
+                old_alias_name: "missing_alias".to_string(),
+                new_alias_name: "renamed_alias".to_string(),
+            }
+            .into(),
+        ],
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(error, StorageError::NotFound { .. }),
+        "renaming a missing alias should be rejected as not found, got {error:?}"
+    );
+
+    // Rejected operation must not save the alias its first action creates
+    let aliases = AliasPersistence::open(&storage_dir.path().join(ALIASES_PATH)).unwrap();
+
+    assert_eq!(aliases.get("test_alias").as_deref(), Some("test"));
+    assert_eq!(aliases.get("new_alias"), None);
+}
+
+#[test]
+fn update_aliases_action_persists_mapping() {
+    let (storage_dir, handle, dispatcher) = new_dispatcher();
+    create_collection(&handle, &dispatcher, "test");
+
+    let action = Action::UpdateAliases {
+        set: BTreeMap::from([("new_alias".to_string(), "test".to_string())]),
+        remove: BTreeSet::new(),
+    };
+    let pass = new_unchecked_verification_pass();
+    let toc = dispatcher.toc(&FULL_ACCESS, &pass);
+
+    toc.apply_action(action.clone()).unwrap();
+    toc.apply_action(action).unwrap();
+
+    let aliases = AliasPersistence::open(&storage_dir.path().join(ALIASES_PATH)).unwrap();
+    assert_eq!(aliases.get("new_alias").as_deref(), Some("test"));
+
+    let action = Action::UpdateAliases {
+        set: BTreeMap::new(),
+        remove: BTreeSet::from(["new_alias".to_string()]),
+    };
+    toc.apply_action(action).unwrap();
+
+    let aliases = AliasPersistence::open(&storage_dir.path().join(ALIASES_PATH)).unwrap();
+    assert_eq!(aliases.get("new_alias"), None);
+}
+
+fn new_dispatcher() -> (TempDir, Handle, Dispatcher) {
     let storage_dir = Builder::new().prefix("storage").tempdir().unwrap();
 
     let config = StorageConfig {
@@ -33,6 +174,7 @@ fn test_alias_operation() {
         snapshots_config: Default::default(),
         temp_path: None,
         on_disk_payload: false,
+        payload: None,
         optimizers: OptimizersConfig {
             deleted_threshold: 0.5,
             vacuum_min_vector_number: 100,
@@ -57,11 +199,13 @@ fn test_alias_operation() {
             incoming_shard_transfers_limit: Some(1),
             outgoing_shard_transfers_limit: Some(1),
             async_scorer: None,
+            io_uring: None,
             load_concurrency: LoadConcurrencyConfig::default(),
         },
         hnsw_index: Default::default(),
         hnsw_global_config: Default::default(),
         mmap_advice: mmap::Advice::Random,
+        low_memory_mode: Default::default(),
         node_type: Default::default(),
         update_queue_size: Default::default(),
         handle_collection_load_errors: false,
@@ -71,36 +215,34 @@ fn test_alias_operation() {
         shard_transfer_method: None,
         collection: None,
         max_collections: None,
+        quotas: Default::default(),
     };
-
-    let search_runtime = Runtime::new().unwrap();
-    let handle = search_runtime.handle().clone();
-
-    let update_runtime = Runtime::new().unwrap();
-
-    let general_runtime = Runtime::new().unwrap();
 
     let (propose_sender, _propose_receiver) = std::sync::mpsc::channel();
     let propose_operation_sender = OperationSender::new(propose_sender);
 
-    let toc = Arc::new(TableOfContent::new(
-        &config,
-        search_runtime,
-        update_runtime,
-        general_runtime,
-        ResourceBudget::default(),
-        ChannelService::new(6333, false, None, None),
-        0,
-        Some(propose_operation_sender),
-    ));
-    let dispatcher = Dispatcher::new(toc);
+    let toc = Arc::new(
+        TableOfContent::new(
+            &config,
+            ResourceBudget::default(),
+            ChannelService::new(6333, false, None, None),
+            0,
+            Some(propose_operation_sender),
+        )
+        .unwrap(),
+    );
+    let handle = toc.general_runtime_handle().clone();
 
+    (storage_dir, handle, Dispatcher::new(toc))
+}
+
+fn create_collection(handle: &Handle, dispatcher: &Dispatcher, collection_name: &str) {
     handle
         .block_on(
             dispatcher.submit_collection_meta_op(
                 CollectionMetaOperations::CreateCollection(
                     CreateCollectionOperation::new(
-                        "test".to_string(),
+                        collection_name.to_string(),
                         CreateCollection {
                             vectors: VectorParamsBuilder::new(10, Distance::Cosine)
                                 .build()
@@ -111,6 +253,8 @@ fn test_alias_operation() {
                             optimizers_config: None,
                             shard_number: Some(1),
                             on_disk_payload: None,
+                            payload: None,
+                            id_tracker: None,
                             replication_factor: None,
                             write_consistency_factor: None,
                             quantization_config: None,
@@ -127,56 +271,16 @@ fn test_alias_operation() {
             ),
         )
         .unwrap();
+}
 
-    handle
-        .block_on(dispatcher.submit_collection_meta_op(
-            CollectionMetaOperations::ChangeAliases(ChangeAliasesOperation {
-                actions: vec![CreateAlias {
-                        collection_name: "test".to_string(),
-                        alias_name: "test_alias".to_string(),
-                    }
-                    .into()],
-            }),
-            FULL_ACCESS,
-            None,
-        ))
-        .unwrap();
-
-    handle
-        .block_on(dispatcher.submit_collection_meta_op(
-            CollectionMetaOperations::ChangeAliases(ChangeAliasesOperation {
-                actions: vec![
-                        CreateAlias {
-                            collection_name: "test".to_string(),
-                            alias_name: "test_alias2".to_string(),
-                        }
-                        .into(),
-                        DeleteAlias {
-                            alias_name: "test_alias".to_string(),
-                        }
-                        .into(),
-                        RenameAlias {
-                            old_alias_name: "test_alias2".to_string(),
-                            new_alias_name: "test_alias3".to_string(),
-                        }
-                        .into(),
-                    ],
-            }),
-            FULL_ACCESS,
-            None,
-        ))
-        .unwrap();
-
-    // Nothing to verify here.
-    let pass = new_unchecked_verification_pass();
-
-    let _ = handle
-        .block_on(
-            dispatcher.toc(&FULL_ACCESS, &pass).get_collection(
-                &FULL_ACCESS
-                    .check_collection_access("test_alias3", AccessRequirements::new(), "test")
-                    .unwrap(),
-            ),
-        )
-        .unwrap();
+fn change_aliases(
+    handle: &Handle,
+    dispatcher: &Dispatcher,
+    actions: Vec<AliasOperations>,
+) -> Result<bool, StorageError> {
+    handle.block_on(dispatcher.submit_collection_meta_op(
+        CollectionMetaOperations::ChangeAliases(ChangeAliasesOperation { actions }),
+        FULL_ACCESS,
+        None,
+    ))
 }

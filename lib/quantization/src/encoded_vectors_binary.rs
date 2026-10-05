@@ -6,23 +6,25 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use common::counter::hardware_counter::HardwareCounterCell;
 use common::fs::atomic_save_json;
-use common::mmap::MmapFlusher;
+use common::mmap::Flusher;
 #[expect(deprecated, reason = "legacy code")]
 use common::mmap::{transmute_from_u8_to_slice, transmute_to_u8_slice};
 use common::typelevel::True;
 use common::types::PointOffsetType;
+use common::universal_io::{UioResult, UniversalReadFs, read_json_via};
 use fs_err as fs;
 use serde::{Deserialize, Serialize};
 use strum::EnumIter;
 
+use crate::encoded_storage::validate_storage_vector_size;
 use crate::encoded_vectors::validate_vector_parameters;
 use crate::vector_stats::{VectorElementStats, VectorStats};
 use crate::{
-    DistanceType, EncodedStorage, EncodedStorageBuilder, EncodedVectors, EncodingError,
-    VectorParameters,
+    DistanceType, EncodedStorage, EncodedStorageBuilder, EncodedStorageWrite, EncodedVectors,
+    EncodingError, VectorParameters,
 };
 
-pub struct EncodedVectorsBin<TBitsStoreType: BitsStoreType, TStorage: EncodedStorage> {
+pub struct EncodedVectorsBin<TBitsStoreType: BitsStoreType, TStorage: EncodedStorageWrite> {
     encoded_vectors: TStorage,
     metadata: Metadata,
     metadata_path: Option<PathBuf>,
@@ -417,11 +419,15 @@ impl BitsStoreType for u128 {
     }
 }
 
-impl<TBitsStoreType: BitsStoreType, TStorage: EncodedStorage>
+impl<TBitsStoreType: BitsStoreType, TStorage: EncodedStorageWrite>
     EncodedVectorsBin<TBitsStoreType, TStorage>
 {
     pub fn storage(&self) -> &TStorage {
         &self.encoded_vectors
+    }
+
+    pub fn storage_mut(&mut self) -> &mut TStorage {
+        &mut self.encoded_vectors
     }
 
     pub fn encode<'a>(
@@ -447,7 +453,7 @@ impl<TBitsStoreType: BitsStoreType, TStorage: EncodedStorage>
         };
 
         let vector_stats = if storage_encoding_needs_states || query_encoding_needs_stats {
-            Some(VectorStats::build(orig_data.clone(), vector_parameters))
+            Some(VectorStats::build(orig_data.clone(), vector_parameters.dim))
         } else {
             None
         };
@@ -472,7 +478,7 @@ impl<TBitsStoreType: BitsStoreType, TStorage: EncodedStorage>
             .map_err(|e| EncodingError::EncodingError(format!("Failed to build storage: {e}",)))?;
 
         let metadata = Metadata {
-            vector_parameters: vector_parameters.clone(),
+            vector_parameters: *vector_parameters,
             encoding,
             query_encoding,
             vector_stats,
@@ -505,16 +511,26 @@ impl<TBitsStoreType: BitsStoreType, TStorage: EncodedStorage>
         })
     }
 
-    pub fn load(encoded_vectors: TStorage, meta_path: &Path) -> std::io::Result<Self> {
-        let contents = fs::read_to_string(meta_path)?;
-        let metadata: Metadata = serde_json::from_str(&contents)?;
-        let result = Self {
+    /// Resume appending to a previously-persisted storage: reads the fitted metadata a writer
+    /// needs to keep encoding consistently, but — unlike [`Self::load`] — never reads a vector
+    /// back from `encoded_vectors` to validate it. A pure appender doesn't need that guarantee:
+    /// every vector it will ever write is sized from this same metadata, so the invariant
+    /// `load`'s check protects (every stored vector has the size the scoring hot path assumes)
+    /// holds by construction, not by verification. Intended for storage backends that can only
+    /// append and cannot serve that read at all (see `EncodedStorage` implementers that are
+    /// write-only).
+    pub fn reopen_for_write<Fs: UniversalReadFs>(
+        fs: &Fs,
+        encoded_vectors: TStorage,
+        meta_path: &Path,
+    ) -> UioResult<Self> {
+        let metadata: Metadata = read_json_via(fs, meta_path)?;
+        Ok(Self {
             metadata,
             metadata_path: Some(meta_path.to_path_buf()),
             encoded_vectors,
             bits_store_type: PhantomData,
-        };
-        Ok(result)
+        })
     }
 
     fn encode_vector(
@@ -523,7 +539,7 @@ impl<TBitsStoreType: BitsStoreType, TStorage: EncodedStorage>
         encoding: Encoding,
     ) -> EncodedBinVector<TBitsStoreType> {
         let encoded_vector_size =
-            Self::get_quantized_vector_size_from_params(vector.len(), encoding)
+            get_quantized_vector_size_from_params::<TBitsStoreType>(vector.len(), encoding)
                 / std::mem::size_of::<TBitsStoreType>();
         let mut encoded_vector = vec![Default::default(); encoded_vector_size];
 
@@ -655,6 +671,69 @@ impl<TBitsStoreType: BitsStoreType, TStorage: EncodedStorage>
         }
     }
 
+    /// Encode and persist `vectors` on consecutive ids from `start_id`, handing the storage the
+    /// whole run as one batch. Inherent rather than on the [`EncodedVectors`] trait, so a
+    /// write-only [`EncodedStorageWrite`] storage can call it.
+    pub fn append_many<'a>(
+        &mut self,
+        start_id: PointOffsetType,
+        vectors: impl IntoIterator<Item = &'a [f32]>,
+        hw_counter: &HardwareCounterCell,
+    ) -> std::io::Result<()> {
+        // Encoded whole rather than streamed: the storage borrows the encoded rows.
+        let encoded: Vec<_> = vectors
+            .into_iter()
+            .map(|vector| {
+                Self::encode_vector(vector, &self.metadata.vector_stats, self.metadata.encoding)
+            })
+            .collect();
+        self.encoded_vectors.upsert_many(
+            start_id,
+            encoded
+                .iter()
+                .map(|vector| bytemuck::cast_slice(vector.encoded_vector.as_slice())),
+            hw_counter,
+        )
+    }
+
+    /// See [`Self::append_many`]: an inherent counterpart of the [`EncodedVectors`] trait's
+    /// `flusher`, so a write-only [`EncodedStorageWrite`] storage can call it too.
+    pub fn flusher(&self) -> Flusher {
+        self.encoded_vectors.flusher()
+    }
+}
+
+impl<TBitsStoreType: BitsStoreType, TStorage: EncodedStorage>
+    EncodedVectorsBin<TBitsStoreType, TStorage>
+{
+    pub fn load<Fs: UniversalReadFs>(
+        fs: &Fs,
+        encoded_vectors: TStorage,
+        meta_path: &Path,
+    ) -> UioResult<Self> {
+        let metadata: Metadata = read_json_via(fs, meta_path)?;
+        let result = Self {
+            metadata,
+            metadata_path: Some(meta_path.to_path_buf()),
+            encoded_vectors,
+            bits_store_type: PhantomData,
+        };
+
+        // Validate the storage's vector size against the metadata once here, so the size
+        // invariant the scoring hot path relies on (it XORs the stored vector against an
+        // equally-sized query) also holds in release builds without a per-score check.
+        validate_storage_vector_size(&result.encoded_vectors, result.quantized_vector_size())?;
+
+        Ok(result)
+    }
+
+    fn get_quantized_vector_size(&self) -> usize {
+        get_quantized_vector_size_from_params::<TBitsStoreType>(
+            self.metadata.vector_parameters.dim,
+            self.metadata.encoding,
+        )
+    }
+
     fn encode_query_vector(
         query: &[f32],
         vector_stats: &Option<VectorStats>,
@@ -741,23 +820,6 @@ impl<TBitsStoreType: BitsStoreType, TStorage: EncodedStorage>
         }
     }
 
-    pub fn get_quantized_vector_size_from_params(dim: usize, encoding: Encoding) -> usize {
-        let extended_dim = match encoding {
-            Encoding::OneBit => dim,
-            Encoding::TwoBits => dim * 2,
-            Encoding::OneAndHalfBits => (dim * 3).div_ceil(2), // ceil(dim * 1.5)
-        };
-        TBitsStoreType::get_storage_size(extended_dim.max(1))
-            * std::mem::size_of::<TBitsStoreType>()
-    }
-
-    fn get_quantized_vector_size(&self) -> usize {
-        Self::get_quantized_vector_size_from_params(
-            self.metadata.vector_parameters.dim,
-            self.metadata.encoding,
-        )
-    }
-
     fn calculate_metric(
         &self,
         vector: &[TBitsStoreType],
@@ -796,8 +858,8 @@ impl<TBitsStoreType: BitsStoreType, TStorage: EncodedStorage>
             self.metadata.vector_parameters.invert,
         ) {
             // So if `invert` is true we return XOR, otherwise we return (dim - XOR)
-            (DistanceType::Dot, true) => xor_product - zeros_count,
-            (DistanceType::Dot, false) => zeros_count - xor_product,
+            (DistanceType::Dot | DistanceType::Cosine, true) => xor_product - zeros_count,
+            (DistanceType::Dot | DistanceType::Cosine, false) => zeros_count - xor_product,
             // This also results in exact ordering as L1 and L2 but reversed.
             (DistanceType::L1 | DistanceType::L2, true) => zeros_count - xor_product,
             (DistanceType::L1 | DistanceType::L2, false) => xor_product - zeros_count,
@@ -819,22 +881,28 @@ impl<TBitsStoreType: BitsStoreType, TStorage: EncodedStorage>
     pub fn get_vector_parameters(&self) -> &VectorParameters {
         &self.metadata.vector_parameters
     }
+}
 
-    pub fn encode_internal_query(&self, point_id: u32) -> EncodedQueryBQ<TBitsStoreType> {
-        // For internal queries we use the same encoding as for storage
-        EncodedQueryBQ::Binary(EncodedBinVector {
-            encoded_vector: bytemuck::cast_slice::<u8, TBitsStoreType>(
-                &self.get_quantized_vector(point_id),
-            )
-            .to_vec(),
-        })
-    }
+pub fn get_quantized_vector_size_from_params<TBitsStoreType: BitsStoreType>(
+    dim: usize,
+    encoding: Encoding,
+) -> usize {
+    let extended_dim = match encoding {
+        Encoding::OneBit => dim,
+        Encoding::TwoBits => dim * 2,
+        Encoding::OneAndHalfBits => (dim * 3).div_ceil(2), // ceil(dim * 1.5)
+    };
+    TBitsStoreType::get_storage_size(extended_dim.max(1)) * std::mem::size_of::<TBitsStoreType>()
 }
 
 impl<TBitsStoreType: BitsStoreType, TStorage: EncodedStorage> EncodedVectors
     for EncodedVectorsBin<TBitsStoreType, TStorage>
 {
     type EncodedQuery = EncodedQueryBQ<TBitsStoreType>;
+
+    fn is_in_ram_or_mmap() -> bool {
+        TStorage::is_in_ram_or_mmap()
+    }
 
     fn is_on_disk(&self) -> bool {
         self.encoded_vectors.is_on_disk()
@@ -848,6 +916,23 @@ impl<TBitsStoreType: BitsStoreType, TStorage: EncodedStorage> EncodedVectors
             self.metadata.encoding,
             self.metadata.query_encoding,
         )
+    }
+
+    fn for_each_batch(
+        &self,
+        offsets: &[PointOffsetType],
+        callback: impl FnMut(usize, Cow<'_, [u8]>),
+    ) {
+        self.encoded_vectors.for_each_batch(offsets, callback)
+    }
+
+    fn score(
+        &self,
+        query: &Self::EncodedQuery,
+        encoded_vector: &[u8],
+        hw_counter: &HardwareCounterCell,
+    ) -> f32 {
+        self.score_bytes(True, query, encoded_vector, hw_counter)
     }
 
     fn score_point(
@@ -924,7 +1009,7 @@ impl<TBitsStoreType: BitsStoreType, TStorage: EncodedStorage> EncodedVectors
         self.encoded_vectors.vectors_count()
     }
 
-    fn flusher(&self) -> MmapFlusher {
+    fn flusher(&self) -> Flusher {
         self.encoded_vectors.flusher()
     }
 
@@ -942,6 +1027,17 @@ impl<TBitsStoreType: BitsStoreType, TStorage: EncodedStorage> EncodedVectors
             files.push(meta_path.clone());
         }
         files
+    }
+
+    fn heap_size_bytes(&self) -> usize {
+        let storage_heap = self.encoded_vectors.heap_size_bytes();
+        let vector_stats_heap = self
+            .metadata
+            .vector_stats
+            .as_ref()
+            .map(|vs| vs.elements_stats.capacity() * std::mem::size_of::<VectorElementStats>())
+            .unwrap_or(0);
+        storage_heap + vector_stats_heap
     }
 
     type SupportsBytes = True;
@@ -1054,7 +1150,6 @@ unsafe extern "C" {
     ) -> u32;
 }
 
-#[allow(missing_docs)]
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512vl")]
 #[target_feature(enable = "avx512vpopcntdq")]

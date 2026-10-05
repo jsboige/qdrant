@@ -1,3 +1,7 @@
+// Deprecated storage placement params (`on_disk`, `always_ram`, `on_disk_payload`) are still
+// handled here for backward compatibility with the new `memory` parameter
+#![allow(deprecated)]
+
 use std::borrow::Cow;
 use std::io::{self, BufWriter, Write};
 use std::ops::Range;
@@ -6,27 +10,27 @@ use std::sync::atomic::AtomicBool;
 
 use common::bitvec::BitSlice;
 use common::counter::hardware_counter::HardwareCounterCell;
-use common::fs::clear_disk_cache;
 use common::generic_consts::AccessPattern;
 use common::mmap;
 use common::types::PointOffsetType;
-use common::universal_io::{MmapFile, UniversalRead};
-use fs_err as fs;
+use common::universal_io::{MmapFile, MmapFs, Populate, UniversalRead, UserData};
 use fs_err::{File, OpenOptions};
 
 use crate::common::Flusher;
+use crate::common::io_uring::{IoUringFallback, use_io_uring};
 use crate::common::operation_error::{OperationError, OperationResult, check_process_stopped};
 use crate::data_types::named_vectors::CowVector;
 use crate::data_types::primitive::PrimitiveVectorElement;
 use crate::data_types::vectors::VectorRef;
-use crate::types::{Distance, VectorStorageDatatype};
-#[cfg(target_os = "linux")]
-use crate::vector_storage::common::get_async_scorer;
+use crate::types::{Distance, Memory, VectorStorageDatatype};
+use crate::vector_storage::common::error_immutable_insert;
 use crate::vector_storage::dense::immutable_dense_vectors::ImmutableDenseVectors;
-use crate::vector_storage::{DenseVectorStorage, VectorStorage, VectorStorageEnum};
+use crate::vector_storage::{
+    DenseVectorStorage, DenseVectorStorageRead, VectorStorage, VectorStorageEnum, VectorStorageRead,
+};
 
-const VECTORS_PATH: &str = "matrix.dat";
-const DELETED_PATH: &str = "deleted.dat";
+pub(crate) const VECTORS_PATH: &str = "matrix.dat";
+pub(crate) const DELETED_PATH: &str = "deleted.dat";
 
 /// Stores all dense vectors in mem-mapped file
 ///
@@ -38,18 +42,20 @@ const DELETED_PATH: &str = "deleted.dat";
 pub struct DenseVectorStorageImpl<T, S = MmapFile>
 where
     T: PrimitiveVectorElement,
-    S: UniversalRead<T>,
+    S: UniversalRead,
 {
     vectors_path: PathBuf,
     deleted_path: PathBuf,
     vectors: Option<ImmutableDenseVectors<T, S>>,
     distance: Distance,
+    populated: bool,
+    fs: S::Fs,
 }
 
 impl<T, S> DenseVectorStorageImpl<T, S>
 where
     T: PrimitiveVectorElement,
-    S: UniversalRead<T>,
+    S: UniversalRead,
 {
     /// Populate all pages in the mmap.
     /// Block until all pages are populated.
@@ -61,27 +67,46 @@ where
 
     /// Drop disk cache.
     pub fn clear_cache(&self) -> OperationResult<()> {
-        clear_disk_cache(&self.vectors_path)?;
-        clear_disk_cache(&self.deleted_path)?;
+        let Self {
+            vectors_path: _,
+            deleted_path: _,
+            vectors,
+            distance: _,
+            populated: _,
+            fs: _,
+        } = self;
+        if let Some(vectors) = vectors {
+            vectors.clear_cache()?;
+        }
         Ok(())
     }
+}
+
+/// Whether the immutable single-file dense vector storages open on io_uring at `memory`. They
+/// have no feature flag of their own, and predate the setting, so they fall back to the async
+/// scorer.
+fn dense_with_uring(memory: Memory) -> bool {
+    use_io_uring(IoUringFallback::AsyncScorer, memory, true)
 }
 
 pub fn open_dense_vector_storage(
     path: &Path,
     dim: usize,
     distance: Distance,
-    populate: bool,
+    memory: Memory,
 ) -> OperationResult<VectorStorageEnum> {
-    #[cfg(target_os = "linux")]
-    let with_uring = get_async_scorer(); // `get_async_scorer` only available on Linux
-
-    #[cfg(not(target_os = "linux"))]
-    let with_uring = false;
-
-    open_dense_vector_storage_with_uring(path, dim, distance, populate, with_uring)
+    open_dense_vector_storage_with_uring(
+        path,
+        dim,
+        distance,
+        memory.populate_on_open(),
+        dense_with_uring(memory),
+    )
 }
 
+/// [`open_dense_vector_storage`] with an explicit backend choice instead of the node-wide
+/// io_uring setting. Falls back to mmap (with an error log) if the io_uring backend cannot be
+/// opened.
 pub fn open_dense_vector_storage_with_uring(
     path: &Path,
     dim: usize,
@@ -94,17 +119,23 @@ pub fn open_dense_vector_storage_with_uring(
 
     #[cfg(target_os = "linux")]
     if with_uring {
-        match open_dense_vector_storage_impl(path, dim, distance, populate) {
+        match open_dense_vector_storage_impl(
+            common::universal_io::IoUringFs,
+            path,
+            dim,
+            distance,
+            populate,
+        ) {
             Ok(uring_storage) => {
                 return Ok(VectorStorageEnum::DenseUring(Box::new(uring_storage)));
             }
             Err(err) => {
-                log::error!("failed to open io_uring based vector storage: {err}");
+                log::error!("Failed to open io_uring based vector storage: {err}");
             }
         }
     }
 
-    let mmap_storage = open_dense_vector_storage_impl(path, dim, distance, populate)?;
+    let mmap_storage = open_dense_vector_storage_impl(MmapFs, path, dim, distance, populate)?;
     Ok(VectorStorageEnum::DenseMemmap(Box::new(mmap_storage)))
 }
 
@@ -112,21 +143,32 @@ pub fn open_dense_vector_storage_half(
     path: &Path,
     dim: usize,
     distance: Distance,
-    populate: bool,
+    memory: Memory,
 ) -> OperationResult<VectorStorageEnum> {
+    let populate = memory.populate_on_open();
+    let with_uring = dense_with_uring(memory);
+    // prevent "unused variable" warning
+    let _ = with_uring;
+
     #[cfg(target_os = "linux")]
-    if get_async_scorer() {
-        match open_dense_vector_storage_impl(path, dim, distance, populate) {
+    if with_uring {
+        match open_dense_vector_storage_impl(
+            common::universal_io::IoUringFs,
+            path,
+            dim,
+            distance,
+            populate,
+        ) {
             Ok(uring_storage) => {
                 return Ok(VectorStorageEnum::DenseUringHalf(Box::new(uring_storage)));
             }
             Err(err) => {
-                log::error!("failed to open io_uring based vector storage: {err}");
+                log::error!("Failed to open io_uring based vector storage: {err}");
             }
         }
     }
 
-    let mmap_storage = open_dense_vector_storage_impl(path, dim, distance, populate)?;
+    let mmap_storage = open_dense_vector_storage_impl(MmapFs, path, dim, distance, populate)?;
     Ok(VectorStorageEnum::DenseMemmapHalf(Box::new(mmap_storage)))
 }
 
@@ -134,25 +176,37 @@ pub fn open_dense_vector_storage_byte(
     path: &Path,
     dim: usize,
     distance: Distance,
-    populate: bool,
+    memory: Memory,
 ) -> OperationResult<VectorStorageEnum> {
+    let populate = memory.populate_on_open();
+    let with_uring = dense_with_uring(memory);
+    // prevent "unused variable" warning
+    let _ = with_uring;
+
     #[cfg(target_os = "linux")]
-    if get_async_scorer() {
-        match open_dense_vector_storage_impl(path, dim, distance, populate) {
+    if with_uring {
+        match open_dense_vector_storage_impl(
+            common::universal_io::IoUringFs,
+            path,
+            dim,
+            distance,
+            populate,
+        ) {
             Ok(uring_storage) => {
                 return Ok(VectorStorageEnum::DenseUringByte(Box::new(uring_storage)));
             }
             Err(err) => {
-                log::error!("failed to open io_uring based vector storage: {err}");
+                log::error!("Failed to open io_uring based vector storage: {err}");
             }
         }
     }
 
-    let mmap_storage = open_dense_vector_storage_impl(path, dim, distance, populate)?;
+    let mmap_storage = open_dense_vector_storage_impl(MmapFs, path, dim, distance, populate)?;
     Ok(VectorStorageEnum::DenseMemmapByte(Box::new(mmap_storage)))
 }
 
-fn open_dense_vector_storage_impl<T, S>(
+pub(crate) fn open_dense_vector_storage_impl<T, S>(
+    fs: S::Fs,
     path: &Path,
     dim: usize,
     distance: Distance,
@@ -160,41 +214,39 @@ fn open_dense_vector_storage_impl<T, S>(
 ) -> OperationResult<DenseVectorStorageImpl<T, S>>
 where
     T: PrimitiveVectorElement,
-    S: UniversalRead<T>,
+    S: UniversalRead,
 {
-    fs::create_dir_all(path)?;
+    fs_err::create_dir_all(path)?;
 
     let vectors_path = path.join(VECTORS_PATH);
     let deleted_path = path.join(DELETED_PATH);
 
-    let vectors = ImmutableDenseVectors::open(&vectors_path, &deleted_path, dim, populate)?;
+    let vectors = ImmutableDenseVectors::open(
+        &fs,
+        &vectors_path,
+        &deleted_path,
+        dim,
+        Populate::from(populate),
+    )?;
     let storage = DenseVectorStorageImpl {
         vectors_path,
         deleted_path,
         vectors: Some(vectors),
         distance,
+        populated: populate,
+        fs,
     };
 
     Ok(storage)
 }
 
-impl<T, S> DenseVectorStorageImpl<T, S>
+impl<T, S> DenseVectorStorageRead<T> for DenseVectorStorageImpl<T, S>
 where
     T: PrimitiveVectorElement,
-    S: UniversalRead<T>,
-{
-    pub fn get_mmap_vectors(&self) -> &ImmutableDenseVectors<T, S> {
-        self.vectors.as_ref().unwrap()
-    }
-}
-
-impl<T, S> DenseVectorStorage<T> for DenseVectorStorageImpl<T, S>
-where
-    T: PrimitiveVectorElement,
-    S: UniversalRead<T>,
+    S: UniversalRead,
 {
     fn vector_dim(&self) -> usize {
-        self.vectors.as_ref().unwrap().dim
+        self.vectors.as_ref().unwrap().dim()
     }
 
     fn get_dense<P: AccessPattern>(&self, key: PointOffsetType) -> Cow<'_, [T]> {
@@ -205,83 +257,50 @@ where
             .unwrap_or_else(|| panic!("vector not found: {key}"))
     }
 
-    fn for_each_in_dense_batch<F: FnMut(usize, &[T])>(&self, keys: &[PointOffsetType], f: F) {
+    fn for_each_in_dense_batch<F: FnMut(usize, &[T])>(
+        &self,
+        keys: &[PointOffsetType],
+        f: F,
+    ) -> OperationResult<()> {
         let mmap_store = self.vectors.as_ref().unwrap();
-        mmap_store.for_each_in_batch(keys, f);
+        mmap_store.for_each_in_batch(keys, f)
+    }
+
+    fn read_dense_bytes<P: AccessPattern, U: Copy>(
+        &self,
+        keys: impl IntoIterator<Item = (U, PointOffsetType)>,
+        mut callback: impl FnMut(U, PointOffsetType, Vec<u8>),
+    ) -> OperationResult<()> {
+        // Split into parallel arrays in one pass: `for_each_in_batch` needs an
+        // offsets slice (it chunks it for batched reads), but we still want
+        // `user_data[idx]` available inside the callback.
+        let (user_data, point_offsets): (Vec<U>, Vec<PointOffsetType>) = keys.into_iter().unzip();
+
+        self.vectors
+            .as_ref()
+            .unwrap()
+            .for_each_in_batch(&point_offsets, |idx, vector| {
+                callback(
+                    user_data[idx],
+                    point_offsets[idx],
+                    bytemuck::cast_slice(vector).to_vec(),
+                );
+            })
     }
 }
 
-impl<T, S> VectorStorage for DenseVectorStorageImpl<T, S>
+impl<T, S> DenseVectorStorage<T> for DenseVectorStorageImpl<T, S>
 where
     T: PrimitiveVectorElement,
-    S: UniversalRead<T>,
+    S: UniversalRead,
 {
-    fn distance(&self) -> Distance {
-        self.distance
-    }
-
-    fn datatype(&self) -> VectorStorageDatatype {
-        T::datatype()
-    }
-
-    fn is_on_disk(&self) -> bool {
-        true
-    }
-
-    fn total_vector_count(&self) -> usize {
-        self.vectors.as_ref().unwrap().num_vectors
-    }
-
-    fn get_vector<P: AccessPattern>(&self, key: PointOffsetType) -> CowVector<'_> {
-        self.vectors
-            .as_ref()
-            .unwrap()
-            .get_vector_opt::<P>(key)
-            .map(|vector| T::slice_to_float_cow(vector).into())
-            .expect("Vector not found")
-    }
-
-    fn read_vectors<P: AccessPattern>(
-        &self,
-        keys: impl IntoIterator<Item = PointOffsetType>,
-        mut callback: impl FnMut(PointOffsetType, CowVector<'_>),
-    ) {
-        let point_offsets: Vec<_> = keys.into_iter().collect();
-        // Create a result vec of the appropriate size
-        self.vectors
-            .as_ref()
-            .unwrap()
-            .read_vectors_async::<P>(&point_offsets, |_pos, key, vector| {
-                let cow_vector = CowVector::from(T::slice_to_float_cow(Cow::Borrowed(vector)));
-                callback(key, cow_vector);
-            })
-            .unwrap();
-    }
-
-    fn get_vector_opt<P: AccessPattern>(&self, key: PointOffsetType) -> Option<CowVector<'_>> {
-        self.vectors
-            .as_ref()
-            .unwrap()
-            .get_vector_opt::<P>(key)
-            .map(|vector| T::slice_to_float_cow(vector).into())
-    }
-
-    fn insert_vector(
-        &mut self,
-        _key: PointOffsetType,
-        _vector: VectorRef,
-        _hw_counter: &HardwareCounterCell,
-    ) -> OperationResult<()> {
-        panic!("Can't directly update vector in mmap storage")
-    }
-
     fn update_from<'a>(
         &mut self,
-        other_vectors: &'a mut impl Iterator<Item = (CowVector<'a>, bool)>,
+        other_vectors: &mut impl Iterator<Item = (Cow<'a, [T]>, bool)>,
         stopped: &AtomicBool,
     ) -> OperationResult<Range<PointOffsetType>> {
         let dim = self.vector_dim();
-        let start_index = self.vectors.as_ref().unwrap().num_vectors as PointOffsetType;
+        let start_index = self.vectors.as_ref().unwrap().num_vectors() as PointOffsetType;
         let mut end_index = start_index;
 
         // Extend vectors file, write other vectors into it
@@ -289,10 +308,10 @@ where
         let mut deleted_ids = vec![];
         for (offset, (other_vector, other_deleted)) in other_vectors.enumerate() {
             check_process_stopped(stopped)?;
-            let vector = T::slice_from_float_cow(Cow::try_from(other_vector)?);
+            // Vectors are already in the storage's element type — write as-is.
             // Safety: T implements zerocopy::IntoBytes.
             #[expect(deprecated, reason = "legacy code")]
-            let raw_bites = unsafe { mmap::transmute_to_u8_slice(vector.as_ref()) };
+            let raw_bites = unsafe { mmap::transmute_to_u8_slice(other_vector.as_ref()) };
             vectors_file.write_all(raw_bites)?;
             end_index += 1;
 
@@ -311,10 +330,11 @@ where
 
         // Load store with updated files
         self.vectors.replace(ImmutableDenseVectors::open(
+            &self.fs,
             &self.vectors_path,
             &self.deleted_path,
             dim,
-            false, // No need to populate
+            Populate::No, // No need to populate
         )?);
 
         // Flush deleted flags into store
@@ -329,6 +349,104 @@ where
         store.flusher()()?;
 
         Ok(start_index..end_index)
+    }
+}
+
+impl<T, S> VectorStorageRead for DenseVectorStorageImpl<T, S>
+where
+    T: PrimitiveVectorElement,
+    S: UniversalRead,
+{
+    fn size_of_available_vectors_in_bytes(&self) -> usize {
+        self.available_vector_count() * self.vector_dim() * std::mem::size_of::<T>()
+    }
+
+    fn distance(&self) -> Distance {
+        self.distance
+    }
+
+    fn datatype(&self) -> VectorStorageDatatype {
+        T::datatype()
+    }
+
+    fn is_on_disk(&self) -> bool {
+        !self.populated
+    }
+
+    fn total_vector_count(&self) -> usize {
+        self.vectors.as_ref().unwrap().num_vectors()
+    }
+
+    fn get_vector<P: AccessPattern>(&self, key: PointOffsetType) -> CowVector<'_> {
+        self.vectors
+            .as_ref()
+            .unwrap()
+            .get_vector_opt::<P>(key)
+            .map(|vector| T::slice_to_float_cow(vector).into())
+            .expect("Vector not found")
+    }
+
+    fn read_vectors<P: AccessPattern, U: Copy>(
+        &self,
+        keys: impl IntoIterator<Item = (U, PointOffsetType)>,
+        mut callback: impl FnMut(U, PointOffsetType, CowVector<'_>),
+    ) {
+        // Split into parallel arrays in one pass: `for_each_in_batch` needs an
+        // offsets slice (it chunks it for batched reads), but we still want
+        // `user_data[idx]` available inside the callback.
+        let (user_data, point_offsets): (Vec<U>, Vec<PointOffsetType>) = keys.into_iter().unzip();
+
+        self.vectors
+            .as_ref()
+            .unwrap()
+            .for_each_in_batch(&point_offsets, |idx, vector| {
+                let vector = CowVector::from(T::slice_to_float_cow(Cow::Borrowed(vector)));
+                callback(user_data[idx], point_offsets[idx], vector);
+            })
+            .expect("read vectors");
+    }
+
+    fn get_vector_opt<P: AccessPattern>(&self, key: PointOffsetType) -> Option<CowVector<'_>> {
+        self.vectors
+            .as_ref()
+            .unwrap()
+            .get_vector_opt::<P>(key)
+            .map(|vector| T::slice_to_float_cow(vector).into())
+    }
+
+    fn is_deleted_vector(&self, key: PointOffsetType) -> bool {
+        self.vectors.as_ref().unwrap().is_deleted_vector(key)
+    }
+
+    fn deleted_vector_count(&self) -> usize {
+        self.vectors.as_ref().unwrap().deleted_count
+    }
+
+    fn deleted_vector_bitslice(&self) -> &BitSlice {
+        self.vectors.as_ref().unwrap().deleted_vector_bitslice()
+    }
+
+    fn read_vector_bytes<P: AccessPattern, U: Copy + UserData>(
+        &self,
+        keys: impl IntoIterator<Item = (U, PointOffsetType)>,
+        callback: impl FnMut(U, PointOffsetType, Vec<u8>),
+    ) -> OperationResult<()> {
+        self.read_dense_bytes::<P, U>(keys, callback)
+    }
+}
+
+impl<T, S> VectorStorage for DenseVectorStorageImpl<T, S>
+where
+    T: PrimitiveVectorElement,
+    S: UniversalRead,
+{
+    fn insert_vector(
+        &mut self,
+        _key: PointOffsetType,
+        _vector: VectorRef,
+        _hw_counter: &HardwareCounterCell,
+    ) -> OperationResult<()> {
+        Err(error_immutable_insert())
     }
 
     fn flusher(&self) -> Flusher {
@@ -354,18 +472,6 @@ where
     fn delete_vector(&mut self, key: PointOffsetType) -> OperationResult<bool> {
         Ok(self.vectors.as_mut().unwrap().delete(key))
     }
-
-    fn is_deleted_vector(&self, key: PointOffsetType) -> bool {
-        self.vectors.as_ref().unwrap().is_deleted_vector(key)
-    }
-
-    fn deleted_vector_count(&self) -> usize {
-        self.vectors.as_ref().unwrap().deleted_count
-    }
-
-    fn deleted_vector_bitslice(&self) -> &BitSlice {
-        self.vectors.as_ref().unwrap().deleted_vector_bitslice()
-    }
 }
 
 /// Open a file shortly for appending
@@ -389,8 +495,9 @@ mod tests {
     use super::*;
     use crate::data_types::vectors::{DenseVector, QueryVector, VectorElementType};
     use crate::fixtures::payload_context_fixture::create_id_tracker_fixture;
-    use crate::id_tracker::IdTracker;
+    use crate::id_tracker::{IdTracker, IdTrackerRead};
     use crate::index::hnsw_index::point_scorer::{BatchFilteredSearcher, FilteredScorer};
+    use crate::segment_constructor::batched_reader::merge_from_single_source;
     use crate::types::{PointIdType, QuantizationConfig, ScalarQuantizationConfig};
     use crate::vector_storage::dense::volatile_dense_vector_storage::new_volatile_dense_vector_storage;
     use crate::vector_storage::quantized::quantized_vectors::{
@@ -409,7 +516,8 @@ mod tests {
             vec![1.0, 1.0, 0.0, 1.0],
             vec![1.0, 0.0, 0.0, 0.0],
         ];
-        let mut storage = open_dense_vector_storage(dir.path(), 4, Distance::Dot, false).unwrap();
+        let mut storage =
+            open_dense_vector_storage(dir.path(), 4, Distance::Dot, Memory::Cold).unwrap();
         let mut id_tracker = create_id_tracker_fixture(points.len());
 
         // Assert this storage lists both the vector and deleted file
@@ -436,13 +544,7 @@ mod tests {
                     .insert_vector(2, points[2].as_slice().into(), &hw_counter)
                     .unwrap();
             }
-            let mut iter = (0..3).map(|i| {
-                let i = i as PointOffsetType;
-                let vector = storage2.get_vector::<Random>(i);
-                let deleted = storage2.is_deleted_vector(i);
-                (vector, deleted)
-            });
-            storage.update_from(&mut iter, &Default::default()).unwrap();
+            merge_from_single_source(&mut storage, &storage2, 3).unwrap();
         }
 
         assert_eq!(storage.total_vector_count(), 3);
@@ -464,13 +566,7 @@ mod tests {
                     .insert_vector(4, points[4].as_slice().into(), &hw_counter)
                     .unwrap();
             }
-            let mut iter = (0..2).map(|i| {
-                let i = i as PointOffsetType;
-                let vector = storage2.get_vector::<Random>(i);
-                let deleted = storage2.is_deleted_vector(i);
-                (vector, deleted)
-            });
-            storage.update_from(&mut iter, &Default::default()).unwrap();
+            merge_from_single_source(&mut storage, &storage2, 2).unwrap();
         }
 
         assert_eq!(storage.total_vector_count(), 5);
@@ -487,7 +583,7 @@ mod tests {
             2,
         );
         let res = searcher
-            .peek_top_all(&DEFAULT_STOPPED, None)
+            .peek_top_all(&DEFAULT_STOPPED)
             .unwrap()
             .into_iter()
             .exactly_one()
@@ -504,7 +600,7 @@ mod tests {
             2,
         );
         let res = searcher
-            .peek_top_iter(&mut [0, 1, 2, 3, 4].iter().cloned(), &DEFAULT_STOPPED)
+            .peek_top_iter([0, 1, 2, 3, 4].iter().cloned(), &DEFAULT_STOPPED)
             .unwrap()
             .into_iter()
             .exactly_one()
@@ -527,7 +623,8 @@ mod tests {
         ];
         let delete_mask = [false, false, true, true, false];
         let id_tracker = create_id_tracker_fixture(points.len());
-        let mut storage = open_dense_vector_storage(dir.path(), 4, Distance::Dot, false).unwrap();
+        let mut storage =
+            open_dense_vector_storage(dir.path(), 4, Distance::Dot, Memory::Cold).unwrap();
 
         let hw_counter = HardwareCounterCell::new();
 
@@ -540,13 +637,8 @@ mod tests {
                         .unwrap();
                 });
             }
-            let mut iter = (0..points.len()).map(|i| {
-                let i = i as PointOffsetType;
-                let vector = storage2.get_vector::<Random>(i);
-                let deleted = storage2.is_deleted_vector(i);
-                (vector, deleted)
-            });
-            storage.update_from(&mut iter, &Default::default()).unwrap();
+            merge_from_single_source(&mut storage, &storage2, points.len() as PointOffsetType)
+                .unwrap();
         }
 
         assert_eq!(storage.total_vector_count(), 5);
@@ -576,7 +668,7 @@ mod tests {
         );
 
         let closest = searcher
-            .peek_top_iter(&mut [0, 1, 2, 3, 4].iter().cloned(), &DEFAULT_STOPPED)
+            .peek_top_iter([0, 1, 2, 3, 4].iter().cloned(), &DEFAULT_STOPPED)
             .unwrap()
             .into_iter()
             .exactly_one()
@@ -605,14 +697,17 @@ mod tests {
             5,
         );
         let closest = searcher
-            .peek_top_iter(&mut [0, 1, 2, 3, 4].iter().cloned(), &DEFAULT_STOPPED)
+            .peek_top_iter([0, 1, 2, 3, 4].iter().cloned(), &DEFAULT_STOPPED)
             .unwrap()
             .into_iter()
             .exactly_one()
             .unwrap();
         assert_eq!(closest.len(), 2, "must have 2 vectors, 3 are deleted");
-        assert_eq!(closest[0].idx, 4);
-        assert_eq!(closest[1].idx, 0);
+        // Points 0 and 4 both score 1.0 against this query; order among equal
+        // scores is unspecified, so assert the set rather than positions.
+        let mut ids = closest.iter().map(|p| p.idx).collect::<Vec<_>>();
+        ids.sort_unstable();
+        assert_eq!(ids, [0, 4]);
 
         // Delete all
         storage.delete_vector(0 as PointOffsetType).unwrap();
@@ -632,7 +727,7 @@ mod tests {
             5,
         );
         let closest = searcher
-            .peek_top_all(&DEFAULT_STOPPED, None)
+            .peek_top_all(&DEFAULT_STOPPED)
             .unwrap()
             .into_iter()
             .exactly_one()
@@ -653,7 +748,8 @@ mod tests {
             vec![1.0, 0.0, 0.0, 0.0],
         ];
         let delete_mask = [false, false, true, true, false];
-        let mut storage = open_dense_vector_storage(dir.path(), 4, Distance::Dot, false).unwrap();
+        let mut storage =
+            open_dense_vector_storage(dir.path(), 4, Distance::Dot, Memory::Cold).unwrap();
         let id_tracker = create_id_tracker_fixture(points.len());
 
         let hw_counter = HardwareCounterCell::new();
@@ -670,13 +766,8 @@ mod tests {
                     }
                 });
             }
-            let mut iter = (0..points.len()).map(|i| {
-                let i = i as PointOffsetType;
-                let vector = storage2.get_vector::<Random>(i);
-                let deleted = storage2.is_deleted_vector(i);
-                (vector, deleted)
-            });
-            storage.update_from(&mut iter, &Default::default()).unwrap();
+            merge_from_single_source(&mut storage, &storage2, points.len() as PointOffsetType)
+                .unwrap();
         }
 
         assert_eq!(
@@ -694,7 +785,7 @@ mod tests {
             5,
         );
         let closest = searcher
-            .peek_top_iter(&mut [0, 1, 2, 3, 4].iter().cloned(), &DEFAULT_STOPPED)
+            .peek_top_iter([0, 1, 2, 3, 4].iter().cloned(), &DEFAULT_STOPPED)
             .unwrap()
             .into_iter()
             .exactly_one()
@@ -727,7 +818,8 @@ mod tests {
             vec![1.0, 1.0, 0.0, 1.0],
             vec![1.0, 0.0, 0.0, 0.0],
         ];
-        let mut storage = open_dense_vector_storage(dir.path(), 4, Distance::Dot, false).unwrap();
+        let mut storage =
+            open_dense_vector_storage(dir.path(), 4, Distance::Dot, Memory::Cold).unwrap();
         let id_tracker = create_id_tracker_fixture(points.len());
 
         let hw_counter = HardwareCounterCell::new();
@@ -741,13 +833,8 @@ mod tests {
                         .unwrap();
                 }
             }
-            let mut iter = (0..points.len()).map(|i| {
-                let i = i as PointOffsetType;
-                let vector = storage2.get_vector::<Random>(i);
-                let deleted = storage2.is_deleted_vector(i);
-                (vector, deleted)
-            });
-            storage.update_from(&mut iter, &Default::default()).unwrap();
+            merge_from_single_source(&mut storage, &storage2, points.len() as PointOffsetType)
+                .unwrap();
         }
 
         let vector = vec![-1.0, -1.0, -1.0, -1.0];
@@ -800,7 +887,8 @@ mod tests {
             vec![1.0, 1.0, 0.0, 1.0],
             vec![1.0, 0.0, 0.0, 0.0],
         ];
-        let mut storage = open_dense_vector_storage(dir.path(), 4, Distance::Dot, false).unwrap();
+        let mut storage =
+            open_dense_vector_storage(dir.path(), 4, Distance::Dot, Memory::Cold).unwrap();
 
         let hw_counter = HardwareCounterCell::new();
 
@@ -813,16 +901,12 @@ mod tests {
                         .unwrap();
                 }
             }
-            let mut iter = (0..points.len()).map(|i| {
-                let i = i as PointOffsetType;
-                let vector = storage2.get_vector::<Random>(i);
-                let deleted = storage2.is_deleted_vector(i);
-                (vector, deleted)
-            });
-            storage.update_from(&mut iter, &Default::default()).unwrap();
+            merge_from_single_source(&mut storage, &storage2, points.len() as PointOffsetType)
+                .unwrap();
         }
 
         let config: QuantizationConfig = ScalarQuantizationConfig {
+            memory: None,
             r#type: Default::default(),
             quantile: None,
             always_ram: None,

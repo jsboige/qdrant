@@ -54,6 +54,14 @@ pub struct PostingElement<V> {
     pub value: V,
 }
 
+/// An id and the byte length of its value, as yielded by
+/// [`PostingLenIterator`](crate::PostingLenIterator).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PostingLen {
+    pub id: PointOffsetType,
+    pub value_len: usize,
+}
+
 #[derive(Debug, Clone, FromBytes, Immutable, IntoBytes, KnownLayout)]
 #[repr(C)]
 pub struct PostingChunk<S: Sized> {
@@ -119,6 +127,22 @@ impl<V: PostingValue> PostingList<V> {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Approximate heap memory usage in bytes.
+    pub fn heap_bytes(&self) -> usize {
+        let Self {
+            id_data,
+            chunks,
+            remainders,
+            var_size_data,
+            last_id: _,
+            _phantom,
+        } = self;
+        id_data.capacity()
+            + chunks.capacity() * std::mem::size_of::<PostingChunk<SizedTypeFor<V>>>()
+            + remainders.capacity() * std::mem::size_of::<RemainderPosting<SizedTypeFor<V>>>()
+            + var_size_data.capacity()
     }
 }
 

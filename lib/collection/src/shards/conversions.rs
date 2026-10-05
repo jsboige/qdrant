@@ -18,8 +18,8 @@ use tonic::Status;
 use crate::operations::conversions::write_ordering_to_proto;
 use crate::operations::payload_ops::{DeletePayloadOp, SetPayloadOp};
 use crate::operations::point_ops::{
-    ConditionalInsertOperationInternal, PointInsertOperationsInternal, PointSyncOperation,
-    WriteOrdering,
+    ConditionalInsertOperationInternal, PointInsertOperationsInternal, PointStructRawPersisted,
+    PointSyncOperation, PointSyncRawOperation, WriteOrdering,
 };
 use crate::operations::types::CollectionResult;
 use crate::operations::vector_ops::UpdateVectorsOp;
@@ -49,7 +49,7 @@ pub fn internal_sync_points(
     } = points_sync_operation;
     Ok(SyncPointsInternal {
         shard_id,
-        clock_tag: clock_tag.map(Into::into),
+        clock_tag: clock_tag.map(ClockTag::into),
         wait_override: wait_override_to_proto(wait),
         sync_points: Some(SyncPoints {
             collection_name,
@@ -58,8 +58,44 @@ pub fn internal_sync_points(
                 .into_iter()
                 .map(api::grpc::qdrant::PointStruct::try_from)
                 .collect::<Result<Vec<_>, Status>>()?,
-            from_id: from_id.map(|x| x.into()),
-            to_id: to_id.map(|x| x.into()),
+            raw_points: Vec::new(),
+            from_id: from_id.map(PointIdType::into),
+            to_id: to_id.map(PointIdType::into),
+            ordering: ordering.map(write_ordering_to_proto),
+            timeout: wait_timeout,
+        }),
+    })
+}
+
+#[allow(clippy::unnecessary_wraps)]
+pub fn internal_sync_points_raw(
+    shard_id: Option<ShardId>,
+    clock_tag: Option<ClockTag>,
+    collection_name: String,
+    points_sync_operation: PointSyncRawOperation,
+    wait: WaitUntil,
+    wait_timeout: Option<u64>,
+    ordering: Option<WriteOrdering>,
+) -> CollectionResult<SyncPointsInternal> {
+    let PointSyncRawOperation {
+        points,
+        from_id,
+        to_id,
+    } = points_sync_operation;
+    Ok(SyncPointsInternal {
+        shard_id,
+        clock_tag: clock_tag.map(ClockTag::into),
+        wait_override: wait_override_to_proto(wait),
+        sync_points: Some(SyncPoints {
+            collection_name,
+            wait: Some(wait.needs_callback()),
+            points: Vec::new(),
+            raw_points: points
+                .into_iter()
+                .map(api::grpc::qdrant::PointStructRaw::from)
+                .collect(),
+            from_id: from_id.map(PointIdType::into),
+            to_id: to_id.map(PointIdType::into),
             ordering: ordering.map(write_ordering_to_proto),
             timeout: wait_timeout,
         }),
@@ -77,8 +113,9 @@ pub fn internal_upsert_points(
 ) -> CollectionResult<UpsertPointsInternal> {
     Ok(UpsertPointsInternal {
         shard_id,
-        clock_tag: clock_tag.map(Into::into),
+        clock_tag: clock_tag.map(ClockTag::into),
         wait_override: wait_override_to_proto(wait),
+        raw_points: Vec::new(),
         upsert_points: Some(UpsertPoints {
             collection_name,
             wait: Some(wait.needs_callback()),
@@ -89,6 +126,37 @@ pub fn internal_upsert_points(
                     .map(api::grpc::qdrant::PointStruct::try_from)
                     .collect::<Result<Vec<_>, Status>>()?,
             },
+            ordering: ordering.map(write_ordering_to_proto),
+            shard_key_selector: None,
+            update_filter: None,
+            timeout: wait_timeout,
+            update_mode: None, // Default mode (Upsert)
+        }),
+    })
+}
+
+#[allow(clippy::unnecessary_wraps)]
+pub fn internal_upsert_points_raw(
+    shard_id: Option<ShardId>,
+    clock_tag: Option<ClockTag>,
+    collection_name: String,
+    points: Vec<PointStructRawPersisted>,
+    wait: WaitUntil,
+    wait_timeout: Option<u64>,
+    ordering: Option<WriteOrdering>,
+) -> CollectionResult<UpsertPointsInternal> {
+    Ok(UpsertPointsInternal {
+        shard_id,
+        clock_tag: clock_tag.map(ClockTag::into),
+        wait_override: wait_override_to_proto(wait),
+        raw_points: points
+            .into_iter()
+            .map(api::grpc::qdrant::PointStructRaw::from)
+            .collect(),
+        upsert_points: Some(UpsertPoints {
+            collection_name,
+            wait: Some(wait.needs_callback()),
+            points: Vec::new(),
             ordering: ordering.map(write_ordering_to_proto),
             shard_key_selector: None,
             update_filter: None,
@@ -123,8 +191,9 @@ pub fn internal_conditional_upsert_points(
 
     Ok(UpsertPointsInternal {
         shard_id,
-        clock_tag: clock_tag.map(Into::into),
+        clock_tag: clock_tag.map(ClockTag::into),
         wait_override: wait_override_to_proto(wait),
+        raw_points: Vec::new(),
         upsert_points: Some(UpsertPoints {
             collection_name,
             wait: Some(wait.needs_callback()),
@@ -155,14 +224,14 @@ pub fn internal_delete_points(
 ) -> DeletePointsInternal {
     DeletePointsInternal {
         shard_id,
-        clock_tag: clock_tag.map(Into::into),
+        clock_tag: clock_tag.map(ClockTag::into),
         wait_override: wait_override_to_proto(wait),
         delete_points: Some(DeletePoints {
             collection_name,
             wait: Some(wait.needs_callback()),
             points: Some(PointsSelector {
                 points_selector_one_of: Some(PointsSelectorOneOf::Points(PointsIdsList {
-                    ids: ids.into_iter().map(|id| id.into()).collect(),
+                    ids: ids.into_iter().map(PointIdType::into).collect(),
                 })),
             }),
             ordering: ordering.map(write_ordering_to_proto),
@@ -183,7 +252,7 @@ pub fn internal_delete_points_by_filter(
 ) -> DeletePointsInternal {
     DeletePointsInternal {
         shard_id,
-        clock_tag: clock_tag.map(Into::into),
+        clock_tag: clock_tag.map(ClockTag::into),
         wait_override: wait_override_to_proto(wait),
         delete_points: Some(DeletePoints {
             collection_name,
@@ -223,7 +292,7 @@ pub fn internal_update_vectors(
 
     Ok(UpdateVectorsInternal {
         shard_id,
-        clock_tag: clock_tag.map(Into::into),
+        clock_tag: clock_tag.map(ClockTag::into),
         wait_override: wait_override_to_proto(wait),
         update_vectors: Some(UpdatePointVectors {
             collection_name,
@@ -250,14 +319,14 @@ pub fn internal_delete_vectors(
 ) -> DeleteVectorsInternal {
     DeleteVectorsInternal {
         shard_id,
-        clock_tag: clock_tag.map(Into::into),
+        clock_tag: clock_tag.map(ClockTag::into),
         wait_override: wait_override_to_proto(wait),
         delete_vectors: Some(DeletePointVectors {
             collection_name,
             wait: Some(wait.needs_callback()),
             points_selector: Some(PointsSelector {
                 points_selector_one_of: Some(PointsSelectorOneOf::Points(PointsIdsList {
-                    ids: ids.into_iter().map(|id| id.into()).collect(),
+                    ids: ids.into_iter().map(PointIdType::into).collect(),
                 })),
             }),
             vectors: Some(VectorsSelector {
@@ -283,7 +352,7 @@ pub fn internal_delete_vectors_by_filter(
 ) -> DeleteVectorsInternal {
     DeleteVectorsInternal {
         shard_id,
-        clock_tag: clock_tag.map(Into::into),
+        clock_tag: clock_tag.map(ClockTag::into),
         wait_override: wait_override_to_proto(wait),
         delete_vectors: Some(DeletePointVectors {
             collection_name,
@@ -313,7 +382,7 @@ pub fn internal_set_payload(
     let points_selector = if let Some(points) = set_payload.points {
         Some(PointsSelector {
             points_selector_one_of: Some(PointsSelectorOneOf::Points(PointsIdsList {
-                ids: points.into_iter().map(|id| id.into()).collect(),
+                ids: points.into_iter().map(PointIdType::into).collect(),
             })),
         })
     } else {
@@ -324,7 +393,7 @@ pub fn internal_set_payload(
 
     SetPayloadPointsInternal {
         shard_id,
-        clock_tag: clock_tag.map(Into::into),
+        clock_tag: clock_tag.map(ClockTag::into),
         wait_override: wait_override_to_proto(wait),
         set_payload_points: Some(SetPayloadPoints {
             collection_name,
@@ -351,7 +420,7 @@ pub fn internal_delete_payload(
     let points_selector = if let Some(points) = delete_payload.points {
         Some(PointsSelector {
             points_selector_one_of: Some(PointsSelectorOneOf::Points(PointsIdsList {
-                ids: points.into_iter().map(|id| id.into()).collect(),
+                ids: points.into_iter().map(PointIdType::into).collect(),
             })),
         })
     } else {
@@ -362,7 +431,7 @@ pub fn internal_delete_payload(
 
     DeletePayloadPointsInternal {
         shard_id,
-        clock_tag: clock_tag.map(Into::into),
+        clock_tag: clock_tag.map(ClockTag::into),
         wait_override: wait_override_to_proto(wait),
         delete_payload_points: Some(DeletePayloadPoints {
             collection_name,
@@ -391,14 +460,14 @@ pub fn internal_clear_payload(
 ) -> ClearPayloadPointsInternal {
     ClearPayloadPointsInternal {
         shard_id,
-        clock_tag: clock_tag.map(Into::into),
+        clock_tag: clock_tag.map(ClockTag::into),
         wait_override: wait_override_to_proto(wait),
         clear_payload_points: Some(ClearPayloadPoints {
             collection_name,
             wait: Some(wait.needs_callback()),
             points: Some(PointsSelector {
                 points_selector_one_of: Some(PointsSelectorOneOf::Points(PointsIdsList {
-                    ids: points.into_iter().map(|id| id.into()).collect(),
+                    ids: points.into_iter().map(PointIdType::into).collect(),
                 })),
             }),
             ordering: ordering.map(write_ordering_to_proto),
@@ -419,7 +488,7 @@ pub fn internal_clear_payload_by_filter(
 ) -> ClearPayloadPointsInternal {
     ClearPayloadPointsInternal {
         shard_id,
-        clock_tag: clock_tag.map(Into::into),
+        clock_tag: clock_tag.map(ClockTag::into),
         wait_override: wait_override_to_proto(wait),
         clear_payload_points: Some(ClearPayloadPoints {
             collection_name,
@@ -459,7 +528,7 @@ pub fn internal_create_index(
 
     CreateFieldIndexCollectionInternal {
         shard_id,
-        clock_tag: clock_tag.map(Into::into),
+        clock_tag: clock_tag.map(ClockTag::into),
         wait_override: wait_override_to_proto(wait),
         create_field_index_collection: Some(CreateFieldIndexCollection {
             collection_name,
@@ -484,7 +553,7 @@ pub fn internal_delete_index(
 ) -> DeleteFieldIndexCollectionInternal {
     DeleteFieldIndexCollectionInternal {
         shard_id,
-        clock_tag: clock_tag.map(Into::into),
+        clock_tag: clock_tag.map(ClockTag::into),
         wait_override: wait_override_to_proto(wait),
         delete_field_index_collection: Some(DeleteFieldIndexCollection {
             collection_name,
@@ -492,6 +561,53 @@ pub fn internal_delete_index(
             field_name: delete_index.to_string(),
             ordering: ordering.map(write_ordering_to_proto),
             timeout: wait_timeout,
+        }),
+    }
+}
+
+pub fn internal_create_vector_name(
+    shard_id: Option<ShardId>,
+    clock_tag: Option<ClockTag>,
+    collection_name: String,
+    create: shard::operations::CreateVectorName,
+    wait: WaitUntil,
+    wait_timeout: Option<u64>,
+    ordering: Option<WriteOrdering>,
+) -> api::grpc::qdrant::CreateVectorNameInternal {
+    api::grpc::qdrant::CreateVectorNameInternal {
+        shard_id,
+        clock_tag: clock_tag.map(Into::into),
+        wait_override: wait_override_to_proto(wait),
+        create_vector_name: Some(api::grpc::qdrant::CreateVectorNameRequest {
+            collection_name,
+            wait: Some(wait.needs_callback()),
+            vector_name: create.vector_name,
+            vector_config: Some(create.config.into()),
+            timeout: wait_timeout,
+            ordering: ordering.map(write_ordering_to_proto),
+        }),
+    }
+}
+
+pub fn internal_delete_vector_name(
+    shard_id: Option<ShardId>,
+    clock_tag: Option<ClockTag>,
+    collection_name: String,
+    delete: shard::operations::DeleteVectorName,
+    wait: WaitUntil,
+    wait_timeout: Option<u64>,
+    ordering: Option<WriteOrdering>,
+) -> api::grpc::qdrant::DeleteVectorNameInternal {
+    api::grpc::qdrant::DeleteVectorNameInternal {
+        shard_id,
+        clock_tag: clock_tag.map(Into::into),
+        wait_override: wait_override_to_proto(wait),
+        delete_vector_name: Some(api::grpc::qdrant::DeleteVectorNameRequest {
+            collection_name,
+            wait: Some(wait.needs_callback()),
+            vector_name: delete.vector_name,
+            timeout: wait_timeout,
+            ordering: ordering.map(write_ordering_to_proto),
         }),
     }
 }

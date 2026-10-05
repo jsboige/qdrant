@@ -1,19 +1,22 @@
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
 use common::counter::hardware_counter::HardwareCounterCell;
 use common::fixed_length_priority_queue::FixedLengthPriorityQueue;
 use common::generic_consts::Random;
 use common::types::{PointOffsetType, ScoredPointOffset};
 use parking_lot::RwLock;
 use rayon::ThreadPool;
-use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
+use rayon::iter::{IndexedParallelIterator as _, IntoParallelIterator as _, ParallelIterator as _};
 
-use crate::common::operation_error::OperationResult;
+use crate::common::operation_error::{OperationResult, check_process_stopped};
 use crate::index::hnsw_index::HnswM;
 use crate::index::hnsw_index::graph_layers::GraphLayers;
 use crate::index::hnsw_index::graph_layers_builder::{GraphLayersBuilder, LockedLayersContainer};
+use crate::index::hnsw_index::hnsw::HNSW_BUILD_MAX_PAR_LEN;
 use crate::index::hnsw_index::links_container::{ItemsBuffer, LinksContainer};
 use crate::index::visited_pool::VisitedPool;
 use crate::vector_storage::quantized::quantized_vectors::QuantizedVectors;
-use crate::vector_storage::{RawScorer, VectorStorage, VectorStorageEnum, new_raw_scorer};
+use crate::vector_storage::{RawScorer, VectorStorageEnum, VectorStorageRead, new_raw_scorer};
 
 pub struct GraphLayersHealer<'a> {
     links_layers: Vec<LockedLayersContainer>,
@@ -54,6 +57,11 @@ impl<'a> GraphLayersHealer<'a> {
             ef_construct,
             visited_pool: VisitedPool::new(),
         }
+    }
+
+    /// Number of `(point, level)` pairs [`Self::heal`] is going to process.
+    pub fn to_heal_count(&self) -> usize {
+        self.to_heal.len()
     }
 
     fn point_deleted(&self, point: PointOffsetType) -> bool {
@@ -211,11 +219,16 @@ impl<'a> GraphLayersHealer<'a> {
         pool: &ThreadPool,
         vector_storage: &VectorStorageEnum,
         quantized_vectors: Option<&QuantizedVectors>,
+        stopped: &AtomicBool,
+        counter: &AtomicU64,
     ) -> OperationResult<()> {
         pool.install(|| {
             std::mem::take(&mut self.to_heal)
                 .into_par_iter()
+                .with_max_len(HNSW_BUILD_MAX_PAR_LEN)
                 .try_for_each(|(offset, level)| {
+                    check_process_stopped(stopped)?;
+
                     // Internal operation. No measurements needed.
                     let internal_hardware_counter = HardwareCounterCell::disposable();
                     let query = vector_storage
@@ -228,6 +241,7 @@ impl<'a> GraphLayersHealer<'a> {
                         new_raw_scorer(query, vector_storage, internal_hardware_counter)?
                     };
                     self.heal_point_on_level(offset, level, scorer.as_ref());
+                    counter.fetch_add(1, Ordering::Relaxed);
                     Ok(())
                 })
         })

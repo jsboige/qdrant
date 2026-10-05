@@ -106,11 +106,11 @@ def test_patch_collection_partially(collection_name):
 def test_strict_mode_query_limit_validation(collection_name):
     def search_request():
         return request_with_validation(
-            api='/collections/{collection_name}/points/search',
+            api='/collections/{collection_name}/points/query',
             method="POST",
             path_params={'collection_name': collection_name},
             body={
-                "vector": [0.2, 0.1, 0.9, 0.7],
+                "query": [0.2, 0.1, 0.9, 0.7],
                 "limit": 4
             }
         )
@@ -137,12 +137,12 @@ def test_strict_mode_query_limit_validation(collection_name):
 def test_strict_mode_timeout_validation(collection_name):
     def search_request_with_timeout(timeout):
         return request_with_validation(
-            api='/collections/{collection_name}/points/search',
+            api='/collections/{collection_name}/points/query',
             method="POST",
             path_params={'collection_name': collection_name},
             query_params={'timeout': timeout},
             body={
-                "vector": [0.2, 0.1, 0.9, 0.7],
+                "query": [0.2, 0.1, 0.9, 0.7],
                 "limit": 3
             }
         )
@@ -165,11 +165,11 @@ def test_strict_mode_timeout_validation(collection_name):
 def test_strict_mode_unindexed_filter_keyword_read_validation(collection_name):
     def search_request_with_filter():
         return request_with_validation(
-            api='/collections/{collection_name}/points/search',
+            api='/collections/{collection_name}/points/query',
             method="POST",
             path_params={'collection_name': collection_name},
             body={
-                "vector": [0.2, 0.1, 0.9, 0.7],
+                "query": [0.2, 0.1, 0.9, 0.7],
                 "limit": 3,
                 "filter": {
                     "must": [
@@ -220,11 +220,11 @@ def test_strict_mode_unindexed_filter_keyword_read_validation(collection_name):
 def test_strict_mode_unindexed_filter_integer_read_validation(collection_name):
     def search_request_with_filter():
         return request_with_validation(
-            api='/collections/{collection_name}/points/search',
+            api='/collections/{collection_name}/points/query',
             method="POST",
             path_params={'collection_name': collection_name},
             body={
-                "vector": [0.2, 0.1, 0.9, 0.7],
+                "query": [0.2, 0.1, 0.9, 0.7],
                 "limit": 3,
                 "filter": {
                     "must": [
@@ -427,11 +427,11 @@ def test_strict_mode_unindexed_filter_write_validation(collection_name):
 def test_strict_mode_max_ef_hnsw_validation(collection_name):
     def search_request():
         return request_with_validation(
-            api='/collections/{collection_name}/points/search',
+            api='/collections/{collection_name}/points/query',
             method="POST",
             path_params={'collection_name': collection_name},
             body={
-                "vector": [0.2, 0.1, 0.9, 0.7],
+                "query": [0.2, 0.1, 0.9, 0.7],
                 "limit": 4,
                 "params": {
                     "hnsw_ef": 5,
@@ -461,11 +461,11 @@ def test_strict_mode_max_ef_hnsw_validation(collection_name):
 def test_strict_mode_allow_exact_validation(collection_name):
     def search_request():
         return request_with_validation(
-            api='/collections/{collection_name}/points/search',
+            api='/collections/{collection_name}/points/query',
             method="POST",
             path_params={'collection_name': collection_name},
             body={
-                "vector": [0.2, 0.1, 0.9, 0.7],
+                "query": [0.2, 0.1, 0.9, 0.7],
                 "limit": 4,
                 "params": {
                     "exact": True,
@@ -495,11 +495,11 @@ def test_strict_mode_allow_exact_validation(collection_name):
 def test_strict_mode_search_max_oversampling_validation(collection_name):
     def search_request():
         return request_with_validation(
-            api='/collections/{collection_name}/points/search',
+            api='/collections/{collection_name}/points/query',
             method="POST",
             path_params={'collection_name': collection_name},
             body={
-                "vector": [0.2, 0.1, 0.9, 0.7],
+                "query": [0.2, 0.1, 0.9, 0.7],
                 "limit": 4,
                 "params": {
                     "quantization": {
@@ -670,13 +670,13 @@ def test_strict_mode_update_vectors_max_batch_size(collection_name):
 def test_strict_mode_search_max_batch_size(collection_name):
     def search_batch_request(n: int):
         return request_with_validation(
-            api='/collections/{collection_name}/points/search/batch',
+            api='/collections/{collection_name}/points/query/batch',
             method="POST",
             path_params={'collection_name': collection_name},
             body={
                 "searches": [
                     {
-                        "vector": [0.2, 0.1, 0.9, 0.7],
+                        "query": [0.2, 0.1, 0.9, 0.7],
                         "limit": 3
                     } for _ in range(n)
                 ]
@@ -714,6 +714,7 @@ def test_strict_mode_max_collection_size_upsert(collection_name):
             api='/collections/{collection_name}/points',
             method="PUT",
             path_params={'collection_name': collection_name},
+            query_params={'wait': 'true'},
             body={
                 "batch": {
                     "ids": ids,
@@ -831,6 +832,7 @@ def test_strict_mode_max_collection_size_upsert_batch(collection_name):
             api='/collections/{collection_name}/points/batch',
             method="POST",
             path_params={'collection_name': collection_name},
+            query_params={'wait': 'true'},
             body={
                 "operations": [
                     {
@@ -1036,11 +1038,11 @@ def test_strict_mode_read_rate_limiting(collection_name):
 
     for _ in range(10):
         response = request_with_validation(
-            api='/collections/{collection_name}/points/search',
+            api='/collections/{collection_name}/points/query',
             method="POST",
             path_params={'collection_name': collection_name},
             body={
-                "vector": [0.2, 0.1, 0.9, 0.7],
+                "query": [0.2, 0.1, 0.9, 0.7],
                 "limit": 4
             }
         )
@@ -1061,11 +1063,11 @@ def test_strict_mode_read_rate_limiting(collection_name):
 
     for _ in range(10):
         response = request_with_validation(
-            api='/collections/{collection_name}/points/search',
+            api='/collections/{collection_name}/points/query',
             method="POST",
             path_params={'collection_name': collection_name},
             body={
-                "vector": [0.2, 0.1, 0.9, 0.7],
+                "query": [0.2, 0.1, 0.9, 0.7],
                 "limit": 4
             }
         )
@@ -1128,6 +1130,7 @@ def test_strict_mode_max_collection_payload_size_upsert_batch(collection_name):
             api='/collections/{collection_name}/points/batch',
             method="POST",
             path_params={'collection_name': collection_name},
+            query_params={'wait': 'true'},
             body={
                 "operations": [
                     {
@@ -1176,6 +1179,7 @@ def test_strict_mode_max_collection_point_count_upsert_batch(collection_name):
             api='/collections/{collection_name}/points/batch',
             method="POST",
             path_params={'collection_name': collection_name},
+            query_params={'wait': 'true'},
             body={
                 "operations": [
                     {
@@ -1378,11 +1382,11 @@ def test_filter_many_conditions(collection_name):
             })
 
         return request_with_validation(
-            api='/collections/{collection_name}/points/search',
+            api='/collections/{collection_name}/points/query',
             method="POST",
             path_params={'collection_name': collection_name},
             body={
-                "vector": [0.2, 0.1, 0.9, 0.7],
+                "query": [0.2, 0.1, 0.9, 0.7],
                 "limit": 4,
                 "filter": {
                     "must": conditions
@@ -1409,11 +1413,11 @@ def test_filter_large_condition(collection_name):
     def search_request(condition_size: int):
         conditions = [x for x in range(condition_size)]
         return request_with_validation(
-            api='/collections/{collection_name}/points/search',
+            api='/collections/{collection_name}/points/query',
             method="POST",
             path_params={'collection_name': collection_name},
             body={
-                "vector": [0.2, 0.1, 0.9, 0.7],
+                "query": [0.2, 0.1, 0.9, 0.7],
                 "limit": 4,
                 "filter": {
                     "must": [
@@ -1448,11 +1452,11 @@ def test_filter_nested_condition(collection_name):
         conditions = [x for x in range(condition_size)]
 
         return request_with_validation(
-            api='/collections/{collection_name}/points/search',
+            api='/collections/{collection_name}/points/query',
             method="POST",
             path_params={'collection_name': collection_name},
             body={
-                "vector": [0.2, 0.1, 0.9, 0.7],
+                "query": [0.2, 0.1, 0.9, 0.7],
                 "limit": 4,
                 "filter": {
                     "must": [
@@ -1600,11 +1604,11 @@ def test_strict_mode_read_rate_limiting_small_replenish(collection_name):
 
     for _ in range(120):
         response = request_with_validation(
-            api='/collections/{collection_name}/points/search',
+            api='/collections/{collection_name}/points/query',
             method="POST",
             path_params={'collection_name': collection_name},
             body={
-                "vector": [0.2, 0.1, 0.9, 0.7],
+                "query": [0.2, 0.1, 0.9, 0.7],
                 "limit": 4
             }
         )
@@ -1677,12 +1681,16 @@ def test_strict_mode_unset_rate_limiting_config(collection_name):
 # Test that examples in recommendations are tracked by rate limiter
 def test_strict_mode_recommendation_best_score_read_rate_limiting(collection_name):
     response = request_with_validation(
-        api="/collections/{collection_name}/points/recommend",
+        api="/collections/{collection_name}/points/query",
         method="POST",
         path_params={"collection_name": collection_name},
         body={
-            "positive": [1, 2, 3, 4, 5],
-            "strategy": "best_score",
+            "query": {
+                "recommend": {
+                    "positive": [1, 2, 3, 4, 5],
+                    "strategy": "best_score",
+                },
+            },
             "limit": 10,
         },
     )
@@ -1707,12 +1715,16 @@ def test_strict_mode_recommendation_best_score_read_rate_limiting(collection_nam
 
     # try max number of examples
     response = request_with_validation(
-        api="/collections/{collection_name}/points/recommend",
+        api="/collections/{collection_name}/points/query",
         method="POST",
         path_params={"collection_name": collection_name},
         body={
-            "positive": [1, 2, 3, 4, 5],
-            "strategy": "best_score",
+            "query": {
+                "recommend": {
+                    "positive": [1, 2, 3, 4, 5],
+                    "strategy": "best_score",
+                },
+            },
             "limit": 10,
         },
     )
@@ -1724,12 +1736,16 @@ def test_strict_mode_recommendation_best_score_read_rate_limiting(collection_nam
     })
 
     response = request_with_validation(
-        api="/collections/{collection_name}/points/recommend",
+        api="/collections/{collection_name}/points/query",
         method="POST",
         path_params={"collection_name": collection_name},
         body={
-            "positive": [1, 2, 3, 4, 5],
-            "strategy": "best_score",
+            "query": {
+                "recommend": {
+                    "positive": [1, 2, 3, 4, 5],
+                    "strategy": "best_score",
+                },
+            },
             "limit": 10,
         },
     )
@@ -1847,11 +1863,11 @@ def test_scroll_filter_many_conditions(collection_name):
 
 def test_strict_mode_group_limits(collection_name):
     response = request_with_validation(
-        api="/collections/{collection_name}/points/search/groups",
+        api="/collections/{collection_name}/points/query/groups",
         method="POST",
         path_params={"collection_name": collection_name},
         body={
-            "vector": [1.0, 0.0, 0.0, 0.0],
+            "query": [1.0, 0.0, 0.0, 0.0],
             "limit": 10,
             "with_payload": True,
             "group_by": "docId",
@@ -1882,11 +1898,11 @@ def test_strict_mode_group_limits(collection_name):
 
     # try again
     response = request_with_validation(
-        api="/collections/{collection_name}/points/search/groups",
+        api="/collections/{collection_name}/points/query/groups",
         method="POST",
         path_params={"collection_name": collection_name},
         body={
-            "vector": [1.0, 0.0, 0.0, 0.0],
+            "query": [1.0, 0.0, 0.0, 0.0],
             "limit": 10,
             "with_payload": True,
             "group_by": "docId",
@@ -2019,11 +2035,11 @@ def test_read_rate_limiter_many_vectors(full_collection_name):
 
 def test_strict_mode_group_by_unindexed(collection_name):
     response = request_with_validation(
-        api="/collections/{collection_name}/points/search/groups",
+        api="/collections/{collection_name}/points/query/groups",
         method="POST",
         path_params={"collection_name": collection_name},
         body={
-            "vector": [1.0, 0.0, 0.0, 0.0],
+            "query": [1.0, 0.0, 0.0, 0.0],
             "limit": 10,
             "with_payload": True,
             "group_by": "docId",
@@ -2053,11 +2069,11 @@ def test_strict_mode_group_by_unindexed(collection_name):
 
     # try again
     response = request_with_validation(
-        api="/collections/{collection_name}/points/search/groups",
+        api="/collections/{collection_name}/points/query/groups",
         method="POST",
         path_params={"collection_name": collection_name},
         body={
-            "vector": [1.0, 0.0, 0.0, 0.0],
+            "query": [1.0, 0.0, 0.0, 0.0],
             "limit": 10,
             "with_payload": True,
             "group_by": "docId",
@@ -2097,11 +2113,11 @@ def test_strict_mode_group_by_unindexed(collection_name):
 
     # try again with geo index
     response = request_with_validation(
-        api="/collections/{collection_name}/points/search/groups",
+        api="/collections/{collection_name}/points/query/groups",
         method="POST",
         path_params={"collection_name": collection_name},
         body={
-            "vector": [1.0, 0.0, 0.0, 0.0],
+            "query": [1.0, 0.0, 0.0, 0.0],
             "limit": 10,
             "with_payload": True,
             "group_by": "docId",
@@ -2141,11 +2157,11 @@ def test_strict_mode_group_by_unindexed(collection_name):
 
     # now it is allowed
     response = request_with_validation(
-        api="/collections/{collection_name}/points/search/groups",
+        api="/collections/{collection_name}/points/query/groups",
         method="POST",
         path_params={"collection_name": collection_name},
         body={
-            "vector": [1.0, 0.0, 0.0, 0.0],
+            "query": [1.0, 0.0, 0.0, 0.0],
             "limit": 10,
             "with_payload": True,
             "group_by": "docId",

@@ -12,7 +12,7 @@ use bitpacking::BitPacker;
 type BitPackerImpl = bitpacking::BitPacker4x;
 
 /// How many elements are packed in a single chunk.
-const CHUNK_LEN: usize = 128;
+pub const CHUNK_LEN: usize = 128;
 const _: () = assert!(128 == BitPackerImpl::BLOCK_LEN);
 
 pub trait SizedValue: Sized + Copy + std::fmt::Debug {}
@@ -40,12 +40,9 @@ pub type SizedTypeFor<V> = <<V as PostingValue>::Handler as ValueHandler>::Sized
 /// Posting list of ids, where ids are compressed.
 pub type IdsPostingList = PostingList<()>;
 
-/// Non-owning posting list of ids, where ids are compressed.
-pub type IdsPostingListView<'a> = PostingListView<'a, ()>;
-
 pub use builder::PostingBuilder;
-pub use iterator::PostingIterator;
-pub use posting_list::{PostingChunk, PostingElement, PostingList, RemainderPosting};
+pub use iterator::{PostingIterator, PostingLenIterator};
+pub use posting_list::{PostingChunk, PostingElement, PostingLen, PostingList, RemainderPosting};
 pub use value_handler::{PostingValue, SizedHandler, UnsizedHandler, ValueHandler};
 pub use view::{PostingListComponents, PostingListView};
 pub use visitor::PostingVisitor;

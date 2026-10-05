@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::path::Path;
@@ -12,50 +12,50 @@ use atomic_refcell::AtomicRefCell;
 use bitvec::macros::internal::funty::Integral;
 use common::budget::ResourcePermit;
 use common::counter::hardware_counter::HardwareCounterCell;
-use common::flags::feature_flags;
+use common::flags::FeatureFlags;
 use common::progress_tracker::ProgressTracker;
 use common::small_uint::U24;
 use common::storage_version::StorageVersion;
-use common::types::PointOffsetType;
+use common::types::{DeferredBehavior, PointOffsetType};
+use common::universal_io::MmapFs;
 use fs_err as fs;
 use itertools::Itertools;
 use rand::Rng;
 use tempfile::TempDir;
 use uuid::Uuid;
 
-#[cfg(feature = "rocksdb")]
-use super::rocksdb_builder::RocksDbBuilder;
 use super::{
-    create_mutable_id_tracker, create_payload_storage, create_sparse_vector_index,
-    create_sparse_vector_storage, get_payload_index_path, get_vector_index_path,
-    get_vector_storage_path, open_vector_storage,
+    create_mutable_id_tracker, create_payload_storage, create_sparse_vector_storage,
+    get_payload_index_path, get_vector_index_path, get_vector_storage_path,
+    open_or_create_sparse_vector_index, open_vector_storage,
 };
 use crate::common::error_logging::LogError;
 use crate::common::operation_error::{OperationError, OperationResult, check_process_stopped};
-use crate::entry::ReadSegmentEntry;
+use crate::entry::entry_point::StorageSegmentEntry as _;
 use crate::id_tracker::compressed::compressed_point_mappings::CompressedPointMappings;
+use crate::id_tracker::disk_id_tracker::DiskIdTracker;
 use crate::id_tracker::immutable_id_tracker::ImmutableIdTracker;
 use crate::id_tracker::in_memory_id_tracker::InMemoryIdTracker;
-use crate::id_tracker::{IdTracker, IdTrackerEnum, for_each_unique_point};
+use crate::id_tracker::{IdTracker, IdTrackerEnum, IdTrackerRead, for_each_unique_point};
 use crate::index::field_index::FieldIndex;
 use crate::index::sparse_index::sparse_vector_index::SparseVectorIndexOpenArgs;
-use crate::index::struct_payload_index::StructPayloadIndex;
-use crate::index::{PayloadIndex, VectorIndexEnum};
+use crate::index::struct_payload_index::{IndexLoadMode, StorageType, StructPayloadIndex};
+use crate::index::{PayloadIndex, PayloadIndexRead, VectorIndexEnum};
 use crate::payload_storage::PayloadStorage;
 use crate::payload_storage::payload_storage_enum::PayloadStorageEnum;
 use crate::segment::{Segment, SegmentVersion};
-use crate::segment_constructor::batched_reader::{BatchedVectorReader, PointData};
+use crate::segment_constructor::batched_reader::{PointData, merge_from};
 use crate::segment_constructor::{
     VectorIndexBuildArgs, VectorIndexOpenArgs, build_vector_index, load_segment,
 };
 use crate::types::{
-    CompactExtendedPointId, ExtendedPointId, HnswGlobalConfig, PayloadFieldSchema, PayloadKeyType,
-    SegmentConfig, SegmentState, SeqNumberType, VectorNameBuf,
+    CompactExtendedPointId, ExtendedPointId, HnswGlobalConfig, Memory, PayloadFieldSchema,
+    PayloadKeyType, SegmentConfig, SegmentState, SeqNumberType, VectorNameBuf, VectorStorageType,
 };
 use crate::vector_storage::quantized::quantized_vectors::{
     QuantizedVectors, QuantizedVectorsStorageType,
 };
-use crate::vector_storage::{VectorStorage, VectorStorageEnum};
+use crate::vector_storage::{VectorStorage, VectorStorageEnum, VectorStorageRead, graph_inline};
 
 /// Structure for constructing segment out of several other segments
 pub struct SegmentBuilder {
@@ -65,6 +65,7 @@ pub struct SegmentBuilder {
     vector_data: HashMap<VectorNameBuf, VectorData>,
     segment_config: SegmentConfig,
     hnsw_global_config: HnswGlobalConfig,
+    feature_flags: FeatureFlags,
 
     // The temporary segment directory
     temp_dir: TempDir,
@@ -72,6 +73,13 @@ pub struct SegmentBuilder {
 
     // Payload key to defragment data to
     defragment_keys: Vec<PayloadKeyType>,
+
+    // Vector names that currently exist in the live collection schema. Used to decide what to do
+    // with a source vector name that is absent from this builder's (frozen) target schema:
+    // - present here (or `None`, i.e. unknown) => cancel the merge (the CreateVectorName race);
+    // - absent here => a previously deleted vector whose data still lingers in older segment
+    //   files, safe to prune. See the merge loop in `update`.
+    live_vector_names: Option<HashSet<VectorNameBuf>>,
 }
 
 struct VectorData {
@@ -84,39 +92,30 @@ impl SegmentBuilder {
         temp_dir: &Path,
         segment_config: &SegmentConfig,
         hnsw_global_config: &HnswGlobalConfig,
+        feature_flags: FeatureFlags,
     ) -> OperationResult<Self> {
         let temp_dir = create_temp_dir(temp_dir)?;
 
         let id_tracker = if segment_config.is_appendable() {
-            IdTrackerEnum::MutableIdTracker(create_mutable_id_tracker(temp_dir.path())?)
+            // Deferred state is applied when the freshly built segment is reloaded
+            // via `load_segment`. The transient builder tracker doesn't need it.
+            IdTrackerEnum::MutableIdTracker(create_mutable_id_tracker(temp_dir.path(), None)?)
         } else {
             IdTrackerEnum::InMemoryIdTracker(InMemoryIdTracker::new())
         };
 
-        #[cfg(feature = "rocksdb")]
-        let mut db_builder = RocksDbBuilder::new(temp_dir.path(), segment_config)?;
-
-        let payload_storage = create_payload_storage(
-            #[cfg(feature = "rocksdb")]
-            &mut db_builder,
-            temp_dir.path(),
-            segment_config,
-        )?;
+        // A segment being built is thrown away on a crash, and durably flushed before it is
+        // loaded, so its storages don't need a journal to repair torn writes
+        let mut payload_storage = create_payload_storage(temp_dir.path(), segment_config)?;
+        payload_storage.disable_journal();
 
         let mut vector_data = HashMap::new();
 
         for (vector_name, vector_config) in &segment_config.vector_data {
             let vector_storage_path = get_vector_storage_path(temp_dir.path(), vector_name);
-            let vector_storage = open_vector_storage(
-                #[cfg(feature = "rocksdb")]
-                &mut db_builder,
-                vector_config,
-                #[cfg(feature = "rocksdb")]
-                &Default::default(),
-                &vector_storage_path,
-                #[cfg(feature = "rocksdb")]
-                vector_name,
-            )?;
+            let vector_index_path = get_vector_index_path(temp_dir.path(), vector_name);
+            let vector_storage =
+                open_vector_storage(vector_config, &vector_storage_path, &vector_index_path)?;
 
             vector_data.insert(
                 vector_name.to_owned(),
@@ -130,16 +129,13 @@ impl SegmentBuilder {
         for (vector_name, sparse_vector_config) in &segment_config.sparse_vector_data {
             let vector_storage_path = get_vector_storage_path(temp_dir.path(), vector_name);
 
-            let vector_storage = create_sparse_vector_storage(
-                #[cfg(feature = "rocksdb")]
-                &mut db_builder,
+            let mut vector_storage = create_sparse_vector_storage(
                 &vector_storage_path,
-                #[cfg(feature = "rocksdb")]
-                vector_name,
                 &sparse_vector_config.storage_type,
-                #[cfg(feature = "rocksdb")]
-                &Default::default(),
             )?;
+            if let VectorStorageEnum::SparseMmap(storage) = &mut vector_storage {
+                storage.disable_journal();
+            }
 
             vector_data.insert(
                 vector_name.to_owned(),
@@ -157,14 +153,28 @@ impl SegmentBuilder {
             vector_data,
             segment_config: segment_config.clone(),
             hnsw_global_config: hnsw_global_config.clone(),
+            feature_flags,
             temp_dir,
             indexed_fields: Default::default(),
             defragment_keys: vec![],
+            live_vector_names: None,
         })
     }
 
     pub fn set_defragment_keys(&mut self, keys: Vec<PayloadKeyType>) {
         self.defragment_keys = keys;
+    }
+
+    /// Set the vector names that currently exist in the live collection schema.
+    ///
+    /// When set, [`SegmentBuilder::update`] prunes (rather than rejects) source vector names that
+    /// are absent from both the target schema and this set, i.e. vectors that were deleted from the
+    /// collection but whose data still lingers in older segment files. Source vector names that are
+    /// still present in the live schema keep cancelling the merge, since those signal the
+    /// CreateVectorName-vs-optimizer race rather than a genuine deletion. When unset, every
+    /// source-superset mismatch cancels (the conservative default).
+    pub fn set_live_vector_names(&mut self, names: HashSet<VectorNameBuf>) {
+        self.live_vector_names = Some(names);
     }
 
     pub fn remove_indexed_field(&mut self, field: &PayloadKeyType) {
@@ -195,12 +205,16 @@ impl SegmentBuilder {
     ///
     /// Note: This value doesn't guarantee strict ordering in ambiguous cases.
     ///       It should only be used in optimization purposes, not for correctness.
-    fn _get_ordering_value(internal_id: PointOffsetType, indices: &[FieldIndex]) -> u64 {
+    fn _get_ordering_value(
+        internal_id: PointOffsetType,
+        indices: &[FieldIndex],
+        hw_counter: &HardwareCounterCell,
+    ) -> u64 {
         let mut ordering = 0;
         for payload_index in indices {
             match payload_index {
                 FieldIndex::IntMapIndex(index) => {
-                    if let Some(numbers) = index.get_values(internal_id) {
+                    if let Some(numbers) = index.get_values(internal_id, hw_counter) {
                         for number in numbers {
                             ordering = ordering.wrapping_add(*number as u64);
                         }
@@ -208,7 +222,7 @@ impl SegmentBuilder {
                     break;
                 }
                 FieldIndex::KeywordIndex(index) => {
-                    if let Some(keywords) = index.get_values(internal_id) {
+                    if let Some(keywords) = index.get_values(internal_id, hw_counter) {
                         for keyword in keywords {
                             let mut hasher = AHasher::default();
                             keyword.hash(&mut hasher);
@@ -252,7 +266,7 @@ impl SegmentBuilder {
                     break;
                 }
                 FieldIndex::UuidMapIndex(index) => {
-                    if let Some(ids) = index.get_values(internal_id) {
+                    if let Some(ids) = index.get_values(internal_id, hw_counter) {
                         uuid_hash(&mut ordering, ids.map(Cow::into_owned));
                     }
                     break;
@@ -281,7 +295,12 @@ impl SegmentBuilder {
     ///
     /// * `bool` - if `true` - data successfully added, if `false` - process was interrupted
     ///
-    pub fn update(&mut self, segments: &[&Segment], stopped: &AtomicBool) -> OperationResult<bool> {
+    pub fn update(
+        &mut self,
+        segments: &[&Segment],
+        stopped: &AtomicBool,
+        hw_counter: &HardwareCounterCell,
+    ) -> OperationResult<bool> {
         if segments.is_empty() {
             return Ok(true);
         }
@@ -321,6 +340,7 @@ impl SegmentBuilder {
                 point_data.ordering = point_data.ordering.wrapping_add(Self::_get_ordering_value(
                     point_data.internal_id,
                     payload_indices,
+                    hw_counter,
                 ));
             }
         }
@@ -334,6 +354,49 @@ impl SegmentBuilder {
 
         let vector_storages: Vec<_> = segments.iter().map(|i| &i.vector_data).collect();
 
+        // The merge loop below iterates `self.vector_data` (target), so any vector name present on
+        // a source segment but absent from the target schema is silently dropped. Whether that drop
+        // is correct depends on *why* the source carries a name the target lacks:
+        //
+        // - DeleteVectorName: the name was removed from the collection schema, but its data still
+        //   lives in older segment files. Pruning it on rebuild is the desired recovery.
+        // - CreateVectorName-vs-optimizer race: an optimizer launched with a pre-`CreateVectorName(V)`
+        //   config observes sources that gained V mid-flight. Dropping V here would emit a merged
+        //   segment without V at version >= V_opnum and break the next optimization round (whose
+        //   refreshed config has V). This must be cancelled and retried.
+        //
+        // We tell the two apart with the live collection schema (`live_vector_names`), which is
+        // authoritative because the schema is persisted before the op is applied to segments: a
+        // deleted name is gone from the live schema, a freshly created one is present. When the live
+        // schema is unknown (`None`) we conservatively cancel.
+        //
+        // Cancel via `Cancelled` rather than `ServiceError` so the optimization worker treats it as
+        // a recoverable cancellation (logged at debug, tracker marked Cancelled, no shard-level
+        // optimizer_errors, no RED status); the retry under the refreshed config merges cleanly.
+        for vector_storage in &vector_storages {
+            for source_vector_name in vector_storage.keys() {
+                if self.vector_data.contains_key(source_vector_name) {
+                    continue;
+                }
+                let deleted_from_schema = self
+                    .live_vector_names
+                    .as_ref()
+                    .is_some_and(|live| !live.contains(source_vector_name));
+                if deleted_from_schema {
+                    log::debug!(
+                        "Dropping vector name {source_vector_name} from source segment during \
+                         optimization; it was deleted from the collection schema"
+                    );
+                } else {
+                    return Err(OperationError::cancelled(format!(
+                        "Cannot update from other segment because it has an extra \
+                         vector name {source_vector_name} not in the target schema; \
+                         retry after optimizer config refresh"
+                    )));
+                }
+            }
+        }
+
         let internal_range_start = self.id_tracker.available_point_count() as PointOffsetType;
         let internal_range_end = internal_range_start + points_to_insert.len() as PointOffsetType;
 
@@ -345,10 +408,20 @@ impl SegmentBuilder {
             let other_vector_storages = vector_storages
                 .iter()
                 .map(|i| {
+                    // Symmetric counterpart to the source-superset check above:
+                    // when target has a vector name a source lacks, the
+                    // optimizer-vs-`DeleteVectorName` race is the typical
+                    // cause (V was removed from originals before the proxy
+                    // wrap, but the frozen `target_config` still has V).
+                    // Use `Cancelled` so the optimization worker treats this
+                    // as a recoverable cancellation — no shard-level
+                    // `optimizer_errors`, no RED status — and the next round
+                    // with refreshed config merges cleanly.
                     let other_vector_data = i.get(vector_name).ok_or_else(|| {
-                        OperationError::service_error(format!(
+                        OperationError::cancelled(format!(
                             "Cannot update from other segment because it is \
-                             missing vector name {vector_name}"
+                             missing vector name {vector_name}; \
+                             retry after optimizer config refresh"
                         ))
                     })?;
 
@@ -360,12 +433,14 @@ impl SegmentBuilder {
                 })
                 .collect::<Result<Vec<_>, OperationError>>()?;
 
-            let mut vectors_iter: BatchedVectorReader =
-                BatchedVectorReader::new(&points_to_insert, &other_vector_storages);
-
-            let internal_range = vector_data
-                .vector_storage
-                .update_from(&mut vectors_iter, stopped)?;
+            let source_refs: Vec<&VectorStorageEnum> =
+                other_vector_storages.iter().map(|s| &**s).collect();
+            let internal_range = merge_from(
+                &mut vector_data.vector_storage,
+                &points_to_insert,
+                &source_refs,
+                stopped,
+            )?;
 
             if new_internal_range != internal_range {
                 debug_assert!(
@@ -390,12 +465,14 @@ impl SegmentBuilder {
             let old_internal_id = point_data.internal_id;
 
             let other_payload = payloads[point_data.segment_index.get() as usize]
-                .get_payload_sequential(old_internal_id, &hw_counter)?; // Internal operation, no measurement needed!
+                .with_view(|v| v.get_payload_sequential(old_internal_id, &hw_counter))?; // Internal operation, no measurement needed!
 
-            match self
-                .id_tracker
-                .internal_id(ExtendedPointId::from(point_data.external_id))
-            {
+            match self.id_tracker.internal_id_with_behavior(
+                ExtendedPointId::from(point_data.external_id),
+                // Dedup guard on a freshly built target (no deferred heads
+                // here): match any existing copy of this external id.
+                DeferredBehavior::WithDeferred,
+            ) {
                 Some(existing_internal_id) => {
                     debug_assert!(
                         false,
@@ -451,7 +528,7 @@ impl SegmentBuilder {
         }
 
         for payload in payloads {
-            for (field, payload_schema) in payload.indexed_fields() {
+            for (field, payload_schema) in payload.with_view(|v| v.indexed_fields()) {
                 self.indexed_fields.insert(field, payload_schema);
             }
         }
@@ -468,6 +545,7 @@ impl SegmentBuilder {
             segments_path,
             Uuid::new_v4(),
             None,
+            true,
             ResourcePermit::dummy(get_num_indexing_threads(0) as u32),
             &AtomicBool::new(false),
             &mut rand::rng(),
@@ -477,12 +555,18 @@ impl SegmentBuilder {
         .unwrap()
     }
 
+    /// Build the segment.
+    ///
+    /// If `ready` is false, the version will not be stored, so the segment is skipped on
+    /// restart. The caller is then responsible for saving the version manually, once it is
+    /// safe to do so, to make the segment ready.
     #[allow(clippy::too_many_arguments)]
     pub fn build<R: Rng + ?Sized>(
         self,
         segments_path: &Path,
         segment_uuid: Uuid,
         deferred_internal_id: Option<PointOffsetType>,
+        ready: bool,
         permit: ResourcePermit,
         stopped: &AtomicBool,
         rng: &mut R,
@@ -495,11 +579,13 @@ impl SegmentBuilder {
                 id_tracker,
                 payload_storage,
                 mut vector_data,
-                segment_config,
+                mut segment_config,
                 hnsw_global_config,
+                feature_flags,
                 temp_dir,
                 indexed_fields,
                 defragment_keys: _,
+                live_vector_names: _,
             } = self;
 
             let progress_quantization = progress_segment.subtask("quantization");
@@ -516,28 +602,54 @@ impl SegmentBuilder {
             let progress_sparse_vector_index = progress_segment.subtask("sparse_vector_index");
 
             let appendable_flag = segment_config.is_appendable();
-
+            // A non-appendable segment is complete once built, its payloads are only read. Before
+            // the flush, which persists the layout
+            if !appendable_flag && feature_flags.compact_logstore_tracker {
+                payload_storage.make_immutable()?;
+            }
             payload_storage.flusher()()?;
             let payload_storage_arc = Arc::new(AtomicRefCell::new(payload_storage));
 
             let id_tracker = match id_tracker {
                 IdTrackerEnum::InMemoryIdTracker(in_memory_id_tracker) => {
-                    let (versions, mappings) = in_memory_id_tracker.into_internal();
-                    let compressed_mapping = CompressedPointMappings::from_mappings(mappings);
-                    let immutable_id_tracker =
-                        ImmutableIdTracker::new(temp_dir.path(), &versions, compressed_mapping)?;
-                    IdTrackerEnum::ImmutableIdTracker(immutable_id_tracker)
+                    match segment_config.id_tracker_memory_placement() {
+                        // Mapping stays on disk; a cached placement primes the page cache
+                        // with it when the built segment is loaded.
+                        Memory::Cold | Memory::Cached => {
+                            let disk_id_tracker = DiskIdTracker::from_in_memory_tracker(
+                                &MmapFs,
+                                in_memory_id_tracker,
+                                temp_dir.path(),
+                            )?;
+                            IdTrackerEnum::DiskIdTracker(disk_id_tracker)
+                        }
+                        // Mapping is held in RAM.
+                        Memory::Pinned => {
+                            let (versions, mappings) = in_memory_id_tracker.into_internal();
+                            let compressed_mapping =
+                                CompressedPointMappings::from_mappings(mappings);
+                            let immutable_id_tracker = ImmutableIdTracker::new(
+                                &MmapFs,
+                                temp_dir.path(),
+                                &versions,
+                                compressed_mapping,
+                            )?;
+                            IdTrackerEnum::ImmutableIdTracker(immutable_id_tracker)
+                        }
+                    }
                 }
                 IdTrackerEnum::MutableIdTracker(_) => id_tracker,
                 IdTrackerEnum::ImmutableIdTracker(_) => {
                     unreachable!("ImmutableIdTracker should not be used for building segment")
                 }
-                #[cfg(feature = "rocksdb")]
-                IdTrackerEnum::RocksDbIdTracker(_) => id_tracker,
+                IdTrackerEnum::DiskIdTracker(_) => {
+                    unreachable!("DiskIdTracker should not be used for building segment")
+                }
             };
 
             id_tracker.mapping_flusher()()?;
             id_tracker.versions_flusher()()?;
+            check_process_stopped(stopped)?;
             let id_tracker_arc = Arc::new(AtomicRefCell::new(id_tracker));
 
             let mut quantized_vectors = Self::update_quantization(
@@ -563,7 +675,7 @@ impl SegmentBuilder {
 
                 let vector_storage_arc = Arc::new(AtomicRefCell::new(vector_info.vector_storage));
 
-                old_indices.insert(vector_name, vector_info.old_indices);
+                old_indices.insert(vector_name.to_owned(), vector_info.old_indices);
 
                 vector_storages_arc.insert(vector_name.to_owned(), vector_storage_arc);
             }
@@ -581,6 +693,7 @@ impl SegmentBuilder {
 
                 vector_storages_arc.insert(vector_name.to_owned(), vector_storage_arc);
             }
+            check_process_stopped(stopped)?;
 
             let payload_index_path = get_payload_index_path(temp_dir.path());
 
@@ -590,9 +703,11 @@ impl SegmentBuilder {
                 id_tracker_arc.clone(),
                 vector_storages_arc.clone(),
                 &payload_index_path,
-                appendable_flag,
-                true,
+                StorageType::from_appendable(appendable_flag),
+                IndexLoadMode::CreateIfMissing,
             )?;
+            // Like the storages, the field indices of a segment being built need no journal
+            payload_index.disable_journal();
             for (field, payload_schema, progress) in indexed_fields {
                 progress.start();
                 payload_index.set_indexed(&field, payload_schema, hw_counter)?;
@@ -617,9 +732,11 @@ impl SegmentBuilder {
 
             // Arc permit to share it with each vector store
             let permit = Arc::new(permit);
+            check_process_stopped(stopped)?;
 
             progress_vector_index.start();
-            for (vector_name, vector_config) in &segment_config.vector_data {
+            for (vector_name, vector_config) in segment_config.vector_data.iter_mut() {
+                let vector_storage_path = get_vector_storage_path(temp_dir.path(), vector_name);
                 let vector_storage = vector_storages_arc.remove(vector_name).unwrap();
                 let quantized_vectors =
                     Arc::new(AtomicRefCell::new(quantized_vectors.remove(vector_name)));
@@ -640,7 +757,8 @@ impl SegmentBuilder {
                         stopped,
                         rng,
                         hnsw_global_config: &hnsw_global_config,
-                        feature_flags: feature_flags(),
+                        feature_flags,
+                        inline_vectors: vector_config.inline_vectors_in_graph(),
                         progress: progress_vector_index.running_subtask(vector_name),
                     },
                 )?;
@@ -658,6 +776,24 @@ impl SegmentBuilder {
                 // Index if always loaded on-disk=true from build function
                 // So we may clear unconditionally
                 index.clear_cache()?;
+
+                if feature_flags.combined_vector_storage && vector_config.inline_vectors_in_graph()
+                {
+                    // Reclaim the build storage from its other holders and
+                    // become the sole owner of it.
+                    drop(index);
+                    payload_index_arc
+                        .borrow_mut()
+                        .unregister_vector_storage(vector_name);
+                    let vector_storage = Arc::into_inner(vector_storage)
+                        .map(AtomicRefCell::into_inner)
+                        .ok_or(OperationError::service_error(
+                            "failed to reclaim vector storage for graph-inline finalization",
+                        ))?;
+
+                    graph_inline::finalize(&vector_storage_path, vector_storage)?;
+                    vector_config.storage_type = VectorStorageType::GraphInline;
+                }
             }
             drop(progress_vector_index);
 
@@ -667,7 +803,8 @@ impl SegmentBuilder {
 
                 let vector_storage_arc = vector_storages_arc.remove(vector_name).unwrap();
 
-                let index = create_sparse_vector_index(SparseVectorIndexOpenArgs {
+                let index = open_or_create_sparse_vector_index(SparseVectorIndexOpenArgs {
+                    fs: &MmapFs,
                     config: sparse_vector_config.index,
                     id_tracker: id_tracker_arc.clone(),
                     vector_storage: vector_storage_arc.clone(),
@@ -675,8 +812,6 @@ impl SegmentBuilder {
                     path: &vector_index_path,
                     stopped,
                     tick_progress: || (),
-                    // We don't use the `index` returned here so we always set deferred to `None`. It's been loaded properly later.
-                    deferred_internal_id: None,
                 })?;
 
                 if sparse_vector_config.storage_type.is_on_disk() {
@@ -703,6 +838,10 @@ impl SegmentBuilder {
             // Clear cache for payload index to avoid cache pollution
             payload_index_arc.borrow().clear_cache_if_on_disk()?;
 
+            // The id tracker is loaded into RAM but its on-disk files are written
+            // during the build; drop their page cache to avoid cache pollution.
+            id_tracker_arc.borrow().clear_cache_if_on_disk()?;
+
             // We're done with CPU-intensive tasks, release CPU permit
             debug_assert_eq!(
                 Arc::strong_count(&permit),
@@ -721,8 +860,10 @@ impl SegmentBuilder {
                 temp_dir.path(),
             )?;
 
-            // After version is saved, segment can be loaded on restart
-            SegmentVersion::save(temp_dir.path())?;
+            // Postpone until ready: this segment may still be missing pending proxy changes
+            if ready {
+                SegmentVersion::save(temp_dir.path())?;
+            }
             // All temp data is evicted from RAM
             temp_dir
         };
@@ -737,6 +878,7 @@ impl SegmentBuilder {
             segment_uuid,
             deferred_internal_id,
             stopped,
+            true, // ignore_missing_version: reloaded here before the version save above, if postponed
         )
     }
 
@@ -749,12 +891,11 @@ impl SegmentBuilder {
         progress: ProgressTracker,
     ) -> OperationResult<HashMap<VectorNameBuf, QuantizedVectors>> {
         progress.start();
-        let config = segment_config.clone();
 
         let mut quantized_vectors_map = HashMap::new();
 
         for (vector_name, vector_info) in vector_storages {
-            let Some(vector_config) = config.vector_data.get(vector_name) else {
+            let Some(vector_config) = segment_config.vector_data.get(vector_name) else {
                 continue;
             };
 
@@ -767,7 +908,7 @@ impl SegmentBuilder {
 
             let max_threads = permit.num_cpus as usize;
 
-            if let Some(quantization_config) = config.quantization_config(vector_name) {
+            if let Some(quantization_config) = segment_config.quantization_config(vector_name) {
                 // Don't build quantization for appendable vectors if quantization method does not support it
                 if is_appendable && !quantization_config.supports_appendable() {
                     continue;

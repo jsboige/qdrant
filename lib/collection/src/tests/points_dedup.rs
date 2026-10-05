@@ -171,6 +171,7 @@ async fn test_scroll_dedup() {
                 order_by: None,
             },
             None,
+            None,
             &ShardSelectorInternal::All,
             None,
             HwMeasurementAcc::new(),
@@ -199,6 +200,7 @@ async fn test_scroll_dedup() {
                 order_by: Some(OrderByInterface::Key("num".parse().unwrap())),
             },
             None,
+            None,
             &ShardSelectorInternal::All,
             None,
             HwMeasurementAcc::new(),
@@ -220,6 +222,7 @@ async fn test_scroll_dedup() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg_attr(target_os = "windows", ignore = "slow on Windows, not OS-specific")]
 async fn test_retrieve_dedup() {
     let collection = fixture().await;
 
@@ -233,6 +236,7 @@ async fn test_retrieve_dedup() {
                 with_payload: Some(false.into()),
                 with_vector: false.into(),
             },
+            None,
             None,
             &ShardSelectorInternal::All,
             None,
@@ -252,6 +256,7 @@ async fn test_retrieve_dedup() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg_attr(target_os = "windows", ignore = "slow on Windows, not OS-specific")]
 async fn test_search_dedup() {
     let collection = fixture().await;
 
@@ -271,6 +276,7 @@ async fn test_search_dedup() {
                 with_vector: None,
                 score_threshold: None,
             },
+            None,
             None,
             &ShardSelectorInternal::All,
             None,

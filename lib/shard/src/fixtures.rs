@@ -187,11 +187,13 @@ pub fn empty_segment_with_deferred(path: &Path, deferred_internal_id: u32) -> Se
             )]),
             sparse_vector_data: Default::default(),
             payload_storage_type: Default::default(),
+            id_tracker_memory: None,
         },
         Some(deferred_internal_id),
         true,
     )
     .unwrap()
+    .0
 }
 
 /// Builds a segment with a deferred threshold that causes points 4 and 5 to be deferred, while points 1, 2, and 3 are not deferred.
@@ -207,7 +209,7 @@ pub fn build_segment_with_deferred_1(path: &Path) -> Segment {
     let hw_counter = HardwareCounterCell::new();
 
     // Build segment with deferred threshold
-    let mut segment = build_segment(
+    let (mut segment, _) = build_segment(
         path,
         &segment::types::SegmentConfig {
             vector_data: HashMap::from([(
@@ -224,6 +226,7 @@ pub fn build_segment_with_deferred_1(path: &Path) -> Segment {
             )]),
             sparse_vector_data: Default::default(),
             payload_storage_type: Default::default(),
+            id_tracker_memory: None,
         },
         Some(deferred_internal_id),
         true,

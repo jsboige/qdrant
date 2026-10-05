@@ -1,14 +1,13 @@
 // Common helper items for the examples.
 // See lib/edge/python/examples/common.py for the equivalent Python helpers.
 
-use std::collections::HashMap;
 use std::error::Error;
 use std::path::Path;
 
 use qdrant_edge::external::serde_json::json;
 use qdrant_edge::{
-    DEFAULT_VECTOR_NAME, Distance, EdgeConfig, EdgeShard, EdgeVectorParams, PointInsertOperations,
-    PointOperations, PointStruct, UpdateOperation,
+    DEFAULT_VECTOR_NAME, Distance, EdgeConfig, EdgeShard, EdgeVectorParams, Memory,
+    PointInsertOperations, PointOperations, PointStruct, UpdateOperation,
 };
 
 pub const DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data");
@@ -24,26 +23,18 @@ pub fn load_new_shard() -> Result<EdgeShard, Box<dyn Error>> {
 
     fs_err::create_dir_all(TMP_DIR)?;
 
-    // Load Qdrant Edge shard
-    let config = EdgeConfig {
-        on_disk_payload: false,
-        vectors: HashMap::from([(
-            DEFAULT_VECTOR_NAME.to_string(),
-            EdgeVectorParams {
-                size: 4,
-                distance: Distance::Dot,
-                quantization_config: None,
-                multivector_config: None,
-                datatype: None,
-                on_disk: None,
-                hnsw_config: None,
-            },
-        )]),
-        sparse_vectors: HashMap::new(),
-        hnsw_config: Default::default(),
-        quantization_config: None,
-        optimizers: Default::default(),
-    };
+    // `memory` controls how each component is held in RAM; data is always persisted on disk.
+    // `Cold` pages data in on demand, `Cached` preloads it into the page cache, `Pinned` keeps
+    // it on the heap.
+    let config = EdgeConfig::builder()
+        .payload_memory(Memory::Cached)
+        .vector(
+            DEFAULT_VECTOR_NAME,
+            EdgeVectorParams::builder(4, Distance::Dot)
+                .memory(Memory::Cached)
+                .build(),
+        )
+        .build();
 
     Ok(EdgeShard::load(Path::new(TMP_DIR), Some(config))?)
 }

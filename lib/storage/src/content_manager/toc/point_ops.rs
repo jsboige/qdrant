@@ -6,12 +6,15 @@ use collection::collection::distance_matrix::{
 };
 use collection::config::ShardingMethod;
 use collection::grouping::GroupBy;
-use collection::grouping::group_by::GroupRequest;
+use collection::grouping::group_by::{GroupRequest, SourceRequest};
 use collection::operations::consistency_params::ReadConsistency;
 use collection::operations::point_ops::WriteOrdering;
+use collection::operations::routing::RoutingToken;
 use collection::operations::shard_selector_internal::ShardSelectorInternal;
 use collection::operations::types::*;
-use collection::operations::universal_query::collection_query::CollectionQueryRequest;
+use collection::operations::universal_query::collection_query::{
+    CollectionPrefetch, CollectionQueryRequest,
+};
 use collection::operations::{CollectionUpdateOperations, OperationWithClockTag};
 use collection::shards::shard_trait::WaitUntil;
 use collection::{discovery, recommendations};
@@ -27,7 +30,6 @@ use shard::search::CoreSearchRequestBatch;
 use super::TableOfContent;
 use crate::content_manager::errors::{StorageError, StorageResult};
 use crate::rbac::Auth;
-use crate::rbac::auditable_operation::AuditableOperation;
 
 impl TableOfContent {
     /// Recommend points using positive and negative example from the request
@@ -46,6 +48,7 @@ impl TableOfContent {
         collection_name: &str,
         request: RecommendRequestInternal,
         read_consistency: Option<ReadConsistency>,
+        routing_token: Option<RoutingToken>,
         shard_selector: ShardSelectorInternal,
         auth: Auth,
         timeout: Option<Duration>,
@@ -54,11 +57,13 @@ impl TableOfContent {
         let collection_pass = auth.check_point_op(collection_name, &request, "recommend")?;
 
         let collection = self.get_collection(&collection_pass).await?;
+        self.validate_recommend_lookup_from(&request).await?;
         recommendations::recommend_by(
             request,
             &collection,
             |name| self.get_collection_opt(name),
             read_consistency,
+            routing_token,
             shard_selector,
             timeout,
             hw_measurement_acc,
@@ -72,16 +77,18 @@ impl TableOfContent {
     /// # Arguments
     ///
     /// * `collection_name` - for what collection do we recommend
-    /// * `request` - [`RecommendRequestBatch`]
+    /// * `requests` - [`RecommendRequestBatch`]
     ///
     /// # Result
     ///
     /// Points with recommendation score
+    #[allow(clippy::too_many_arguments)]
     pub async fn recommend_batch(
         &self,
         collection_name: &str,
         mut requests: Vec<(RecommendRequestInternal, ShardSelectorInternal)>,
         read_consistency: Option<ReadConsistency>,
+        routing_token: Option<RoutingToken>,
         auth: Auth,
         timeout: Option<Duration>,
         hw_measurement_acc: HwMeasurementAcc,
@@ -96,11 +103,15 @@ impl TableOfContent {
         };
 
         let collection = self.get_collection(&collection_pass).await?;
+        for (request, _shard_selector) in &requests {
+            self.validate_recommend_lookup_from(request).await?;
+        }
         recommendations::recommend_batch_by(
             requests,
             &collection,
             |name| self.get_collection_opt(name),
             read_consistency,
+            routing_token,
             timeout,
             hw_measurement_acc,
         )
@@ -128,6 +139,7 @@ impl TableOfContent {
         collection_name: &str,
         mut request: CoreSearchRequestBatch,
         read_consistency: Option<ReadConsistency>,
+        routing_token: Option<RoutingToken>,
         shard_selection: ShardSelectorInternal,
         auth: Auth,
         timeout: Option<Duration>,
@@ -147,6 +159,7 @@ impl TableOfContent {
             .core_search_batch(
                 request,
                 read_consistency,
+                routing_token,
                 shard_selection,
                 timeout,
                 hw_measurement_acc,
@@ -173,6 +186,7 @@ impl TableOfContent {
         collection_name: &str,
         request: CountRequestInternal,
         read_consistency: Option<ReadConsistency>,
+        routing_token: Option<RoutingToken>,
         timeout: Option<Duration>,
         shard_selection: ShardSelectorInternal,
         auth: Auth,
@@ -185,6 +199,7 @@ impl TableOfContent {
             .count(
                 request,
                 read_consistency,
+                routing_token,
                 &shard_selection,
                 timeout,
                 hw_measurement_acc,
@@ -210,6 +225,7 @@ impl TableOfContent {
         collection_name: &str,
         request: PointRequestInternal,
         read_consistency: Option<ReadConsistency>,
+        routing_token: Option<RoutingToken>,
         timeout: Option<Duration>,
         shard_selection: ShardSelectorInternal,
         auth: Auth,
@@ -222,6 +238,7 @@ impl TableOfContent {
             .retrieve(
                 request,
                 read_consistency,
+                routing_token,
                 &shard_selection,
                 timeout,
                 hw_measurement_acc,
@@ -236,6 +253,7 @@ impl TableOfContent {
         collection_name: &str,
         request: GroupRequest,
         read_consistency: Option<ReadConsistency>,
+        routing_token: Option<RoutingToken>,
         shard_selection: ShardSelectorInternal,
         auth: Auth,
         timeout: Option<Duration>,
@@ -244,11 +262,13 @@ impl TableOfContent {
         let collection_pass = auth.check_point_op(collection_name, &request, "group")?;
 
         let collection = self.get_collection(&collection_pass).await?;
+        self.validate_group_lookup_from(&request).await?;
 
         let collection_by_name = |name| self.get_collection_opt(name);
 
         let group_by = GroupBy::new(request, &collection, collection_by_name, hw_measurement_acc)
             .set_read_consistency(read_consistency)
+            .set_routing_token(routing_token)
             .set_shard_selection(shard_selection)
             .set_timeout(timeout);
 
@@ -265,6 +285,7 @@ impl TableOfContent {
         collection_name: &str,
         request: DiscoverRequestInternal,
         read_consistency: Option<ReadConsistency>,
+        routing_token: Option<RoutingToken>,
         shard_selector: ShardSelectorInternal,
         auth: Auth,
         timeout: Option<Duration>,
@@ -278,6 +299,7 @@ impl TableOfContent {
             &collection,
             |name| self.get_collection_opt(name),
             read_consistency,
+            routing_token,
             shard_selector,
             timeout,
             hw_measurement_acc,
@@ -286,11 +308,13 @@ impl TableOfContent {
         .map_err(|err| err.into())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn discover_batch(
         &self,
         collection_name: &str,
         mut requests: Vec<(DiscoverRequestInternal, ShardSelectorInternal)>,
         read_consistency: Option<ReadConsistency>,
+        routing_token: Option<RoutingToken>,
         auth: Auth,
         timeout: Option<Duration>,
         hw_measurement_acc: HwMeasurementAcc,
@@ -311,6 +335,7 @@ impl TableOfContent {
             &collection,
             |name| self.get_collection_opt(name),
             read_consistency,
+            routing_token,
             timeout,
             hw_measurement_acc,
         )
@@ -335,6 +360,7 @@ impl TableOfContent {
         collection_name: &str,
         request: ScrollRequestInternal,
         read_consistency: Option<ReadConsistency>,
+        routing_token: Option<RoutingToken>,
         timeout: Option<Duration>,
         shard_selection: ShardSelectorInternal,
         auth: Auth,
@@ -347,6 +373,7 @@ impl TableOfContent {
             .scroll_by(
                 request,
                 read_consistency,
+                routing_token,
                 &shard_selection,
                 timeout,
                 hw_measurement_acc,
@@ -355,11 +382,13 @@ impl TableOfContent {
             .map_err(|err| err.into())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn query_batch(
         &self,
         collection_name: &str,
         mut requests: Vec<(CollectionQueryRequest, ShardSelectorInternal)>,
         read_consistency: Option<ReadConsistency>,
+        routing_token: Option<RoutingToken>,
         auth: Auth,
         timeout: Option<Duration>,
         hw_measurement_acc: HwMeasurementAcc,
@@ -374,12 +403,16 @@ impl TableOfContent {
         };
 
         let collection = self.get_collection(&collection_pass).await?;
+        for (request, _shard_selector) in &requests {
+            self.validate_query_lookup_from(request).await?;
+        }
 
         collection
             .query_batch(
                 requests,
                 |name| self.get_collection_opt(name),
                 read_consistency,
+                routing_token,
                 timeout,
                 hw_measurement_acc,
             )
@@ -395,6 +428,7 @@ impl TableOfContent {
         request: FacetParams,
         shard_selection: ShardSelectorInternal,
         read_consistency: Option<ReadConsistency>,
+        routing_token: Option<RoutingToken>,
         auth: Auth,
         timeout: Option<Duration>,
         hw_measurement_acc: HwMeasurementAcc,
@@ -408,6 +442,7 @@ impl TableOfContent {
                 request,
                 shard_selection,
                 read_consistency,
+                routing_token,
                 timeout,
                 hw_measurement_acc,
             )
@@ -421,6 +456,7 @@ impl TableOfContent {
         collection_name: &str,
         request: CollectionSearchMatrixRequest,
         read_consistency: Option<ReadConsistency>,
+        routing_token: Option<RoutingToken>,
         shard_selection: ShardSelectorInternal,
         auth: Auth,
         timeout: Option<Duration>,
@@ -436,6 +472,7 @@ impl TableOfContent {
                 request,
                 shard_selection,
                 read_consistency,
+                routing_token,
                 timeout,
                 hw_measurement_acc,
             )
@@ -667,5 +704,64 @@ impl TableOfContent {
         };
 
         Ok(res)
+    }
+
+    async fn validate_lookup_from_collection_exists(
+        &self,
+        collection_name: &str,
+    ) -> StorageResult<()> {
+        match self.get_collection_unchecked(collection_name).await {
+            Ok(_) => Ok(()),
+            Err(StorageError::NotFound { .. }) => Err(StorageError::not_found(format!(
+                "Collection {collection_name} not found"
+            ))),
+            Err(err) => Err(err),
+        }
+    }
+
+    async fn validate_recommend_lookup_from(
+        &self,
+        request: &RecommendRequestInternal,
+    ) -> StorageResult<()> {
+        if let Some(lookup_from) = &request.lookup_from {
+            self.validate_lookup_from_collection_exists(&lookup_from.collection)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn validate_query_lookup_from(
+        &self,
+        request: &CollectionQueryRequest,
+    ) -> StorageResult<()> {
+        if let Some(lookup_from) = &request.lookup_from {
+            self.validate_lookup_from_collection_exists(&lookup_from.collection)
+                .await?;
+        }
+
+        let mut prefetches: Vec<&CollectionPrefetch> = request.prefetch.iter().collect();
+        while let Some(prefetch) = prefetches.pop() {
+            if let Some(lookup_from) = &prefetch.lookup_from {
+                self.validate_lookup_from_collection_exists(&lookup_from.collection)
+                    .await?;
+            }
+            prefetches.extend(prefetch.prefetch.iter());
+        }
+
+        Ok(())
+    }
+
+    async fn validate_group_lookup_from(&self, request: &GroupRequest) -> StorageResult<()> {
+        match &request.source {
+            SourceRequest::Search(_) => {}
+            SourceRequest::Recommend(request) => {
+                self.validate_recommend_lookup_from(request).await?;
+            }
+            SourceRequest::Query(request) => {
+                self.validate_query_lookup_from(request).await?;
+            }
+        }
+
+        Ok(())
     }
 }

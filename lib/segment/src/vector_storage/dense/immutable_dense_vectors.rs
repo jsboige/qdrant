@@ -3,14 +3,16 @@ use std::io::Write;
 use std::mem::{self, MaybeUninit, size_of};
 use std::path::Path;
 
+use bytemuck::TransparentWrapper;
 use common::bitvec::{BitSlice, BitSliceExt as _};
 use common::generic_consts::{AccessPattern, Random, Sequential};
 use common::maybe_uninit::maybe_uninit_fill_from;
 use common::mmap;
-use common::mmap::{AdviceSetting, MmapBitSlice, MmapFlusher};
+use common::mmap::{AdviceSetting, Flusher, MmapBitSlice};
 use common::types::PointOffsetType;
 use common::universal_io::{
-    MmapFile, OpenOptions as UniversalOpenOptions, ReadOnly, ReadRange, TypedStorage, UniversalRead,
+    CachedReadFs, MmapFile, OpenOptions as UniversalOpenOptions, Populate, ReadOnly, ReadRange,
+    TypedStorage, UioResult, UniversalRead, UniversalReadFs,
 };
 use fs_err::{File, OpenOptions};
 
@@ -24,80 +26,76 @@ const HEADER_SIZE: usize = 4;
 const VECTORS_HEADER: &[u8; HEADER_SIZE] = b"data";
 const DELETED_HEADER: &[u8; HEADER_SIZE] = b"drop";
 
-/// Immutable storage for dense vectors.
+/// Immutable dense vector blob, shared by the writable [`ImmutableDenseVectors`]
+/// and the read-only dense storage. Provides typed read access for `T` through
+/// the [`UniversalRead`] backend `S`; holds no deletion flags.
 #[derive(Debug)]
-pub struct ImmutableDenseVectors<T, S = MmapFile>
+pub struct ImmutableDenseVectorData<T, S = MmapFile>
 where
     T: PrimitiveVectorElement,
-    S: UniversalRead<T>,
+    S: UniversalRead,
 {
     pub dim: usize,
     pub num_vectors: usize,
-    /// Vector data storage, providing read access via [`UniversalRead<T>`].
+    /// Vector data storage, providing typed read access for `T`.
     storage: TypedStorage<ReadOnly<S>, T>,
-    /// Memory mapped deletion flags
-    deleted: MmapBitSlice,
-    /// Current number of deleted vectors.
-    pub deleted_count: usize,
 }
 
-impl<T: PrimitiveVectorElement, S: UniversalRead<T>> ImmutableDenseVectors<T, S> {
-    pub fn open(
-        vectors_path: &Path,
-        deleted_path: &Path,
-        dim: usize,
-        populate: bool,
-    ) -> OperationResult<Self> {
-        // Allocate/open vectors file
-        ensure_mmap_file_size(vectors_path, VECTORS_HEADER, None)
-            .describe("Create mmap data file")?;
-
-        let file_len = fs_err::metadata(vectors_path)?.len() as usize;
-        let num_vectors = file_len.saturating_sub(HEADER_SIZE) / dim / size_of::<T>();
-
-        let options = UniversalOpenOptions {
+impl<T: PrimitiveVectorElement, S: UniversalRead> ImmutableDenseVectorData<T, S> {
+    fn open_options(populate: Populate) -> UniversalOpenOptions {
+        UniversalOpenOptions {
             writeable: false,
             need_sequential: true,
-            disk_parallel: None,
-            populate: Some(populate),
-            advice: None,
-            prevent_caching: None,
-        };
-        let storage = TypedStorage::open(vectors_path, options).map_err(|e| {
+            populate,
+            advice: AdviceSetting::Global,
+        }
+    }
+
+    /// Schedule background prefetch of the vector blob [`Self::open`] reads.
+    pub fn preopen(
+        fs: &impl CachedReadFs<File = S>,
+        vectors_path: &Path,
+        populate: Populate,
+    ) -> OperationResult<()> {
+        // Vector data
+        fs.schedule_open(vectors_path, Some(Self::open_options(populate)), None);
+
+        Ok(())
+    }
+
+    /// Open the immutable vector blob read-only through `fs`. The file must
+    /// already exist (the writer creates it); nothing is created here.
+    pub fn open(
+        fs: &impl UniversalReadFs<File = S>,
+        vectors_path: &Path,
+        dim: usize,
+        populate: Populate,
+    ) -> OperationResult<Self> {
+        let options = Self::open_options(populate);
+        let read_only =
+            ReadOnly::open(fs, vectors_path, options, Default::default()).map_err(|e| {
+                crate::common::operation_error::OperationError::service_error(format!(
+                    "Failed to open vector mmap at {}: {e}",
+                    vectors_path.display()
+                ))
+            })?;
+        // Vector count from the length read through `fs` — the backing store may
+        // be remote, so never stat the path locally.
+        let file_len = read_only.len::<u8>().map_err(|e| {
             crate::common::operation_error::OperationError::service_error(format!(
-                "Failed to open vector mmap at {}: {e}",
+                "Failed to read length of vector file {}: {e}",
                 vectors_path.display()
             ))
-        })?;
+        })? as usize;
+        let num_vectors = file_len.saturating_sub(HEADER_SIZE) / dim / size_of::<T>();
 
-        // Allocate/open deleted mmap
-        let deleted_mmap_size = deleted_mmap_size(num_vectors);
-        ensure_mmap_file_size(deleted_path, DELETED_HEADER, Some(deleted_mmap_size as u64))
-            .describe("Create mmap deleted file")?;
-        let deleted_mmap = mmap::open_write_mmap(deleted_path, AdviceSetting::Global, false)
-            .describe("Open mmap deleted for writing")?;
-
-        // Advise kernel that we'll need this page soon so the kernel can prepare
-        #[cfg(unix)]
-        if let Err(err) = deleted_mmap.advise(memmap2::Advice::WillNeed) {
-            log::error!("Failed to advise MADV_WILLNEED for deleted flags: {err}");
-        }
-
-        // Transform into mmap BitSlice
-        let deleted = MmapBitSlice::try_from(deleted_mmap, deleted_mmap_data_start())?;
-        let deleted_count = deleted.count_ones();
+        let storage = TypedStorage::<ReadOnly<S>, T>::wrap(read_only);
 
         Ok(Self {
             dim,
             num_vectors,
             storage,
-            deleted,
-            deleted_count,
         })
-    }
-
-    pub fn flusher(&self) -> MmapFlusher {
-        self.deleted.flusher()
     }
 
     /// Returns the byte offset within the file at which the vector for `key` begins.
@@ -124,7 +122,7 @@ impl<T: PrimitiveVectorElement, S: UniversalRead<T>> ImmutableDenseVectors<T, S>
         };
 
         self.storage
-            .read::<P>(range)
+            .read(range, P::default())
             .expect("vector read from storage failed")
     }
 
@@ -139,25 +137,165 @@ impl<T: PrimitiveVectorElement, S: UniversalRead<T>> ImmutableDenseVectors<T, S>
             .map(|offset| self.raw_vector_offset::<P>(offset))
     }
 
-    pub fn for_each_in_batch<F: FnMut(usize, &[T])>(&self, keys: &[PointOffsetType], mut f: F) {
-        debug_assert!(keys.len() <= VECTOR_READ_BATCH_SIZE);
+    pub fn for_each_in_batch<F: FnMut(usize, &[T])>(
+        &self,
+        keys: &[PointOffsetType],
+        mut f: F,
+    ) -> OperationResult<()> {
+        if TypedStorage::<ReadOnly<S>, T>::kind().can_be_async() {
+            return self.for_each_in_batch_async(keys, f);
+        }
 
-        // The `f` is most likely a scorer function.
-        // Fetching all vectors first then scoring them is more cache friendly
-        // than fetching and scoring in a single loop.
+        // The `f` is most likely a scorer function. Fetching all vectors first, and then scoring
+        // them is more cache friendly, than fetching and scoring in a single loop.
 
         let mut vectors_buffer = [const { MaybeUninit::uninit() }; VECTOR_READ_BATCH_SIZE];
-        let vectors = if is_read_with_prefetch_efficient(keys) {
-            let iter = keys.iter().map(|key| self.get_vector::<Sequential>(*key));
-            maybe_uninit_fill_from(&mut vectors_buffer, iter).0
-        } else {
-            let iter = keys.iter().map(|key| self.get_vector::<Random>(*key));
-            maybe_uninit_fill_from(&mut vectors_buffer, iter).0
+
+        for (batch_idx, keys) in keys.chunks(VECTOR_READ_BATCH_SIZE).enumerate() {
+            let vectors = if is_read_with_prefetch_efficient(keys) {
+                let iter = keys
+                    .iter()
+                    .map(|&point_offset| self.get_vector::<Sequential>(point_offset));
+
+                maybe_uninit_fill_from(&mut vectors_buffer, iter).0
+            } else {
+                let iter = keys
+                    .iter()
+                    .map(|&point_offset| self.get_vector::<Random>(point_offset));
+
+                maybe_uninit_fill_from(&mut vectors_buffer, iter).0
+            };
+
+            let batch_offset = VECTOR_READ_BATCH_SIZE * batch_idx;
+
+            for (vector_idx, vec) in vectors.iter().enumerate() {
+                f(batch_offset + vector_idx, vec);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn for_each_in_batch_async<F>(
+        &self,
+        keys: &[PointOffsetType],
+        mut callback: F,
+    ) -> OperationResult<()>
+    where
+        F: FnMut(usize, &[T]),
+    {
+        let ranges = keys.iter().enumerate().map(|(idx, &point_offset)| {
+            let range = ReadRange {
+                byte_offset: self.data_offset(point_offset).expect("point exists") as _,
+                length: self.dim as _,
+            };
+
+            (idx, range)
+        });
+
+        let callback = move |idx, vector: &[T]| {
+            callback(idx, vector);
+            UioResult::Ok(())
         };
 
-        for (i, vec) in vectors.iter().enumerate() {
-            f(i, vec);
+        // access pattern does not matter for io_uring
+        self.storage.read_batch(ranges, Random, callback)?;
+        Ok(())
+    }
+
+    pub fn populate(&self) {
+        if let Err(err) = self.storage.populate() {
+            log::error!("Failed to populate vector storage: {err}");
         }
+    }
+
+    pub fn clear_cache(&self) -> OperationResult<()> {
+        self.storage.clear_ram_cache()?;
+        Ok(())
+    }
+}
+
+/// Immutable storage for dense vectors.
+///
+/// Wraps the shared [`ImmutableDenseVectorData`] blob with a writable deletion
+/// bitmap, so it can mark vectors as removed even though the vector data itself
+/// is append-only and can only be constructed from another storage.
+#[derive(Debug)]
+pub struct ImmutableDenseVectors<T, S = MmapFile>
+where
+    T: PrimitiveVectorElement,
+    S: UniversalRead,
+{
+    /// Vector data blob, read-only through `S`.
+    data: ImmutableDenseVectorData<T, S>,
+    /// Memory mapped deletion flags
+    deleted: MmapBitSlice,
+    /// Current number of deleted vectors.
+    pub deleted_count: usize,
+}
+
+impl<T: PrimitiveVectorElement, S: UniversalRead> ImmutableDenseVectors<T, S> {
+    pub fn open(
+        fs: &impl UniversalReadFs<File = S>,
+        vectors_path: &Path,
+        deleted_path: &Path,
+        dim: usize,
+        populate: Populate,
+    ) -> OperationResult<Self> {
+        // Allocate/open vectors file
+        ensure_mmap_file_size(vectors_path, VECTORS_HEADER, None)
+            .describe("Create mmap data file")?;
+
+        let data = ImmutableDenseVectorData::open(fs, vectors_path, dim, populate)?;
+        let num_vectors = data.num_vectors;
+
+        // Allocate/open deleted mmap
+        let deleted_mmap_size = deleted_mmap_size(num_vectors);
+        ensure_mmap_file_size(deleted_path, DELETED_HEADER, Some(deleted_mmap_size as u64))
+            .describe("Create mmap deleted file")?;
+        let deleted_mmap = mmap::open_write_mmap(deleted_path, AdviceSetting::Global, false)
+            .describe("Open mmap deleted for writing")?;
+
+        // Advise kernel that we'll need this page soon so the kernel can prepare
+        #[cfg(unix)]
+        if let Err(err) = deleted_mmap.advise(memmap2::Advice::WillNeed) {
+            log::error!("Failed to advise MADV_WILLNEED for deleted flags: {err}");
+        }
+
+        // Transform into mmap BitSlice
+        let deleted = MmapBitSlice::try_from(deleted_mmap, deleted_mmap_data_start())?;
+        let deleted_count = deleted.count_ones();
+
+        Ok(Self {
+            data,
+            deleted,
+            deleted_count,
+        })
+    }
+
+    pub fn dim(&self) -> usize {
+        self.data.dim
+    }
+
+    pub fn num_vectors(&self) -> usize {
+        self.data.num_vectors
+    }
+
+    pub fn flusher(&self) -> Flusher {
+        self.deleted.flusher()
+    }
+
+    /// Returns an optional vector data by key
+    pub fn get_vector_opt<P: AccessPattern>(&self, key: PointOffsetType) -> Option<Cow<'_, [T]>> {
+        self.data.get_vector_opt::<P>(key)
+    }
+
+    pub fn for_each_in_batch<F: FnMut(usize, &[T])>(
+        &self,
+        keys: &[PointOffsetType],
+        f: F,
+    ) -> OperationResult<()> {
+        self.data.for_each_in_batch(keys, f)
     }
 
     /// Marks the key as deleted.
@@ -183,33 +321,14 @@ impl<T: PrimitiveVectorElement, S: UniversalRead<T>> ImmutableDenseVectors<T, S>
         &self.deleted
     }
 
-    /// Reads vectors for the given ids and calls the callback for each vector.
-    /// Tries to utilize asynchronous IO if possible.
-    /// In particular, uses io_uring on Linux and simple synchronous IO otherwise.
-    pub fn read_vectors_async<P: AccessPattern>(
-        &self,
-        points: &[PointOffsetType],
-        mut callback: impl FnMut(usize, PointOffsetType, &[T]),
-    ) -> OperationResult<()> {
-        let vector_size_bytes = size_of::<T>() * self.dim;
-        let ranges = points.iter().copied().map(|point| ReadRange {
-            byte_offset: (HEADER_SIZE + vector_size_bytes * point as usize) as _,
-            length: self.dim as _,
-        });
-
-        self.storage.read_batch::<P>(ranges, |idx, vector| {
-            let point = points.get(idx).copied().expect("point ID tracked");
-            callback(idx, point, vector);
-            Ok(())
-        })?;
-
-        Ok(())
+    pub fn populate(&self) {
+        self.data.populate();
     }
 
-    pub fn populate(&self) {
-        if let Err(err) = self.storage.populate() {
-            log::error!("Failed to populate vector storage: {err}");
-        }
+    pub fn clear_cache(&self) -> OperationResult<()> {
+        self.data.clear_cache()?;
+        self.deleted.clear_cache()?;
+        Ok(())
     }
 }
 
@@ -242,7 +361,7 @@ fn ensure_mmap_file_size(path: &Path, header: &[u8], size: Option<u64>) -> Opera
 
 /// Get start position of flags `BitSlice` in deleted mmap.
 #[inline]
-const fn deleted_mmap_data_start() -> usize {
+pub(crate) const fn deleted_mmap_data_start() -> usize {
     let align = mem::align_of::<usize>();
     HEADER_SIZE.div_ceil(align) * align
 }

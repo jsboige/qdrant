@@ -76,7 +76,7 @@ fn test_update_proxy_segments() {
                 payload: None,
             },
         ];
-        upsert_points(&segments.read(), 1000 + i, &points, &hw_counter).unwrap();
+        upsert_points(&segments.read(), 1000 + i, &points, None, &hw_counter).unwrap();
     }
 
     let all_ids = segments
@@ -92,7 +92,7 @@ fn test_update_proxy_segments() {
                     None,
                     &is_stopped,
                     &hw_counter,
-                    DeferredBehavior::Exclude,
+                    DeferredBehavior::VisibleOnly,
                 )
                 .unwrap()
         })
@@ -138,7 +138,7 @@ fn test_move_points_to_copy_on_write() {
 
     // Points should be marked as deleted in proxy segment
     // and moved to another appendable segment (segment2)
-    upsert_points(&segments.read(), 1001, &points, &hw_counter).unwrap();
+    upsert_points(&segments.read(), 1001, &points, None, &hw_counter).unwrap();
 
     let points = vec![
         PointStructPersisted {
@@ -153,7 +153,7 @@ fn test_move_points_to_copy_on_write() {
         },
     ];
 
-    upsert_points(&segments.read(), 1002, &points, &hw_counter).unwrap();
+    upsert_points(&segments.read(), 1002, &points, None, &hw_counter).unwrap();
 
     let segments_write = segments.write();
 
@@ -166,16 +166,26 @@ fn test_move_points_to_copy_on_write() {
 
     let num_deleted_points_in_proxy = read_proxy.deleted_point_count();
 
+    let wrapped_delete = read_proxy
+        .wrapped_segment
+        .get_read()
+        .read()
+        .deleted_point_count();
+
     assert_eq!(
-        num_deleted_points_in_proxy, 3,
+        num_deleted_points_in_proxy - wrapped_delete,
+        3,
         "3 points should be deleted in proxy"
     );
 
     // Copy-on-write segment should contain all 3 points
 
-    let cow_segment = segments_write.get(sid2).unwrap();
+    let cow_segment = match segments_write.get(sid2).unwrap() {
+        shard::locked_segment::LockedSegment::Original(segment) => segment.clone(),
+        shard::locked_segment::LockedSegment::Proxy(_) => panic!("cow segment must be Original"),
+    };
 
-    let cow_segment_read = cow_segment.get().read();
+    let cow_segment_read = cow_segment.read();
 
     let cow_points: HashSet<_> = cow_segment_read.iter_points().collect();
 
@@ -240,17 +250,23 @@ fn test_upsert_points_in_smallest_segment() {
             payload: None,
         })
         .collect();
-    upsert_points(&segments.read(), 1000, &points, &hw_counter).unwrap();
+    upsert_points(&segments.read(), 1000, &points, None, &hw_counter).unwrap();
 
     // Segment 1 and 2 are over capacity, we expect to have the new points in segment 3
     {
         let segment3 = segments.read();
         let segment3_read = segment3.get(sid3).unwrap().get().read();
         for point_id in 1000..1010 {
-            assert!(segment3_read.has_point(point_id.into()));
+            assert!(segment3_read.has_point(
+                point_id.into(),
+                common::types::DeferredBehavior::WithDeferred
+            ));
         }
         for point_id in 0..10 {
-            assert!(!segment3_read.has_point(point_id.into()));
+            assert!(!segment3_read.has_point(
+                point_id.into(),
+                common::types::DeferredBehavior::WithDeferred
+            ));
         }
     }
 }
@@ -303,7 +319,7 @@ fn test_delete_all_point_versions() {
         TEST_TIMEOUT,
         &AtomicBool::new(false),
         HwMeasurementAcc::new(),
-        DeferredBehavior::Exclude,
+        DeferredBehavior::VisibleOnly,
     )
     .unwrap();
     assert_eq!(
@@ -323,16 +339,44 @@ fn test_delete_all_point_versions() {
     {
         // Assert that point 123 is in both segments
         let holder = segments.read();
-        assert!(holder.get(sid1).unwrap().get().read().has_point(point_id));
-        assert!(holder.get(sid2).unwrap().get().read().has_point(point_id));
+        assert!(
+            holder
+                .get(sid1)
+                .unwrap()
+                .get()
+                .read()
+                .has_point(point_id, common::types::DeferredBehavior::WithDeferred)
+        );
+        assert!(
+            holder
+                .get(sid2)
+                .unwrap()
+                .get()
+                .read()
+                .has_point(point_id, common::types::DeferredBehavior::WithDeferred)
+        );
 
         // Delete point 123
         delete_points(&holder, 102, &[123.into()], &hw_counter).unwrap();
 
         // Assert that point 123 is deleted from both segments
         // Note: before the bug fix the point was only deleted from segment 2
-        assert!(!holder.get(sid1).unwrap().get().read().has_point(point_id));
-        assert!(!holder.get(sid2).unwrap().get().read().has_point(point_id));
+        assert!(
+            !holder
+                .get(sid1)
+                .unwrap()
+                .get()
+                .read()
+                .has_point(point_id, common::types::DeferredBehavior::WithDeferred)
+        );
+        assert!(
+            !holder
+                .get(sid2)
+                .unwrap()
+                .get()
+                .read()
+                .has_point(point_id, common::types::DeferredBehavior::WithDeferred)
+        );
     }
 
     // Drop the last segment, only keep the first
@@ -350,7 +394,7 @@ fn test_delete_all_point_versions() {
         TEST_TIMEOUT,
         &AtomicBool::new(false),
         HwMeasurementAcc::new(),
-        DeferredBehavior::Exclude,
+        DeferredBehavior::VisibleOnly,
     )
     .unwrap();
     assert!(retrieved.is_empty());
@@ -423,7 +467,7 @@ fn test_proxy_shared_updates() {
 
     let ids = vec![idx1, idx2];
 
-    set_payload(&holder, 30, &payload, &ids, &None, &hw_counter).unwrap();
+    set_payload(&holder, 30, &payload, &ids, &None, None, &hw_counter).unwrap();
 
     // Points should still be accessible in both proxies through write segment
     for &point_id in &ids {
@@ -433,7 +477,7 @@ fn test_proxy_shared_updates() {
                 .unwrap()
                 .get()
                 .read()
-                .has_point(point_id),
+                .has_point(point_id, common::types::DeferredBehavior::WithDeferred),
         );
         assert!(
             !holder
@@ -441,7 +485,7 @@ fn test_proxy_shared_updates() {
                 .unwrap()
                 .get()
                 .read()
-                .has_point(point_id),
+                .has_point(point_id, common::types::DeferredBehavior::WithDeferred),
         );
         assert!(
             holder
@@ -449,7 +493,7 @@ fn test_proxy_shared_updates() {
                 .unwrap()
                 .get()
                 .read()
-                .has_point(point_id),
+                .has_point(point_id, common::types::DeferredBehavior::WithDeferred),
         );
     }
 
@@ -468,7 +512,7 @@ fn test_proxy_shared_updates() {
         TEST_TIMEOUT,
         &is_stopped,
         HwMeasurementAcc::new(),
-        DeferredBehavior::Exclude,
+        DeferredBehavior::VisibleOnly,
     )
     .unwrap();
 
@@ -560,7 +604,7 @@ fn test_proxy_shared_updates_same_version() {
 
     let ids = vec![idx1, idx2];
 
-    set_payload(&holder, 20, &payload, &ids, &None, &hw_counter).unwrap();
+    set_payload(&holder, 20, &payload, &ids, &None, None, &hw_counter).unwrap();
 
     // Points should still be accessible in both proxies through write segment
     for &point_id in &ids {
@@ -570,7 +614,7 @@ fn test_proxy_shared_updates_same_version() {
                 .unwrap()
                 .get()
                 .read()
-                .has_point(point_id),
+                .has_point(point_id, common::types::DeferredBehavior::WithDeferred),
         );
         assert!(
             !holder
@@ -578,7 +622,7 @@ fn test_proxy_shared_updates_same_version() {
                 .unwrap()
                 .get()
                 .read()
-                .has_point(point_id),
+                .has_point(point_id, common::types::DeferredBehavior::WithDeferred),
         );
         assert!(
             holder
@@ -586,7 +630,7 @@ fn test_proxy_shared_updates_same_version() {
                 .unwrap()
                 .get()
                 .read()
-                .has_point(point_id),
+                .has_point(point_id, common::types::DeferredBehavior::WithDeferred),
         );
     }
 
@@ -605,7 +649,7 @@ fn test_proxy_shared_updates_same_version() {
         TEST_TIMEOUT,
         &is_stopped,
         HwMeasurementAcc::new(),
-        DeferredBehavior::Exclude,
+        DeferredBehavior::VisibleOnly,
     )
     .unwrap();
 

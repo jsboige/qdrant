@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use common::counter::hardware_accumulator::HwMeasurementAcc;
 use segment::types::ShardKey;
 
-use crate::collection::Collection;
+use crate::collection::{AbortReshardingScope, Collection};
 use crate::config::ShardingMethod;
 use crate::operations::types::{CollectionError, CollectionResult};
 use crate::operations::{
@@ -66,8 +66,14 @@ impl Collection {
     ) -> CollectionResult<()> {
         let hw_counter = HwMeasurementAcc::disposable(); // Internal operation. No measurement needed.
 
-        let state = self.state().await;
-        match state.config.params.sharding_method.unwrap_or_default() {
+        let (sharding_method, key_mapping) = {
+            let shards_holder = self.shards_holder.read().await;
+            (
+                shards_holder.get_sharding_method(),
+                shards_holder.get_shard_key_to_ids_mapping(),
+            )
+        };
+        match sharding_method {
             ShardingMethod::Auto => {
                 return Err(CollectionError::bad_request(format!(
                     "Shard Key {shard_key} cannot be created with Auto sharding method"
@@ -76,9 +82,19 @@ impl Collection {
             ShardingMethod::Custom => {}
         }
 
-        if state.shards_key_mapping.contains_key(&shard_key) {
+        // Shard key mapping is updated atomically at the end of `create_shard_key`.
+        // If shard key already exists, either user submitted invalid/duplicate operation,
+        // or we are re-applying fully applied and persisted operation after crash.
+        // Returning "bad request" error is fine in both cases.
+        if key_mapping.contains_key(&shard_key) {
             return Err(CollectionError::bad_request(format!(
                 "Shard key {shard_key} already exists"
+            )));
+        }
+
+        if placement.is_empty() {
+            return Err(CollectionError::bad_request(format!(
+                "Shard key {shard_key} placement cannot be empty"
             )));
         }
 
@@ -102,17 +118,26 @@ impl Collection {
             )));
         }
 
-        let max_shard_id = state.max_shard_id();
+        let base_id = key_mapping.iter_shard_ids().max().unwrap_or(0) + 1;
         let payload_schema = self.payload_index_schema.read().schema.clone();
 
-        for (idx, shard_replicas_placement) in placement.iter().enumerate() {
-            let shard_id = max_shard_id + idx as ShardId + 1;
+        // Create shards on disk *before* updating shard key mapping.
+        //
+        // `ShardHolder::load_shards` only loads shards that are present in the mapping,
+        // so directories that are not in the mapping do not affect startup and state after crash.
+        //
+        // On re-apply, `Collection::create_replica_set` cleanly re-creates any leftover directories.
+
+        let mut shards = Vec::with_capacity(placement.len());
+
+        for (idx, replicas) in placement.iter().enumerate() {
+            let shard_id = base_id + idx as ShardId;
 
             let replica_set = self
                 .create_replica_set(
                     shard_id,
                     Some(shard_key.clone()),
-                    shard_replicas_placement,
+                    replicas,
                     Some(init_state),
                 )
                 .await?;
@@ -132,59 +157,60 @@ impl Collection {
                         None,
                         hw_counter.clone(),
                         false,
-                    ) // TODO: Assign clock tag!? 🤔
+                    )
                     .await?;
             }
 
-            self.shards_holder
-                .write()
-                .await
-                .add_shard(shard_id, replica_set, Some(shard_key.clone()))
-                .await?;
+            shards.push((shard_id, replica_set));
         }
 
-        Ok(())
+        // Persist mapping and register new shards
+        self.shards_holder
+            .write()
+            .await
+            .add_shards(shards, Some(shard_key))
+            .await
     }
 
     pub async fn drop_shard_key(&self, shard_key: ShardKey) -> CollectionResult<()> {
-        let state = self.state().await;
+        let sharding_method = self.shards_holder.read().await.get_sharding_method();
 
-        match state.config.params.sharding_method.unwrap_or_default() {
+        match sharding_method {
+            ShardingMethod::Custom => {}
             ShardingMethod::Auto => {
                 return Err(CollectionError::bad_request(format!(
-                    "Shard Key {shard_key} cannot be removed with Auto sharding method"
+                    "shard key {shard_key} cannot be removed with Auto sharding method"
                 )));
             }
-            ShardingMethod::Custom => {}
         }
 
+        // Abort resharding and propagate abort error, so we don't leave active resharding
+        // referencing deleted shard key
         let resharding_state = self
             .resharding_state()
             .await
             .filter(|state| state.shard_key.as_ref() == Some(&shard_key));
 
-        if let Some(state) = resharding_state
-            && let Err(err) = self.abort_resharding(state.key(), true).await
-        {
-            log::error!(
-                "failed to abort resharding {} while deleting shard key {shard_key}: {err}",
-                state.key(),
-            );
+        if let Some(state) = resharding_state {
+            self.abort_resharding(state.key(), true, AbortReshardingScope::default())
+                .await?;
         }
 
-        // Invalidate local shard cleaning tasks
-        match self
+        // Invalidate local shard cleanup tasks
+        let shard_ids = self
             .shards_holder
             .read()
             .await
-            .get_shard_ids_by_key(&shard_key)
-        {
+            .get_shard_ids_by_key(&shard_key);
+
+        match shard_ids {
             Ok(shard_ids) => self.invalidate_clean_local_shards(shard_ids).await,
             Err(err) => {
-                log::warn!("Failed to invalidate local shard cleaning task, ignoring: {err}");
+                log::warn!("Failed to invalidate local shard cleanup task, ignoring: {err}");
             }
         }
 
+        // Remove shard key
         self.shards_holder
             .write()
             .await
@@ -196,10 +222,9 @@ impl Collection {
         self.shards_holder
             .read()
             .await
-            .get_shard_key_to_ids_mapping()
-            .get(shard_key)
-            .map(|ids| ids.iter().cloned().collect())
-            .ok_or_else(|| {
+            .get_shard_ids_by_key(shard_key)
+            .map(|ids| ids.into_iter().collect())
+            .map_err(|_| {
                 CollectionError::bad_input(format!(
                     "Shard key {shard_key} does not exist for collection {}",
                     self.name()

@@ -1,22 +1,34 @@
-use std::borrow::Cow;
 use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::Arc;
 
 use fs_err as fs;
 
+use crate::ext::aligned_vec::ACow;
 use crate::generic_consts::AccessPattern;
 use crate::universal_io::{
-    OpenOptions, ReadRange, Result, UniversalIoError, UniversalRead, UniversalReadFileOps,
+    ListedFile, OpenOptions, UioResult, UniversalIoError, UniversalRead, UniversalReadFs, UserData,
     local_file_ops,
 };
 
 mod cached_slice;
 mod controller;
+mod pipeline;
 #[cfg(test)]
 mod tests;
 
+#[cfg(any(test, feature = "testing"))]
 pub use cached_slice::CachedSlice;
-use controller::{CacheController, CacheRead};
+#[cfg(not(any(test, feature = "testing")))]
+use cached_slice::CachedSlice;
+#[cfg(any(test, feature = "testing"))]
+pub use controller::CacheController;
+#[cfg(not(any(test, feature = "testing")))]
+use controller::CacheController;
+use controller::CacheRead;
+use pipeline::DiskCacheReadPipeline;
+
+use super::UniversalKind;
 
 /// We cache data in blocks of this size.
 /// Should be multiple of filesystem block size (usually 4 KiB).
@@ -53,72 +65,118 @@ struct BlockRequest {
     range: Range<usize>,
 }
 
-impl<T> UniversalReadFileOps for CachedSlice<T> {
-    fn list_files(prefix_path: &Path) -> Result<Vec<PathBuf>> {
-        local_file_ops::local_list_files(prefix_path)
-    }
+/// Construction context for [`BlockCacheFs`]: carries the shared cache
+/// controller. Defaults to the global controller when one has been
+/// installed via `CacheController::initialize_global`; for tests and
+/// multi-tenant code, pass an explicit `Arc<CacheController>`.
+#[derive(Debug, Clone)]
+pub struct BlockCacheConfigContext {
+    pub controller: Arc<CacheController>,
+}
 
-    fn exists(path: &Path) -> Result<bool> {
-        fs::exists(path).map_err(UniversalIoError::from)
+impl Default for BlockCacheConfigContext {
+    fn default() -> Self {
+        let controller = CacheController::global()
+            .expect("CacheController::initialize_global must be called before BlockCacheConfigContext::default()")
+            .clone();
+        BlockCacheConfigContext { controller }
     }
 }
 
-impl<T: bytemuck::Pod> UniversalRead<T> for CachedSlice<T> {
-    fn open(path: impl AsRef<Path>, options: OpenOptions) -> Result<Self> {
-        let Some(controller) = CacheController::global() else {
-            return Err(UniversalIoError::uninitialized(
-                "Disk cache was not initialized when trying to register a file",
-            ));
-        };
+/// Filesystem handle for the block-based disk cache.
+#[derive(Debug, Clone)]
+pub struct BlockCacheFs {
+    controller: Arc<CacheController>,
+}
 
-        // Disk-cache is backed by a single file
+impl UniversalReadFs for BlockCacheFs {
+    type File = CachedSlice;
+    type OpenExtra = ();
+    type ContextConfig = BlockCacheConfigContext;
+
+    fn from_context(ctx: BlockCacheConfigContext) -> UioResult<Self> {
+        Ok(Self {
+            controller: ctx.controller,
+        })
+    }
+
+    fn list_files(&self, prefix_path: &Path) -> UioResult<Vec<ListedFile>> {
+        local_file_ops::local_list_files(prefix_path)
+    }
+
+    fn exists(&self, path: &Path) -> UioResult<bool> {
+        fs::exists(path).map_err(UniversalIoError::from)
+    }
+
+    fn open(
+        &self,
+        path: impl AsRef<Path>,
+        options: OpenOptions,
+        _extra: (),
+    ) -> UioResult<CachedSlice> {
         let OpenOptions {
             writeable,
             need_sequential: _,
-            disk_parallel: _,
             populate: _,
             advice: _,
-            prevent_caching: _, // This is cached in disk, backed by a mmap
         } = options;
-
         debug_assert!(!writeable);
 
-        Ok(CachedSlice::open(controller, path.as_ref())?)
+        CachedSlice::open(&self.controller, path.as_ref())
+            .map_err(|err| UniversalIoError::extract_not_found(err, path.as_ref()))
     }
+}
 
-    fn read<P: AccessPattern>(&self, range: ReadRange) -> Result<Cow<'_, [T]>> {
-        let elem_start = usize::try_from(range.byte_offset).expect("range.start is within usize")
-            / size_of::<T>();
-        let elem_length = usize::try_from(range.length).expect("range.length is within usize");
+// Deliberately no `UniversalWriteFs` impl: the block cache is strictly
+// read-only ([`CachedSlice`] neither writes nor appends, and `open` rejects
+// writeable opens). Mutations go straight to the underlying local
+// filesystem — `MmapFs`/`IoUringFs` over the very same paths.
 
-        let range = elem_start..elem_start + elem_length;
+impl UniversalRead for CachedSlice {
+    type Fs = BlockCacheFs;
 
-        Ok(self.get_range(range)?)
-    }
+    type ReadPipeline<'a, U>
+        = DiskCacheReadPipeline<'a, U>
+    where
+        Self: 'a,
+        U: UserData;
 
-    fn read_batch<P: AccessPattern>(
-        &self,
-        ranges: impl IntoIterator<Item = ReadRange>,
-        mut callback: impl FnMut(usize, &[T]) -> Result<()>,
-    ) -> Result<()> {
-        for (i, range) in ranges.into_iter().enumerate() {
-            let data = self.read::<P>(range)?;
-            callback(i, &data)?;
-        }
-
+    fn live_reload(&mut self) -> UioResult<()> {
+        // TODO: revise if this is the best way to reopen
+        *self = CachedSlice::open(&self.controller, &self.path)
+            .map_err(|err| UniversalIoError::extract_not_found(err, &self.path))?;
         Ok(())
     }
 
-    fn len(&self) -> Result<u64> {
-        Ok(Self::len(self) as u64)
+    fn read_bytes<P: AccessPattern>(
+        &self,
+        range: Range<u64>,
+        _access_pattern: P,
+        align: usize,
+    ) -> UioResult<ACow<'_>> {
+        let start = usize::try_from(range.start).expect("range.start is within usize");
+        let end = usize::try_from(range.end).expect("range.end is within usize");
+        Ok(self.get_range_bytes(start..end, align)?)
     }
 
-    fn populate(&self) -> Result<()> {
+    fn len<T>(&self) -> UioResult<u64> {
+        Ok(Self::len::<T>(self) as u64)
+    }
+
+    fn populate(&self) -> UioResult<()> {
         Ok(self.populate()?)
     }
 
-    fn clear_ram_cache(&self) -> Result<()> {
+    fn populate_auto() -> bool {
+        false
+    }
+
+    fn clear_ram_cache(&self) -> UioResult<()> {
         // TODO: issue fadvise DONTNEED on the cache file's backing mmap region.
         Ok(())
+    }
+
+    fn kind() -> UniversalKind {
+        UniversalKind::DiskCache
     }
 }

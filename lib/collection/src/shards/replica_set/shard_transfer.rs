@@ -170,12 +170,7 @@ impl ShardReplicaSet {
             _ => unreachable!(),
         };
 
-        let wal_keep_from = local_shard
-            .update_handler
-            .lock()
-            .await
-            .wal_keep_from
-            .clone();
+        let wal_ack_pins = local_shard.update_handler.lock().await.wal_ack_pins.clone();
 
         // Proxify local shard
         //
@@ -189,13 +184,13 @@ impl ShardReplicaSet {
         // Try to queue proxify with or without version
         let proxy_shard = match from_version {
             None => {
-                Ok(QueueProxyShard::new(local_shard, remote_shard, wal_keep_from, progress).await)
+                Ok(QueueProxyShard::new(local_shard, remote_shard, &wal_ack_pins, progress).await)
             }
             Some(from_version) => {
                 QueueProxyShard::new_from_version(
                     local_shard,
                     remote_shard,
-                    wal_keep_from,
+                    &wal_ack_pins,
                     from_version,
                     progress,
                 )
@@ -231,8 +226,20 @@ impl ShardReplicaSet {
             Some(Shard::Local(_)) => return Ok(()),
             Some(Shard::ForwardProxy(_) | Shard::QueueProxy(_)) => {}
 
+            // A dummy stands in for a local shard that is not initialized, so it was never
+            // proxified and there is nothing to revert. Transfer restarts and aborts un-proxify
+            // the sender when applied, and an error here stops consensus for good: a peer whose
+            // shard was cleared under a transfer would otherwise fail on every start.
+            Some(Shard::Dummy(_)) => {
+                log::warn!(
+                    "Local shard {} is a dummy shard, nothing to un-proxify",
+                    self.shard_id,
+                );
+                return Ok(());
+            }
+
             // Unexpected states, error
-            Some(shard @ (Shard::Proxy(_) | Shard::Dummy(_))) => {
+            Some(shard @ Shard::Proxy(_)) => {
                 return Err(CollectionError::service_error(format!(
                     "Cannot un-proxify local shard {} because it has unexpected type - {}",
                     self.shard_id,
@@ -340,6 +347,47 @@ impl ShardReplicaSet {
 
         let (local_shard, _) = queue_proxy.forget_updates_and_finalize();
         let _ = local.insert(Shard::Local(local_shard));
+    }
+
+    /// Revert any proxy wrapper on the local shard back into a plain local shard, discarding
+    /// all proxy state. Nothing is ever sent to a remote shard: queued updates are forgotten
+    /// and update forwarding stops.
+    ///
+    /// Does nothing if there is no local shard, or if the local shard is not a proxy.
+    ///
+    /// This method cannot fail and performs no remote calls.
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is cancel safe.
+    ///
+    /// If cancelled - the proxy may not be reverted to a local shard.
+    pub async fn discard_proxy_local(&self) {
+        let mut local = self.local.write().await;
+
+        let Some(shard) = local.take() else {
+            return;
+        };
+
+        // Making `await` calls between `local.take()` and `local.insert(...)` is *not* cancel safe!
+        let shard = match shard {
+            shard @ (Shard::Local(_) | Shard::Dummy(_)) => shard,
+            Shard::ForwardProxy(proxy) => {
+                log::debug!("Discarding forward proxy and reverting to local shard");
+                Shard::Local(proxy.wrapped_shard)
+            }
+            Shard::QueueProxy(proxy) => {
+                log::debug!("Forgetting queue proxy updates and reverting to local shard");
+                let (local_shard, _) = proxy.forget_updates_and_finalize();
+                Shard::Local(local_shard)
+            }
+            Shard::Proxy(proxy) => {
+                log::debug!("Discarding proxy and reverting to local shard");
+                Shard::Local(proxy.wrapped_shard)
+            }
+        };
+
+        let _ = local.insert(shard);
     }
 
     /// Read a transfer batch without sending it yet.

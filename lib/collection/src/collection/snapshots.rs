@@ -25,6 +25,7 @@ use crate::shards::remote_shard::RemoteShard;
 use crate::shards::replica_set::ShardReplicaSet;
 use crate::shards::shard::{PeerId, ShardId};
 use crate::shards::shard_config::{self, ShardConfig};
+use crate::shards::shard_holder::recovery_guard::{RecoveryProgressHandle, ShardRecoveryGuard};
 use crate::shards::shard_holder::shard_mapping::ShardKeyMapping;
 use crate::shards::shard_holder::{SHARD_KEY_MAPPING_FILE, ShardHolder, shard_not_found_error};
 use crate::shards::shard_path;
@@ -184,6 +185,15 @@ impl Collection {
             }
         }
 
+        // A snapshot without a collection config is a malformed archive. Reject it
+        // explicitly: the raw IO error from `load` would embed the server-side
+        // temporary path in the API response.
+        if !CollectionConfigInternal::check(target_dir) {
+            return Err(CollectionError::bad_input(
+                "Snapshot archive does not contain a collection config",
+            ));
+        }
+
         let config = CollectionConfigInternal::load(target_dir)?;
         config.validate_and_warn();
         let configured_shards = config.params.shard_number.get();
@@ -327,6 +337,7 @@ impl Collection {
         this_peer_id: PeerId,
         is_distributed: bool,
         temp_dir: &Path,
+        recovery_progress: Option<RecoveryProgressHandle>,
         cancel: cancel::CancellationToken,
     ) -> CollectionResult<impl Future<Output = CollectionResult<()>> + 'static> {
         // `ShardHolder::validate_shard_snapshot` is cancel safe, so we explicitly cancel it
@@ -351,6 +362,7 @@ impl Collection {
                     this_peer_id,
                     is_distributed,
                     &temp_dir,
+                    recovery_progress,
                     cancel,
                 )
                 .await?;
@@ -372,6 +384,80 @@ impl Collection {
             .read()
             .await
             .assert_shard_exists(shard_id)
+    }
+
+    /// Start a snapshot recovery of `shard_id`, waiting for one already in progress to
+    /// finish.
+    ///
+    /// The returned guard holds the shard's recovery lock and must be held for the whole
+    /// recovery - clear, download and restore. See [`ShardRecoveryGuard`].
+    pub async fn start_shard_recovery(
+        &self,
+        shard_id: ShardId,
+    ) -> CollectionResult<ShardRecoveryGuard> {
+        // Release the shard holder before awaiting: the lock is held for the length of a
+        // snapshot download, which would stall the whole collection.
+        let replica_set = self
+            .shards_holder
+            .read()
+            .await
+            .get_shard(shard_id)
+            .cloned()
+            .ok_or_else(|| shard_not_found_error(shard_id))?;
+
+        let recovery_lock = replica_set.take_snapshot_recovery_lock().await;
+
+        Ok(self
+            .shards_holder
+            .read()
+            .await
+            .start_shard_recovery(shard_id, recovery_lock))
+    }
+
+    /// Drop the local shard and clear its on-disk data, before a shard snapshot
+    /// transfer downloads a replacement snapshot. See
+    /// [`ShardReplicaSet::clear_local_for_snapshot_recovery`] for details and safety
+    /// constraints.
+    ///
+    /// A shard transfer into this shard must be registered, from `from_peer_id` if that is given.
+    /// This is destructive, so a sender that drives a transfer consensus has since aborted must
+    /// not get to wipe a replica that another transfer is populating. Senders running an older
+    /// version don't identify themselves, they are only held to *some* transfer being registered.
+    pub async fn clear_local_shard_for_snapshot_recovery(
+        &self,
+        shard_id: ShardId,
+        from_peer_id: Option<PeerId>,
+    ) -> CollectionResult<()> {
+        let shard_holder = self.shards_holder.read().await;
+
+        let transfers =
+            shard_holder.get_transfers(|transfer| transfer.is_target(self.this_peer_id, shard_id));
+
+        let is_registered = if let Some(from_peer_id) = from_peer_id {
+            transfers
+                .iter()
+                .any(|transfer| transfer.from == from_peer_id)
+        } else {
+            !transfers.is_empty()
+        };
+
+        if !is_registered {
+            let from = match from_peer_id {
+                Some(from_peer_id) => format!("from peer {from_peer_id}"),
+                None => "from any peer".into(),
+            };
+
+            return Err(CollectionError::bad_request(format!(
+                "Refusing to clear shard {shard_id} for snapshot recovery: \
+                 there is no registered transfer {from}",
+            )));
+        }
+
+        shard_holder
+            .get_shard(shard_id)
+            .ok_or_else(|| shard_not_found_error(shard_id))?
+            .clear_local_for_snapshot_recovery(&self.path)
+            .await
     }
 
     pub async fn try_take_partial_snapshot_recovery_lock(

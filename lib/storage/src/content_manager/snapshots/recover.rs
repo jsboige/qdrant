@@ -35,7 +35,7 @@ pub async fn activate_shard(
         log::debug!(
             "Activating shard {} of collection {} with consensus",
             shard_id,
-            &collection.name()
+            collection.name()
         );
         toc.send_set_replica_state_proposal(
             collection.name().to_string(),
@@ -48,7 +48,7 @@ pub async fn activate_shard(
         log::debug!(
             "Activating shard {} of collection {} locally",
             shard_id,
-            &collection.name()
+            collection.name()
         );
         collection
             .set_shard_replica_state(*shard_id, peer_id, ReplicaState::Active, None)
@@ -130,6 +130,7 @@ async fn _do_recover_from_snapshot(
         &toc.optional_temp_or_storage_temp_path()?,
         toc.snapshots_path(),
         checksum.is_some(),
+        None,
     )
     .await?;
 
@@ -166,6 +167,14 @@ async fn _do_recover_from_snapshot(
     });
     restoring.await??;
 
+    // A snapshot without a collection config is a malformed archive. Reject it
+    // explicitly: the raw IO error from `load` would embed the server-side
+    // temporary path in the API response.
+    if !CollectionConfigInternal::check(tmp_collection_dir.path()) {
+        return Err(StorageError::bad_input(
+            "Snapshot archive does not contain a collection config",
+        ));
+    }
     let snapshot_config = CollectionConfigInternal::load(tmp_collection_dir.path())?;
     snapshot_config.validate_and_warn();
 
@@ -257,18 +266,16 @@ async fn _do_recover_from_snapshot(
     for (shard_id, shard_info) in &state.shards {
         let local_shard_state = shard_info.replicas.get(&this_peer_id);
         match local_shard_state {
-            None => {} // Shard is not on this node, skip
-            Some(state) => {
-                if state != &recovery_state {
-                    toc.send_set_replica_state_proposal(
-                        collection_pass.to_string(),
-                        this_peer_id,
-                        *shard_id,
-                        recovery_state,
-                        None,
-                    )?;
-                }
+            Some(state) if state != &recovery_state => {
+                toc.send_set_replica_state_proposal(
+                    collection_pass.to_string(),
+                    this_peer_id,
+                    *shard_id,
+                    recovery_state,
+                    None,
+                )?;
             }
+            Some(_) | None => {} // Shard is not on this node, skip
         }
     }
 
@@ -285,7 +292,7 @@ async fn _do_recover_from_snapshot(
 
         // TODO:
         //   `_do_recover_from_snapshot` is not *yet* analyzed/organized for cancel safety,
-        //   but `recover_local_shard_from` requires `cancel::CanellationToken` argument *now*,
+        //   but `recover_local_shard_from` requires `cancel::CancellationToken` argument *now*,
         //   so we provide a token that is never triggered (in this case `recover_local_shard_from`
         //   works *exactly* as before the `cancel::CancellationToken` parameter was added to it)
         let recovered = collection
@@ -384,10 +391,9 @@ async fn _do_recover_from_snapshot(
 
                     for (peer_id, _) in other_active_replicas {
                         if replicas_to_remove > 0 {
-                            // Keep this replica
+                            // Don't need more replicas, remove this one
                             replicas_to_remove -= 1;
 
-                            // Don't need more replicas, remove this one
                             toc.request_remove_replica(
                                 collection_pass.to_string(),
                                 *shard_id,

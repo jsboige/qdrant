@@ -4,6 +4,7 @@ use std::sync::atomic::AtomicBool;
 use ahash::AHashSet;
 use common::counter::hardware_counter::HardwareCounterCell;
 use common::types::TelemetryDetail;
+use common::universal_io::MmapFs;
 use itertools::Itertools;
 use rand::prelude::StdRng;
 use rand::{Rng, RngExt, SeedableRng};
@@ -12,7 +13,7 @@ use segment::data_types::query_context::{QueryContext, VectorQueryContext};
 use segment::data_types::vectors::{QueryVector, VectorElementType, VectorInternal};
 use segment::entry::entry_point::SegmentEntry;
 use segment::fixtures::payload_fixtures::random_vector;
-use segment::index::VectorIndex;
+use segment::index::VectorIndexRead;
 use segment::index::sparse_index::sparse_index_config::{SparseIndexConfig, SparseIndexType};
 use segment::index::sparse_index::sparse_vector_index::SparseVectorIndexOpenArgs;
 use segment::segment_constructor::{build_segment, create_sparse_vector_index_test};
@@ -125,6 +126,7 @@ fn sparse_index_discover_test() {
             SPARSE_VECTOR_NAME.to_owned(),
             SparseVectorDataConfig {
                 index: SparseIndexConfig {
+                    memory: None,
                     full_scan_threshold: Some(DEFAULT_SPARSE_FULL_SCAN_THRESHOLD),
                     index_type: SparseIndexType::MutableRam,
                     datatype: Some(VectorStorageDatatype::Float32),
@@ -134,6 +136,7 @@ fn sparse_index_discover_test() {
             },
         )]),
         payload_storage_type: Default::default(),
+        id_tracker_memory: None,
     };
     let dense_config = SegmentConfig {
         vector_data: HashMap::from([(
@@ -149,11 +152,12 @@ fn sparse_index_discover_test() {
             },
         )]),
         payload_storage_type: Default::default(),
+        id_tracker_memory: None,
         sparse_vector_data: Default::default(),
     };
 
-    let mut sparse_segment = build_segment(dir.path(), &sparse_config, None, true).unwrap();
-    let mut dense_segment = build_segment(dir.path(), &dense_config, None, true).unwrap();
+    let (mut sparse_segment, _) = build_segment(dir.path(), &sparse_config, None, true).unwrap();
+    let (mut dense_segment, _) = build_segment(dir.path(), &dense_config, None, true).unwrap();
 
     let hw_counter = HardwareCounterCell::new();
 
@@ -173,7 +177,9 @@ fn sparse_index_discover_test() {
 
     let vector_storage = &sparse_segment.vector_data[SPARSE_VECTOR_NAME].vector_storage;
     let sparse_index = create_sparse_vector_index_test(SparseVectorIndexOpenArgs {
+        fs: &MmapFs,
         config: SparseIndexConfig {
+            memory: None,
             full_scan_threshold: Some(DEFAULT_SPARSE_FULL_SCAN_THRESHOLD),
             index_type: SparseIndexType::ImmutableRam,
             datatype: Some(VectorStorageDatatype::Float32),
@@ -184,7 +190,6 @@ fn sparse_index_discover_test() {
         path: index_dir.path(),
         stopped: &stopped,
         tick_progress: || (),
-        deferred_internal_id: None,
     })
     .unwrap();
 
@@ -264,6 +269,7 @@ fn sparse_index_hardware_measurement_test() {
             SPARSE_VECTOR_NAME.to_owned(),
             SparseVectorDataConfig {
                 index: SparseIndexConfig {
+                    memory: None,
                     full_scan_threshold: Some(DEFAULT_SPARSE_FULL_SCAN_THRESHOLD),
                     index_type: SparseIndexType::MutableRam,
                     datatype: Some(VectorStorageDatatype::Float32),
@@ -273,9 +279,10 @@ fn sparse_index_hardware_measurement_test() {
             },
         )]),
         payload_storage_type: Default::default(),
+        id_tracker_memory: None,
     };
 
-    let mut sparse_segment = build_segment(dir.path(), &sparse_config, None, true).unwrap();
+    let (mut sparse_segment, _) = build_segment(dir.path(), &sparse_config, None, true).unwrap();
 
     let hw_counter = HardwareCounterCell::new();
 
@@ -291,7 +298,9 @@ fn sparse_index_hardware_measurement_test() {
 
     let vector_storage = &sparse_segment.vector_data[SPARSE_VECTOR_NAME].vector_storage;
     let sparse_index = create_sparse_vector_index_test(SparseVectorIndexOpenArgs {
+        fs: &MmapFs,
         config: SparseIndexConfig {
+            memory: None,
             full_scan_threshold: Some(DEFAULT_SPARSE_FULL_SCAN_THRESHOLD),
             index_type: SparseIndexType::ImmutableRam,
             datatype: Some(VectorStorageDatatype::Float32),
@@ -302,7 +311,6 @@ fn sparse_index_hardware_measurement_test() {
         path: index_dir.path(),
         stopped: &stopped,
         tick_progress: || (),
-        deferred_internal_id: None,
     })
     .unwrap();
 

@@ -8,13 +8,13 @@ use api::rest::models::{
     CollectionDescription, CollectionsResponse, ShardKeyDescription, ShardKeysResponse,
 };
 use collection::config::ShardingMethod;
-#[cfg(feature = "staging")]
-use collection::operations::cluster_ops::TestSlowDownOperation;
 use collection::operations::cluster_ops::{
     AbortTransferOperation, ClusterOperations, DropReplicaOperation, MoveShardOperation,
     ReplicatePoints, ReplicatePointsOperation, ReplicateShardOperation, ReshardingDirection,
     RestartTransfer, RestartTransferOperation, StartResharding,
 };
+#[cfg(feature = "staging")]
+use collection::operations::cluster_ops::{TestSlowDownOperation, TestTransientErrorOperation};
 use collection::operations::shard_selector_internal::ShardSelectorInternal;
 use collection::operations::snapshot_ops::SnapshotDescription;
 use collection::operations::types::{
@@ -22,20 +22,22 @@ use collection::operations::types::{
 };
 use collection::operations::verification::new_unchecked_verification_pass;
 use collection::shards::replica_set;
-use collection::shards::replica_set::replica_set_state;
+use collection::shards::replica_set::replica_set_state::ReplicaState;
 use collection::shards::resharding::ReshardKey;
 use collection::shards::shard::{PeerId, ShardId, ShardsPlacement};
-use collection::shards::transfer::{ShardTransfer, ShardTransferKey, ShardTransferRestart};
+use collection::shards::transfer::{
+    ShardTransfer, ShardTransferKey, ShardTransferMethod, ShardTransferRestart,
+};
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::seq::IteratorRandom;
 use storage::content_manager::collection_meta_ops::ShardTransferOperations::{Abort, Start};
-#[cfg(feature = "staging")]
-use storage::content_manager::collection_meta_ops::TestSlowDown;
 use storage::content_manager::collection_meta_ops::{
     CollectionMetaOperations, CreateShardKey, DropShardKey, ReshardingOperation,
     SetShardReplicaState, ShardTransferOperations, UpdateCollectionOperation,
 };
+#[cfg(feature = "staging")]
+use storage::content_manager::collection_meta_ops::{TestSlowDown, TestTransientError};
 use storage::content_manager::errors::StorageError;
 use storage::content_manager::toc::TableOfContent;
 use storage::dispatcher::Dispatcher;
@@ -57,6 +59,7 @@ pub async fn do_collection_exists(
     let Err(error) = toc.get_collection(&collection_pass).await else {
         return Ok(CollectionExists { exists: true });
     };
+    #[expect(clippy::wildcard_enum_match_arm, reason = "error handling")]
     match error {
         StorageError::NotFound { .. } => Ok(CollectionExists { exists: false }),
         e => Err(e),
@@ -108,14 +111,13 @@ pub async fn do_get_collection_shard_keys(
 
     let collection = toc.get_collection(&collection_pass).await?;
 
-    let state = collection.state().await;
-    let shard_keys = match state.config.params.sharding_method.unwrap_or_default() {
+    let (sharding_method, shard_keys) = collection.get_sharding_method_and_keys().await;
+    let shard_keys = match sharding_method {
         ShardingMethod::Auto => None,
         ShardingMethod::Custom => Some(
-            state
-                .shards_key_mapping
-                .iter_shard_keys()
-                .map(|k| ShardKeyDescription { key: k.clone() })
+            shard_keys
+                .into_iter()
+                .map(|key| ShardKeyDescription { key })
                 .collect(),
         ),
     };
@@ -256,9 +258,7 @@ pub async fn do_update_collection_cluster(
     )?;
 
     if dispatcher.consensus_state().is_none() {
-        return Err(StorageError::BadRequest {
-            description: "Distributed mode disabled".to_string(),
-        });
+        return Err(StorageError::standalone_mode());
     }
     let consensus_state = dispatcher.consensus_state().unwrap();
 
@@ -281,9 +281,9 @@ pub async fn do_update_collection_cluster(
             .read()
             .contains_key(&peer_id);
         if !target_peer_exist {
-            return Err(StorageError::BadRequest {
-                description: format!("Peer {peer_id} does not exist"),
-            });
+            return Err(StorageError::bad_request(format!(
+                "Peer {peer_id} does not exist"
+            )));
         }
         Ok(())
     };
@@ -300,17 +300,22 @@ pub async fn do_update_collection_cluster(
         ClusterOperations::MoveShard(MoveShardOperation { move_shard }) => {
             // validate shard to move
             if !collection.contains_shard(move_shard.shard_id).await {
-                return Err(StorageError::BadRequest {
-                    description: format!(
-                        "Shard {} of {} does not exist",
-                        move_shard.shard_id, collection_name
-                    ),
-                });
+                return Err(StorageError::bad_request(format!(
+                    "Shard {} of {} does not exist",
+                    move_shard.shard_id, collection_name
+                )));
             };
 
             // validate target and source peer exists
             validate_peer_exists(move_shard.to_peer_id)?;
             validate_peer_exists(move_shard.from_peer_id)?;
+
+            // Resolve the transfer method on this peer so the whole cluster
+            // applies the same one — the consensus entry carries it explicitly.
+            let method = match move_shard.method {
+                Some(method) => method,
+                None => collection.default_shard_transfer_method(),
+            };
 
             // submit operation to consensus
             dispatcher
@@ -323,7 +328,7 @@ pub async fn do_update_collection_cluster(
                             to: move_shard.to_peer_id,
                             from: move_shard.from_peer_id,
                             sync: false,
-                            method: move_shard.method,
+                            method: Some(method),
                             filter: None,
                         }),
                     ),
@@ -335,12 +340,10 @@ pub async fn do_update_collection_cluster(
         ClusterOperations::ReplicateShard(ReplicateShardOperation { replicate_shard }) => {
             // validate shard to move
             if !collection.contains_shard(replicate_shard.shard_id).await {
-                return Err(StorageError::BadRequest {
-                    description: format!(
-                        "Shard {} of {} does not exist",
-                        replicate_shard.shard_id, collection_name
-                    ),
-                });
+                return Err(StorageError::bad_request(format!(
+                    "Shard {} of {} does not exist",
+                    replicate_shard.shard_id, collection_name
+                )));
             };
 
             // validate target peer exists
@@ -348,6 +351,13 @@ pub async fn do_update_collection_cluster(
 
             // validate source peer exists
             validate_peer_exists(replicate_shard.from_peer_id)?;
+
+            // Resolve the transfer method on this peer so the whole cluster
+            // applies the same one — the consensus entry carries it explicitly.
+            let method = match replicate_shard.method {
+                Some(method) => method,
+                None => collection.default_shard_transfer_method(),
+            };
 
             // submit operation to consensus
             dispatcher
@@ -360,7 +370,7 @@ pub async fn do_update_collection_cluster(
                             to: replicate_shard.to_peer_id,
                             from: replicate_shard.from_peer_id,
                             sync: true,
-                            method: replicate_shard.method,
+                            method: Some(method),
                             filter: None,
                         }),
                     ),
@@ -380,12 +390,10 @@ pub async fn do_update_collection_cluster(
 
             // Temporary, before we support multi-source transfers
             if from_shard_ids.len() != 1 {
-                return Err(StorageError::BadRequest {
-                    description: format!(
-                        "Only replicating from shard keys with exactly one shard is supported. Shard key {from_shard_key} has {} shards",
-                        from_shard_ids.len()
-                    ),
-                });
+                return Err(StorageError::bad_request(format!(
+                    "Only replicating from shard keys with exactly one shard is supported. Shard key {from_shard_key} has {} shards",
+                    from_shard_ids.len()
+                )));
             }
 
             // validate shard key exists
@@ -395,12 +403,10 @@ pub async fn do_update_collection_cluster(
             debug_assert!(!from_replicas.is_empty());
 
             if to_replicas.len() != 1 {
-                return Err(StorageError::BadRequest {
-                    description: format!(
-                        "Only replicating to shard keys with exactly one replica is supported. Shard key {to_shard_key} has {} replicas",
-                        to_replicas.len()
-                    ),
-                });
+                return Err(StorageError::bad_request(format!(
+                    "Only replicating to shard keys with exactly one replica is supported. Shard key {to_shard_key} has {} replicas",
+                    to_replicas.len()
+                )));
             }
 
             let (from_shard_id, from_peer_id) = from_replicas[0];
@@ -410,15 +416,12 @@ pub async fn do_update_collection_cluster(
             validate_peer_exists(to_peer_id)?;
             validate_peer_exists(from_peer_id)?;
 
-            // Decide on a transfer-method and check its validity in combination with filters.
-            let method = collection.default_shard_transfer_method().await;
-            if !method.is_streaming() && filter.is_some() {
-                return Err(StorageError::BadRequest {
-                    description: format!(
-                        "Can't do shard transfer using method {method:?} in combination with a filter",
-                    ),
-                });
-            }
+            // Require stream records based transfer if a filter is given
+            let method = if filter.is_none() {
+                collection.default_shard_transfer_method()
+            } else {
+                ShardTransferMethod::StreamRecords
+            };
 
             // submit operation to consensus
             dispatcher
@@ -449,12 +452,10 @@ pub async fn do_update_collection_cluster(
             };
 
             if !collection.check_transfer_exists(&transfer).await {
-                return Err(StorageError::NotFound {
-                    description: format!(
-                        "Shard transfer {} -> {} for collection {}:{} does not exist",
-                        transfer.from, transfer.to, collection_name, transfer.shard_id
-                    ),
-                });
+                return Err(StorageError::not_found(format!(
+                    "Shard transfer {} -> {} for collection {}:{} does not exist",
+                    transfer.from, transfer.to, collection_name, transfer.shard_id
+                )));
             }
 
             dispatcher
@@ -473,12 +474,10 @@ pub async fn do_update_collection_cluster(
         }
         ClusterOperations::DropReplica(DropReplicaOperation { drop_replica }) => {
             if !collection.contains_shard(drop_replica.shard_id).await {
-                return Err(StorageError::BadRequest {
-                    description: format!(
-                        "Shard {} of {} does not exist",
-                        drop_replica.shard_id, collection_name
-                    ),
-                });
+                return Err(StorageError::bad_request(format!(
+                    "Shard {} of {} does not exist",
+                    drop_replica.shard_id, collection_name
+                )));
             };
 
             validate_peer_exists(drop_replica.peer_id)?;
@@ -540,9 +539,16 @@ pub async fn do_update_collection_cluster(
 
             if let Some(initial_state) = create_sharding_key.initial_state {
                 match initial_state {
-                    replica_set_state::ReplicaState::Active
-                    | replica_set_state::ReplicaState::Partial => {}
-                    _ => {
+                    ReplicaState::Active | ReplicaState::Partial => {}
+                    ReplicaState::Dead
+                    | ReplicaState::Initializing
+                    | ReplicaState::Listener
+                    | ReplicaState::PartialSnapshot
+                    | ReplicaState::Recovery
+                    | ReplicaState::Resharding
+                    | ReplicaState::ReshardingScaleDown
+                    | ReplicaState::ActiveRead
+                    | ReplicaState::ManualRecovery => {
                         return Err(StorageError::bad_request(format!(
                             "Initial state cannot be {initial_state:?}, only Active or Partial are allowed",
                         )));
@@ -552,22 +558,18 @@ pub async fn do_update_collection_cluster(
 
             let shard_keys_mapping = state.shards_key_mapping;
             if shard_keys_mapping.contains_key(&create_sharding_key.shard_key) {
-                return Err(StorageError::BadRequest {
-                    description: format!(
-                        "Sharding key {} already exists for collection {}",
-                        create_sharding_key.shard_key, collection_name
-                    ),
-                });
+                return Err(StorageError::bad_request(format!(
+                    "Sharding key {} already exists for collection {}",
+                    create_sharding_key.shard_key, collection_name
+                )));
             }
 
             let peers_pool: Vec<_> = if let Some(placement) = create_sharding_key.placement {
                 if placement.is_empty() {
-                    return Err(StorageError::BadRequest {
-                        description: format!(
-                            "Sharding key {} placement cannot be empty. If you want to use random placement, do not specify placement",
-                            create_sharding_key.shard_key
-                        ),
-                    });
+                    return Err(StorageError::bad_request(format!(
+                        "Sharding key {} placement cannot be empty. If you want to use random placement, do not specify placement",
+                        create_sharding_key.shard_key
+                    )));
                 }
 
                 for peer_id in placement.iter().copied() {
@@ -600,9 +602,9 @@ pub async fn do_update_collection_cluster(
             // - proper sharding method is used
             // - key does exist
 
-            let state = collection.state().await;
+            let (sharding_method, shard_keys) = collection.get_sharding_method_and_keys().await;
 
-            match state.config.params.sharding_method.unwrap_or_default() {
+            match sharding_method {
                 ShardingMethod::Auto => {
                     return Err(StorageError::bad_request(
                         "Shard Key cannot be created with Auto sharding method",
@@ -611,14 +613,11 @@ pub async fn do_update_collection_cluster(
                 ShardingMethod::Custom => {}
             }
 
-            let shard_keys_mapping = state.shards_key_mapping;
-            if !shard_keys_mapping.contains_key(&drop_sharding_key.shard_key) {
-                return Err(StorageError::BadRequest {
-                    description: format!(
-                        "Sharding key {} does not exist for collection {collection_name}",
-                        drop_sharding_key.shard_key,
-                    ),
-                });
+            if !shard_keys.contains(&drop_sharding_key.shard_key) {
+                return Err(StorageError::bad_request(format!(
+                    "Sharding key {} does not exist for collection {collection_name}",
+                    drop_sharding_key.shard_key,
+                )));
             }
 
             dispatcher
@@ -651,12 +650,10 @@ pub async fn do_update_collection_cluster(
             };
 
             if !collection.check_transfer_exists(&transfer_key).await {
-                return Err(StorageError::NotFound {
-                    description: format!(
-                        "Shard transfer {} -> {} for collection {}:{} does not exist",
-                        transfer_key.from, transfer_key.to, collection_name, transfer_key.shard_id
-                    ),
-                });
+                return Err(StorageError::not_found(format!(
+                    "Shard transfer {} -> {} for collection {}:{} does not exist",
+                    transfer_key.from, transfer_key.to, collection_name, transfer_key.shard_id
+                )));
             }
 
             dispatcher
@@ -876,8 +873,8 @@ pub async fn do_update_collection_cluster(
             };
 
             let from_state = match state.direction {
-                ReshardingDirection::Up => replica_set_state::ReplicaState::Resharding,
-                ReshardingDirection::Down => replica_set_state::ReplicaState::ReshardingScaleDown,
+                ReshardingDirection::Up => ReplicaState::Resharding,
+                ReshardingDirection::Down => ReplicaState::ReshardingScaleDown,
             };
 
             dispatcher
@@ -886,7 +883,7 @@ pub async fn do_update_collection_cluster(
                         collection_name: collection_name.clone(),
                         shard_id,
                         peer_id,
-                        state: replica_set_state::ReplicaState::Active,
+                        state: ReplicaState::Active,
                         from_state: Some(from_state),
                     }),
                     auth,
@@ -967,6 +964,30 @@ pub async fn do_update_collection_cluster(
                     CollectionMetaOperations::TestSlowDown(TestSlowDown {
                         peer_id: test_slow_down.peer_id,
                         duration_ms,
+                    }),
+                    auth,
+                    wait_timeout,
+                )
+                .await
+        }
+
+        #[cfg(feature = "staging")]
+        ClusterOperations::TestTransientError(TestTransientErrorOperation {
+            test_transient_error,
+        }) => {
+            if let Some(peer_id) = test_transient_error.peer_id {
+                validate_peer_exists(peer_id)?;
+            }
+
+            // Convert probability (f64, 0.0-1.0) to percent (u8, 0-100)
+            let failure_probability_percent =
+                (test_transient_error.failure_probability * 100.0) as u8;
+
+            dispatcher
+                .submit_collection_meta_op(
+                    CollectionMetaOperations::TestTransientError(TestTransientError {
+                        peer_id: test_transient_error.peer_id,
+                        failure_probability_percent,
                     }),
                     auth,
                     wait_timeout,

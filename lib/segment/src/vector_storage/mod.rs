@@ -1,14 +1,19 @@
-#[cfg(target_os = "linux")]
-pub mod async_raw_scorer;
 mod chunked_vectors;
 pub mod common;
 pub mod dense;
+pub mod graph_inline;
+pub mod graph_vectors;
+mod memory_reporter;
 pub mod multi_dense;
+mod prefill_deleted;
 pub mod quantized;
 pub mod query;
 pub mod query_scorer;
 pub mod raw_scorer;
+pub mod read_only;
 pub mod sparse;
+pub mod turbo;
+pub mod update_only;
 mod vector_storage_base;
 pub mod volatile_chunked_vectors;
 

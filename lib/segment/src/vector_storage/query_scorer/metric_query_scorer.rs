@@ -10,15 +10,14 @@ use zerocopy::FromBytes;
 use crate::data_types::primitive::PrimitiveVectorElement;
 use crate::data_types::vectors::{TypedDenseVector, VectorElementType};
 use crate::spaces::metric::Metric;
-use crate::vector_storage::DenseVectorStorage;
-use crate::vector_storage::common::VECTOR_READ_BATCH_SIZE;
+use crate::vector_storage::DenseVectorStorageRead;
 use crate::vector_storage::query_scorer::QueryScorer;
 
 pub struct MetricQueryScorer<
     'a,
     TElement: PrimitiveVectorElement,
     TMetric: Metric<TElement>,
-    TVectorStorage: DenseVectorStorage<TElement>,
+    TVectorStorage: DenseVectorStorageRead<TElement>,
 > {
     vector_storage: &'a TVectorStorage,
     query: TypedDenseVector<TElement>,
@@ -30,7 +29,7 @@ impl<
     'a,
     TElement: PrimitiveVectorElement,
     TMetric: Metric<TElement>,
-    TVectorStorage: DenseVectorStorage<TElement>,
+    TVectorStorage: DenseVectorStorageRead<TElement>,
 > MetricQueryScorer<'a, TElement, TMetric, TVectorStorage>
 {
     pub fn new(
@@ -57,16 +56,20 @@ impl<
             hardware_counter,
         }
     }
+
+    #[inline]
+    fn score(&self, v2: &[TElement]) -> ScoreType {
+        self.hardware_counter.cpu_counter().incr();
+        TMetric::similarity(&self.query, v2)
+    }
 }
 
 impl<
     TElement: PrimitiveVectorElement,
     TMetric: Metric<TElement>,
-    TVectorStorage: DenseVectorStorage<TElement>,
+    TVectorStorage: DenseVectorStorageRead<TElement>,
 > QueryScorer for MetricQueryScorer<'_, TElement, TMetric, TVectorStorage>
 {
-    type TVector = [TElement];
-
     #[inline]
     fn score_stored(&self, idx: PointOffsetType) -> ScoreType {
         self.hardware_counter.cpu_counter().incr();
@@ -74,8 +77,8 @@ impl<
         TMetric::similarity(&self.query, &self.vector_storage.get_dense::<Random>(idx))
     }
 
+    #[inline]
     fn score_stored_batch(&self, ids: &[PointOffsetType], scores: &mut [ScoreType]) {
-        debug_assert!(ids.len() <= VECTOR_READ_BATCH_SIZE);
         debug_assert_eq!(ids.len(), scores.len());
 
         self.hardware_counter.cpu_counter().incr_delta(ids.len());
@@ -84,13 +87,8 @@ impl<
         self.vector_storage
             .for_each_in_dense_batch(ids, |idx, vector| {
                 scores[idx] = TMetric::similarity(&self.query, vector);
-            });
-    }
-
-    #[inline]
-    fn score(&self, v2: &[TElement]) -> ScoreType {
-        self.hardware_counter.cpu_counter().incr();
-        TMetric::similarity(&self.query, v2)
+            })
+            .expect("read vectors");
     }
 
     fn score_internal(&self, point_a: PointOffsetType, point_b: PointOffsetType) -> ScoreType {

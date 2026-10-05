@@ -3,24 +3,10 @@ use std::collections::{HashMap, HashSet};
 use super::{ShardTransfer, ShardTransferKey, ShardTransferMethod};
 use crate::operations::types::{CollectionError, CollectionResult};
 use crate::shards::replica_set::replica_set_state::ReplicaState;
-use crate::shards::shard::{PeerId, ShardId};
+use crate::shards::shard::PeerId;
 use crate::shards::shard_holder::shard_mapping::ShardKeyMapping;
 
-pub fn validate_transfer_exists(
-    transfer_key: &ShardTransferKey,
-    current_transfers: &HashSet<ShardTransfer>,
-) -> CollectionResult<()> {
-    if !current_transfers.iter().any(|t| &t.key() == transfer_key) {
-        return Err(CollectionError::bad_request(format!(
-            "There is no transfer for shard {} from {} to {}",
-            transfer_key.shard_id, transfer_key.from, transfer_key.to,
-        )));
-    }
-
-    Ok(())
-}
-
-pub fn get_transfer(
+fn get_transfer(
     transfer_key: &ShardTransferKey,
     current_transfers: &HashSet<ShardTransfer>,
 ) -> Option<ShardTransfer> {
@@ -79,7 +65,7 @@ where
 ///
 /// For resharding transfers this also checks:
 /// 1. If the source and target shards are different
-/// 2. If the source and target shardsd share the same shard key
+/// 2. If the source and target shards share the same shard key
 ///
 /// If validation fails, return `BadRequest` error.
 pub fn validate_transfer(
@@ -91,7 +77,7 @@ pub fn validate_transfer(
     shards_key_mapping: &ShardKeyMapping,
 ) -> CollectionResult<()> {
     let Some(source_replicas) = source_replicas else {
-        return Err(CollectionError::service_error(format!(
+        return Err(CollectionError::bad_request(format!(
             "Shard {} does not exist",
             transfer.shard_id,
         )));
@@ -125,7 +111,38 @@ pub fn validate_transfer(
         )));
     }
 
-    if let Some(existing_transfer) = check_transfer_conflicts(transfer, current_transfers.iter()) {
+    // If transfer with this key already exist, there are two possible cases:
+    // - either we apply identical, but *conflicting* operation
+    // - or we re-apply *the same* operation after a crash
+    //
+    // We can distinguish between the two, because *last step* of `start_resharding`
+    // sets destination replica state to `Partial`.
+    //
+    // If destination replica *is* in `Partial` state, we should reject conflicting operation.
+    // If destination replica is *not* in `Partial` state, we should re-apply existing operation.
+    if get_transfer(&transfer.key(), current_transfers).is_some() {
+        // Resharding/filtered transfers have separate destination shard
+        let destination_replicas = destination_replicas.unwrap_or(source_replicas);
+
+        let is_applied = destination_replicas
+            .get(&transfer.to)
+            .is_some_and(|state| state.is_partial_or_recovery());
+
+        if is_applied {
+            return Err(CollectionError::bad_request(format!(
+                "Shard {} is already involved in transfer {} -> {}",
+                transfer.shard_id, transfer.from, transfer.to,
+            )));
+        }
+    }
+
+    // Exclude this key from conflict check, because we already checked for identical transfer
+    // conflict above
+    let other_transfers = current_transfers
+        .iter()
+        .filter(|other| transfer.key() != other.key());
+
+    if let Some(existing_transfer) = check_transfer_conflicts(transfer, other_transfers) {
         return Err(CollectionError::bad_request(format!(
             "Shard {} is already involved in transfer {} -> {}",
             transfer.shard_id, existing_transfer.from, existing_transfer.to,
@@ -133,17 +150,16 @@ pub fn validate_transfer(
     }
 
     if transfer.method == Some(ShardTransferMethod::ReshardingStreamRecords) {
-        let Some(destination_replicas) = destination_replicas else {
-            return Err(CollectionError::service_error(format!(
-                "Destination shard {} does not exist",
-                transfer.shard_id,
-            )));
-        };
-
         let Some(to_shard_id) = transfer.to_shard_id else {
             return Err(CollectionError::bad_request(
                 "Target shard is not set for resharding transfer",
             ));
+        };
+
+        let Some(destination_replicas) = destination_replicas else {
+            return Err(CollectionError::bad_request(format!(
+                "Destination shard {to_shard_id} does not exist",
+            )));
         };
 
         if transfer.shard_id == to_shard_id {
@@ -163,7 +179,7 @@ pub fn validate_transfer(
         // Both shard IDs must share the same shard key
         let source_shard_key = shards_key_mapping
             .iter()
-            .find(|(_, shard_ids)| shard_ids.contains(&to_shard_id))
+            .find(|(_, shard_ids)| shard_ids.contains(&transfer.shard_id))
             .map(|(key, _)| key);
         let target_shard_key = shards_key_mapping
             .iter()
@@ -175,17 +191,16 @@ pub fn validate_transfer(
             )));
         }
     } else if transfer.filter.is_some() {
-        let Some(destination_replicas) = destination_replicas else {
-            return Err(CollectionError::service_error(format!(
-                "Destination shard {} does not exist",
-                transfer.shard_id,
-            )));
-        };
-
         let Some(to_shard_id) = transfer.to_shard_id else {
             return Err(CollectionError::bad_request(
                 "Target shard is not set for filtered points transfer",
             ));
+        };
+
+        let Some(destination_replicas) = destination_replicas else {
+            return Err(CollectionError::bad_request(format!(
+                "Destination shard {to_shard_id} does not exist",
+            )));
         };
 
         if transfer.shard_id == to_shard_id {
@@ -211,59 +226,40 @@ pub fn validate_transfer(
     Ok(())
 }
 
-/// Selects a best peer to transfer shard from.
-///
-/// Requirements:
-/// 1. Peer should have an active replica of the shard
-/// 2. There should be no active transfers from this peer with the same shard
-/// 3. Prefer peer with the lowest number of active transfers
-///
-/// If there are no peers that satisfy the requirements, returns `None`.
-pub fn suggest_transfer_source(
-    shard_id: ShardId,
-    target_peer: PeerId,
-    current_transfers: &[ShardTransfer],
-    shard_peers: &HashMap<PeerId, ReplicaState>,
-) -> Option<PeerId> {
-    let mut candidates = HashSet::new();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    for (&peer_id, &state) in shard_peers {
-        // We allow transfers *from* `ReshardingScaleDown` replicas, because they contain a *superset*
-        // of points in a regular replica
-        let is_active = matches!(
-            state,
-            ReplicaState::Active | ReplicaState::ReshardingScaleDown
+    #[test]
+    fn reject_resharding_transfer_between_shard_keys() {
+        let transfer = ShardTransfer {
+            shard_id: 0,
+            to_shard_id: Some(1),
+            from: 1,
+            to: 2,
+            sync: true,
+            method: Some(ShardTransferMethod::ReshardingStreamRecords),
+            filter: None,
+        };
+        let all_peers = HashSet::from([transfer.from, transfer.to]);
+        let source_replicas = HashMap::from([(transfer.from, ReplicaState::Active)]);
+        let destination_replicas = HashMap::from([(transfer.to, ReplicaState::Active)]);
+        let mut shards_key_mapping = ShardKeyMapping::default();
+        shards_key_mapping.insert("source".into(), HashSet::from([transfer.shard_id]));
+        shards_key_mapping.insert(
+            "target".into(),
+            HashSet::from([transfer.to_shard_id.unwrap()]),
         );
 
-        if is_active && peer_id != target_peer {
-            candidates.insert(peer_id);
-        }
+        let result = validate_transfer(
+            &transfer,
+            &all_peers,
+            Some(&source_replicas),
+            Some(&destination_replicas),
+            &HashSet::new(),
+            &shards_key_mapping,
+        );
+
+        assert!(matches!(result, Err(CollectionError::BadRequest { .. })));
     }
-
-    let currently_transferring = current_transfers
-        .iter()
-        .filter(|transfer| transfer.shard_id == shard_id)
-        .flat_map(|transfer| [transfer.from, transfer.to])
-        .collect::<HashSet<PeerId>>();
-
-    candidates = candidates
-        .difference(&currently_transferring)
-        .cloned()
-        .collect();
-
-    let transfer_counts = current_transfers
-        .iter()
-        .fold(HashMap::new(), |mut counts, transfer| {
-            *counts.entry(transfer.from).or_insert(0_usize) += 1;
-            counts
-        });
-
-    // Sort candidates by the number of active transfers
-    let mut candidates = candidates
-        .into_iter()
-        .map(|peer_id| (peer_id, transfer_counts.get(&peer_id).unwrap_or(&0)))
-        .collect::<Vec<(PeerId, &usize)>>();
-    candidates.sort_unstable_by_key(|(_, count)| **count);
-
-    candidates.first().map(|(peer_id, _)| *peer_id)
 }

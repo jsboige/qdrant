@@ -7,8 +7,10 @@
 id: self-crate
 language: rust
 rule:
-  kind: crate
-  not: { inside: { kind: visibility_modifier } } # Don't fix `crate` in `pub(crate)`.
+  all:
+    - kind: crate
+    - not: { inside: { kind: visibility_modifier } } # `pub(crate)`
+    - not: { inside: { kind: extern_crate_declaration } } # `extern crate blah;`
 fix: crate::%PACKAGE%
 ---
 id: self-crate-in-macro-rules
@@ -43,13 +45,14 @@ fix: crate::$MOD
 ---
 id: inner-deps-global
 language: rust
+# Matched by node text rather than a `::$MOD` pattern: ast-grep 0.45 no longer parses a leading
+# `::` fragment as a pattern, so that form silently stopped matching anything.
 rule:
-  pattern: ::$MOD
   kind: scoped_identifier
+  regex: ^::(%DEPS%)$
   has:
-    kind: identifier
-    regex: ^(%DEPS%)$
-    stopBy: end
+    field: name
+    pattern: $MOD
 fix: crate::$MOD
 
 # Remove `Anonymize` derives.
@@ -76,7 +79,7 @@ fix: ""
 # Inline package versions.
 # Why: these are significant for migration logic.
 # Before: `env!("CARGO_PKG_VERSION")`
-# After:  `"0.6.0"`
+# After:  `"0.8.0"`
 ---
 id: replace-pkg-version
 language: rust

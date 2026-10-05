@@ -1,11 +1,13 @@
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Generator
 
 import pytest
 import docker
 from docker.errors import ImageNotFound
+from filelock import FileLock
 
 from .models import QdrantContainerConfig
 from .utils import (
@@ -20,6 +22,21 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     rep = outcome.get_result()
     setattr(item, "rep_" + rep.when, rep)
+
+
+def _dump_container_logs_on_failure(request, docker_containers):
+    """On test failure, write full docker logs to tests/e2e_tests/logs/<test>/<container>.log."""
+    rep = getattr(request.node, "rep_call", None)
+    if rep is None or not rep.failed:
+        return
+    log_dir = Path(__file__).parent / "logs" / f"{request.node.name}_{int(time.time())}"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    for c in docker_containers:
+        try:
+            c.reload()
+            (log_dir / f"{c.name}.log").write_bytes(c.logs())
+        except Exception as e:
+            print(f"Failed to capture logs for {c.name}: {e}")
 
 
 @pytest.fixture(scope="session")
@@ -94,21 +111,49 @@ def qdrant_image(docker_client: docker.DockerClient, request) -> str:
         else:
             print(f"Building Docker image {image_tag}...")
 
-        # Build image using docker buildx
-        build_cmd = [
-            "docker", "buildx", "build",
-            "--build-arg=PROFILE=ci",
-            "--build-arg=FEATURES=data-consistency-check,rocksdb,staging",
-            "--load",
-            str(project_root),
-            f"--tag={image_tag}"
-        ]
+        cache_dir = Path.home() / ".cache" / "qdrant-e2e-buildx"
+        builder_name = "qdrant-e2e-builder"
+        cache_dir.parent.mkdir(parents=True, exist_ok=True)
 
-        result = subprocess.run(build_cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to build Docker image: {result.stderr}")
+        # With pytest-xdist every worker runs this session fixture, so serialize builder
+        # creation and builds; workers that got the lock later reuse the freshly built image.
+        with FileLock(cache_dir.parent / "qdrant-e2e-buildx.lock"):
+            built_by_other_worker = False
+            if not rebuild_image:
+                try:
+                    docker_client.images.get(image_tag)
+                    built_by_other_worker = True
+                except ImageNotFound:
+                    pass
 
-        print(f"Successfully built image {image_tag}")
+            if built_by_other_worker:
+                print(f"Docker image {image_tag} was built by another worker")
+            else:
+                if subprocess.run(
+                        ["docker", "buildx", "inspect", builder_name],
+                        capture_output=True,
+                ).returncode != 0:
+                    subprocess.run(
+                        ["docker", "buildx", "create", "--name", builder_name, "--driver", "docker-container"],
+                        check=True,
+                    )
+                build_cmd = [
+                    "docker", "buildx", "build",
+                    f"--builder={builder_name}",
+                    "--build-arg=PROFILE=ci",
+                    "--build-arg=FEATURES=data-consistency-check,staging",
+                    f"--cache-from=type=local,src={cache_dir}",
+                    f"--cache-to=type=local,dest={cache_dir},mode=max",
+                    "--load",
+                    str(project_root),
+                    f"--tag={image_tag}"
+                ]
+
+                result = subprocess.run(build_cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    raise RuntimeError(f"Failed to build Docker image: {result.stderr}")
+
+                print(f"Successfully built image {image_tag}")
     else:
         print(f"Using existing Docker image {image_tag}")
 
@@ -169,30 +214,10 @@ def qdrant_container_factory(docker_client, qdrant_image, request):
         containers.append(container_info.container)
         return container_info
 
-    def _log_containers_on_failure():
-        """Output container logs if the test failed"""
-        if request.node.rep_call.failed if hasattr(request.node, 'rep_call') else False:
-            print("\n" + "="*50)
-            print("TEST FAILED - DUMPING CONTAINER LOGS")
-            print("="*50)
-            for docker_container in containers:
-                try:
-                    docker_container.reload()
-                    logs = docker_container.logs(tail=50).decode('utf-8', errors='ignore')
-                    print(f"\nLogs for container {docker_container.name}:")
-                    print("-" * 30)
-                    print(logs)
-                    print("-" * 30)
-                except Exception as e:
-                    print(f"Failed to get logs for container {docker_container.name}: {e}")
-            print("="*50)
-
     def _cleanup_containers():
         """Clean up containers after potentially logging them"""
-        # First log containers if test failed (before cleanup)
-        _log_containers_on_failure()
+        _dump_container_logs_on_failure(request, containers)
 
-        # Then cleanup all containers
         for container in containers:
             cleanup_container(container)
 
@@ -349,4 +374,5 @@ def qdrant_compose(docker_client, qdrant_image, test_data_dir, request):
     try:
         yield cluster
     finally:
+        _dump_container_logs_on_failure(request, [c.container for c in cluster.containers])
         cluster.cleanup()

@@ -35,6 +35,7 @@ use crate::actix::api::issues_api::config_issues_api;
 use crate::actix::api::local_shard_api::config_local_shard_api;
 use crate::actix::api::profiler_api::config_profiler_api;
 use crate::actix::api::query_api::config_query_api;
+use crate::actix::api::quota_api::config_quota_api;
 use crate::actix::api::recommend_api::config_recommend_api;
 use crate::actix::api::retrieve_api::{get_point, get_points, scroll_points};
 use crate::actix::api::search_api::config_search_api;
@@ -42,6 +43,7 @@ use crate::actix::api::service_api::config_service_api;
 use crate::actix::api::shards_api::config_shards_api;
 use crate::actix::api::snapshot_api::config_snapshots_api;
 use crate::actix::api::update_api::config_update_api;
+use crate::actix::api::vector_name_api::config_vector_name_api;
 use crate::actix::auth::{AuthTransform, WhitelistItem};
 use crate::actix::web_ui::{WEB_UI_PATH, web_ui_factory, web_ui_folder};
 use crate::common::auth::AuthKeys;
@@ -147,6 +149,7 @@ pub fn init(
                 .app_data(audit_config_data.clone())
                 .service(index)
                 .configure(config_collections_api)
+                .configure(config_vector_name_api)
                 .configure(config_snapshots_api)
                 .configure(config_update_api)
                 .configure(config_cluster_api)
@@ -162,6 +165,7 @@ pub fn init(
                 .configure(config_profiler_api)
                 .configure(config_local_shard_api)
                 .configure(config_audit_api)
+                .configure(config_quota_api)
                 // Ordering of services is important for correct path pattern matching
                 // See: <https://github.com/qdrant/qdrant/issues/3543>
                 .service(scroll_points)
@@ -244,18 +248,28 @@ fn validation_error_handler(
                 }
             )
         }
-        actix_web_validator::Error::JsonPayloadError(
-            actix_web::error::JsonPayloadError::Deserialize(err),
-        ) => {
-            format!("Format error in {name}: {err}",)
+        actix_web_validator::Error::JsonPayloadError(err) =>
+        {
+            #[expect(clippy::wildcard_enum_match_arm, reason = "#[non_exhaustive] enum")]
+            match err {
+                actix_web::error::JsonPayloadError::Deserialize(err) => {
+                    format!("Format error in {name}: {err}")
+                }
+                _ => err.to_string(),
+            }
         }
-        err => err.to_string(),
+        actix_web_validator::Error::UrlEncodedError(_) | actix_web_validator::Error::QsError(_) => {
+            err.to_string()
+        }
     };
 
     // Build fitting response
     let response = match &err {
         actix_web_validator::Error::Validate(_) => HttpResponse::UnprocessableEntity(),
-        _ => HttpResponse::BadRequest(),
+        actix_web_validator::Error::Deserialize(_)
+        | actix_web_validator::Error::JsonPayloadError(_)
+        | actix_web_validator::Error::UrlEncodedError(_)
+        | actix_web_validator::Error::QsError(_) => HttpResponse::BadRequest(),
     }
     .json(ApiResponse::<()> {
         result: None,

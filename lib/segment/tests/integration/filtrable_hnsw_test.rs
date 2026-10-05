@@ -1,3 +1,7 @@
+// Deprecated storage placement params (`on_disk`, `always_ram`, `on_disk_payload`) are still
+// handled here for backward compatibility with the new `memory` parameter
+#![allow(deprecated)]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -7,7 +11,6 @@ use common::counter::hardware_counter::HardwareCounterCell;
 use common::flags::FeatureFlags;
 use common::progress_tracker::ProgressTracker;
 use common::types::{PointOffsetType, TelemetryDetail};
-use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use rand::prelude::StdRng;
 use rand::{Rng, RngExt, SeedableRng};
@@ -17,14 +20,14 @@ use segment::entry::entry_point::SegmentEntry;
 use segment::fixtures::payload_fixtures::{random_int_payload, random_vector};
 use segment::fixtures::query_fixtures::QueryVariant;
 use segment::index::hnsw_index::hnsw::{HNSWIndex, HnswIndexOpenArgs};
-use segment::index::{PayloadIndex, VectorIndex};
+use segment::index::{PayloadIndex, PayloadIndexRead, VectorIndexRead};
 use segment::json_path::JsonPath;
 use segment::payload_json;
 use segment::segment_constructor::VectorIndexBuildArgs;
 use segment::segment_constructor::simple_segment_constructor::build_simple_segment;
 use segment::types::{
-    Condition, Distance, FieldCondition, Filter, HnswConfig, HnswGlobalConfig, PayloadSchemaType,
-    Range, SearchParams, SeqNumberType,
+    AcornSearchParams, Condition, Distance, FieldCondition, Filter, HnswConfig, HnswGlobalConfig,
+    PayloadSchemaType, Range, SearchParams, SeqNumberType,
 };
 use tempfile::Builder;
 
@@ -95,6 +98,7 @@ fn _test_filterable_hnsw(
     let payload_index_ptr = segment.payload_index.clone();
 
     let hnsw_config = HnswConfig {
+        memory: None,
         m,
         ef_construct,
         full_scan_threshold,
@@ -116,11 +120,16 @@ fn _test_filterable_hnsw(
         )
         .unwrap();
     let borrowed_payload_index = payload_index_ptr.borrow();
-    let blocks = borrowed_payload_index
-        .payload_blocks(&JsonPath::new(int_key), indexing_threshold)
-        .map(Result::unwrap)
-        .collect_vec();
-    for block in blocks.iter() {
+    let mut blocks = Vec::new();
+    borrowed_payload_index
+        .with_view(|v| {
+            v.for_each_payload_block(&JsonPath::new(int_key), indexing_threshold, &mut |block| {
+                blocks.push(block);
+                Ok(())
+            })
+        })
+        .unwrap();
+    for block in &blocks {
         assert!(
             block.condition.range.is_some(),
             "only range conditions should be generated for this type of payload"
@@ -132,7 +141,7 @@ fn _test_filterable_hnsw(
     for block in &blocks {
         let filter = Filter::new_must(Condition::Field(block.condition.clone()));
         let points = px
-            .query_points(&filter, &hw_counter, &stopped, None)
+            .with_view(|v| v.query_points(&filter, &hw_counter, &stopped))
             .unwrap();
         for point in points {
             coverage.insert(point, coverage.get(&point).unwrap_or(&0) + 1);
@@ -171,6 +180,7 @@ fn _test_filterable_hnsw(
             stopped: &stopped,
             hnsw_global_config: &HnswGlobalConfig::default(),
             feature_flags: FeatureFlags::default(),
+            inline_vectors: false,
             progress: ProgressTracker::new_for_test(),
         },
     )
@@ -282,6 +292,7 @@ fn test_hnsw_search_top_zero(#[case] num_vectors: u64, #[case] full_scan_thresho
     let payload_index_ptr = segment.payload_index.clone();
 
     let hnsw_config = HnswConfig {
+        memory: None,
         m,
         ef_construct,
         full_scan_threshold: full_scan_threshold_kb,
@@ -303,11 +314,16 @@ fn test_hnsw_search_top_zero(#[case] num_vectors: u64, #[case] full_scan_thresho
         )
         .unwrap();
     let borrowed_payload_index = payload_index_ptr.borrow();
-    let blocks = borrowed_payload_index
-        .payload_blocks(&JsonPath::new(int_key), indexing_threshold)
-        .map(Result::unwrap)
-        .collect_vec();
-    for block in blocks.iter() {
+    let mut blocks = Vec::new();
+    borrowed_payload_index
+        .with_view(|v| {
+            v.for_each_payload_block(&JsonPath::new(int_key), indexing_threshold, &mut |block| {
+                blocks.push(block);
+                Ok(())
+            })
+        })
+        .unwrap();
+    for block in &blocks {
         assert!(
             block.condition.range.is_some(),
             "only range conditions should be generated for this type of payload"
@@ -333,6 +349,7 @@ fn test_hnsw_search_top_zero(#[case] num_vectors: u64, #[case] full_scan_thresho
             stopped: &stopped,
             hnsw_global_config: &HnswGlobalConfig::default(),
             feature_flags: FeatureFlags::default(),
+            inline_vectors: false,
             progress: ProgressTracker::new_for_test(),
         },
     )
@@ -350,4 +367,177 @@ fn test_hnsw_search_top_zero(#[case] num_vectors: u64, #[case] full_scan_thresho
             &Default::default(),
         )
         .unwrap();
+}
+
+/// A filtered graph search is counted under the algorithm it ran: ACORN searches under
+/// `filtered_acorn`, HNSW ones under `filtered_large_cardinality`, never both.
+#[test]
+fn acorn_searches_are_counted_separately() {
+    let stopped = AtomicBool::new(false);
+
+    let dim = 8;
+    let num_vectors: u64 = 2_000;
+    // 16 KB over 8 float dimensions: a filter must keep more than 512 points to take the graph.
+    let full_scan_threshold = 16;
+    let matching_points = 1_000;
+
+    let mut rng = StdRng::seed_from_u64(42);
+    let dir = Builder::new().prefix("segment_dir").tempdir().unwrap();
+    let hnsw_dir = Builder::new().prefix("hnsw_dir").tempdir().unwrap();
+    let int_key = "int";
+    let hw_counter = HardwareCounterCell::new();
+
+    let mut segment = build_simple_segment(dir.path(), dim, Distance::Cosine).unwrap();
+    for n in 0..num_vectors {
+        let vector = random_vector(&mut rng, dim);
+        // The payload is the point's own id, so a range filter keeps a known share of them.
+        segment
+            .upsert_point(
+                n as SeqNumberType,
+                n.into(),
+                only_default_vector(&vector),
+                &hw_counter,
+            )
+            .unwrap();
+        segment
+            .set_full_payload(
+                n as SeqNumberType,
+                n.into(),
+                &payload_json! {int_key: n as i64},
+                &hw_counter,
+            )
+            .unwrap();
+    }
+
+    let payload_index_ptr = segment.payload_index.clone();
+    payload_index_ptr
+        .borrow_mut()
+        .set_indexed(
+            &JsonPath::new(int_key),
+            PayloadSchemaType::Integer,
+            &hw_counter,
+        )
+        .unwrap();
+
+    let hnsw_index = HNSWIndex::build(
+        HnswIndexOpenArgs {
+            path: hnsw_dir.path(),
+            id_tracker: segment.id_tracker.clone(),
+            vector_storage: segment.vector_data[DEFAULT_VECTOR_NAME]
+                .vector_storage
+                .clone(),
+            quantized_vectors: segment.vector_data[DEFAULT_VECTOR_NAME]
+                .quantized_vectors
+                .clone(),
+            payload_index: payload_index_ptr.clone(),
+            hnsw_config: HnswConfig {
+                memory: None,
+                m: 8,
+                ef_construct: 16,
+                full_scan_threshold,
+                max_indexing_threads: 2,
+                on_disk: Some(false),
+                payload_m: None,
+                inline_storage: None,
+            },
+        },
+        VectorIndexBuildArgs {
+            permit: Arc::new(ResourcePermit::dummy(1)),
+            old_indices: &[],
+            gpu_device: None,
+            rng: &mut rng,
+            stopped: &stopped,
+            hnsw_global_config: &HnswGlobalConfig::default(),
+            feature_flags: FeatureFlags::default(),
+            inline_vectors: false,
+            progress: ProgressTracker::new_for_test(),
+        },
+    )
+    .unwrap();
+
+    let query = random_query(&QueryVariant::Nearest, &mut rng, dim);
+    let filter = Filter::new_must(Condition::Field(FieldCondition::new_range(
+        JsonPath::new(int_key),
+        Range {
+            lt: None,
+            gt: None,
+            gte: Some(OrderedFloat(0.0)),
+            lte: Some(OrderedFloat(f64::from(matching_points - 1))),
+        },
+    )));
+
+    let search = |vectors: &[&QueryVector], acorn: Option<AcornSearchParams>| {
+        hnsw_index
+            .search(
+                vectors,
+                Some(&filter),
+                3,
+                Some(&SearchParams {
+                    hnsw_ef: Some(32),
+                    acorn,
+                    ..Default::default()
+                }),
+                &Default::default(),
+            )
+            .unwrap();
+        let telemetry = hnsw_index.get_telemetry_data(TelemetryDetail::default());
+        (
+            telemetry.filtered_large_cardinality.count,
+            telemetry.filtered_acorn.count,
+        )
+    };
+
+    let allow_acorn = Some(AcornSearchParams {
+        enable: true,
+        max_selectivity: Some(OrderedFloat(1.0)),
+    });
+
+    // Half the points match, so the search takes the graph and ACORN is within its threshold.
+    let allowed = search(&[&query], allow_acorn);
+    assert_eq!(
+        allowed,
+        (0, 1),
+        "an allowed ACORN search counts only as ACORN"
+    );
+
+    // Same search, but no selectivity is low enough to let ACORN run.
+    let refused = search(
+        &[&query],
+        Some(AcornSearchParams {
+            enable: true,
+            max_selectivity: Some(OrderedFloat(0.0)),
+        }),
+    );
+    assert_eq!(
+        refused,
+        (1, 1),
+        "a refused ACORN search counts only as HNSW"
+    );
+
+    let without = search(&[&query], None);
+    assert_eq!(
+        without,
+        (2, 1),
+        "a search that never asked for ACORN leaves it alone"
+    );
+
+    // The HNSW counter counts one search per batch, and so must the ACORN one.
+    let batch: Vec<_> = (0..4)
+        .map(|_| random_query(&QueryVariant::Nearest, &mut rng, dim))
+        .collect();
+    let batched = search(&batch.iter().collect::<Vec<_>>(), allow_acorn);
+    assert_eq!(
+        batched,
+        (2, 2),
+        "a batch of four vectors is one search, not four"
+    );
+
+    // Discover searches the graph twice per query; that is still one search.
+    let discover = random_query(&QueryVariant::Discover, &mut rng, dim);
+    let discovered = search(&[&discover], allow_acorn);
+    assert_eq!(
+        discovered,
+        (2, 3),
+        "discover's two graph passes are one search"
+    );
 }

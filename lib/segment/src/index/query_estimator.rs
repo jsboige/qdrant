@@ -18,7 +18,7 @@ use crate::types::{Condition, Filter, MinShould};
 ///
 /// * `estimation` - cardinality estimations of number of points selected by payload filter
 /// * `available_vectors` - number of available vectors for the named vector storage
-/// * `total_vectors` - total number of points in the segment
+/// * `available_points` - number of available (non-deleted) points in the segment
 ///
 /// # Result
 ///
@@ -36,6 +36,7 @@ pub fn adjust_to_available_vectors(
             max: 0,
         };
     }
+    let estimation = estimation.bounded_by(available_points);
 
     let number_of_deleted_vectors = available_points.saturating_sub(available_vectors);
 
@@ -79,6 +80,7 @@ pub fn adjust_for_deferred_points(
             max: 0,
         };
     }
+    let estimation = estimation.bounded_by(total_points);
 
     let number_of_deferred_points = total_points.saturating_sub(visible_points);
 
@@ -229,7 +231,14 @@ where
 {
     match condition {
         Condition::Filter(filter) => estimate_filter(estimator, filter, total),
-        _ => estimator(condition),
+        Condition::Field(_)
+        | Condition::IsEmpty(_)
+        | Condition::IsNull(_)
+        | Condition::HasId(_)
+        | Condition::HasVector(_)
+        | Condition::Slice(_)
+        | Condition::Nested(_)
+        | Condition::CustomIdChecker(_) => estimator(condition),
     }
 }
 
@@ -244,37 +253,31 @@ where
     let mut filter_estimations: Vec<CardinalityEstimation> = vec![];
 
     match &filter.must {
-        None => {}
-        Some(conditions) => {
-            if !conditions.is_empty() {
-                filter_estimations.push(estimate_must(estimator, conditions, total)?);
-            }
+        Some(conditions) if !conditions.is_empty() => {
+            filter_estimations.push(estimate_must(estimator, conditions, total)?);
         }
+        Some(_) | None => {}
     }
     match &filter.should {
-        None => {}
-        Some(conditions) => {
-            if !conditions.is_empty() {
-                filter_estimations.push(estimate_should(estimator, conditions, total)?);
-            }
+        Some(conditions) if !conditions.is_empty() => {
+            filter_estimations.push(estimate_should(estimator, conditions, total)?);
         }
+        Some(_) | None => {}
     }
-    match &filter.min_should {
-        None => {}
-        Some(MinShould {
-            conditions,
-            min_count,
-        }) => filter_estimations.push(estimate_min_should(
+    if let Some(MinShould {
+        conditions,
+        min_count,
+    }) = &filter.min_should
+    {
+        filter_estimations.push(estimate_min_should(
             estimator, conditions, *min_count, total,
-        )?),
+        )?)
     }
     match &filter.must_not {
-        None => {}
-        Some(conditions) => {
-            if !conditions.is_empty() {
-                filter_estimations.push(estimate_must_not(estimator, conditions, total)?)
-            }
+        Some(conditions) if !conditions.is_empty() => {
+            filter_estimations.push(estimate_must_not(estimator, conditions, total)?)
         }
+        Some(_) | None => {}
     }
 
     Ok(combine_must_estimations(&filter_estimations, total))
@@ -354,6 +357,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::wildcard_enum_match_arm, reason = "test code")]
+
     use super::*;
     use crate::index::field_index::ResolvedHasId;
     use crate::json_path::JsonPath;
@@ -384,6 +389,7 @@ mod tests {
             Condition::Filter(_) => panic!("unexpected Filter"),
             Condition::Nested(_) => panic!("unexpected Nested"),
             Condition::CustomIdChecker(_) => panic!("unexpected CustomIdChecker"),
+            Condition::Slice(_) => panic!("unexpected Slice"),
             Condition::Field(field) => match field.key.to_string().as_str() {
                 "color" => CardinalityEstimation {
                     primary_clauses: vec![PrimaryCondition::Condition(Box::new(field.clone()))],
@@ -607,7 +613,7 @@ mod tests {
             min_should: None,
             must: None,
             must_not: Some(vec![Condition::HasId(HasIdCondition {
-                has_id: [1, 2, 3, 4, 5].into_iter().map(|x| x.into()).collect(),
+                has_id: [1, 2, 3, 4, 5].into_iter().map(u64::into).collect(),
             })]),
         };
 
@@ -638,7 +644,7 @@ mod tests {
                 }),
             ]),
             must_not: Some(vec![Condition::HasId(HasIdCondition {
-                has_id: [1, 2, 3, 4, 5].into_iter().map(|x| x.into()).collect(),
+                has_id: [1, 2, 3, 4, 5].into_iter().map(u64::into).collect(),
             })]),
         };
 
@@ -682,5 +688,36 @@ mod tests {
         assert_eq!(new_estimation.min, 0);
         assert_eq!(new_estimation.exp, 16);
         assert_eq!(new_estimation.max, 50);
+    }
+
+    /// A payload index that still counts tombstoned points (append-only
+    /// deletion) estimates above the available points; the adjustment must
+    /// still return `min <= exp <= max`, within the available points. The
+    /// numbers are those of a model testing run that tripped the debug
+    /// assertion.
+    #[test]
+    fn test_adjust_estimation_above_available_points() {
+        let estimation = CardinalityEstimation {
+            primary_clauses: vec![],
+            min: 10,
+            exp: 30,
+            max: 40,
+        };
+
+        let adjusted = adjust_to_available_vectors(estimation.clone(), 70, 22);
+        assert!(adjusted.min <= adjusted.exp && adjusted.exp <= adjusted.max);
+        assert_eq!(adjusted.max, 22);
+        assert_eq!(adjusted.exp, 22);
+
+        // Fewer vectors than points: scaled from the bounded estimate.
+        let adjusted = adjust_to_available_vectors(estimation.clone(), 11, 22);
+        assert!(adjusted.min <= adjusted.exp && adjusted.exp <= adjusted.max);
+        assert_eq!(adjusted.max, 11);
+        assert_eq!(adjusted.exp, 11);
+
+        let adjusted = adjust_for_deferred_points(estimation, 11, 22);
+        assert!(adjusted.min <= adjusted.exp && adjusted.exp <= adjusted.max);
+        assert_eq!(adjusted.max, 11);
+        assert_eq!(adjusted.exp, 11);
     }
 }

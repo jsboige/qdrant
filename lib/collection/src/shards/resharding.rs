@@ -73,11 +73,12 @@ impl ReshardState {
 }
 
 /// Resharding stages
-///
-/// # Warning
-///
-/// This enum is ordered!
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Deserialize, Serialize)]
+// This enum is ordered!
+// Cluster Manager depends on these serialized values and their meanings.
+// Avoid breaking changes.
+#[derive(
+    Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Deserialize, Serialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ReshardingStage {
     #[default]
@@ -96,6 +97,23 @@ pub struct ReshardKey {
     pub peer_id: PeerId,
     pub shard_id: ShardId,
     pub shard_key: Option<ShardKey>,
+}
+
+impl ReshardKey {
+    /// Pin the auto-sharding invariant that resharding always targets the
+    /// last shard id. `shard_number` must equal `shard_id` or `shard_id + 1`;
+    /// any other value would silently corrupt the count via the id-derived
+    /// `shard_number` update.
+    pub(crate) fn debug_assert_targets_last_shard(&self, shard_number: u32) {
+        let shard_id = self.shard_id;
+        debug_assert!(
+            shard_id
+                .checked_add(1)
+                .is_some_and(|next| shard_number == shard_id || shard_number == next),
+            "auto-sharding resharding must target the last shard id; \
+             shard_number={shard_number} shard_id={shard_id}",
+        );
+    }
 }
 
 impl fmt::Display for ReshardKey {

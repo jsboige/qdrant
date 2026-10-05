@@ -1,3 +1,7 @@
+// Deprecated storage placement params (`on_disk`, `always_ram`, `on_disk_payload`) are still
+// handled here for backward compatibility with the new `memory` parameter
+#![allow(deprecated)]
+
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -13,7 +17,7 @@ use segment::entry::entry_point::SegmentEntry;
 use segment::fixtures::payload_fixtures::random_vector;
 use segment::index::hnsw_index::get_num_indexing_threads;
 use segment::index::hnsw_index::hnsw::{HNSWIndex, HnswIndexOpenArgs};
-use segment::index::{PayloadIndex, VectorIndex};
+use segment::index::{PayloadIndex, VectorIndexRead};
 use segment::json_path::JsonPath;
 use segment::payload_json;
 use segment::segment_constructor::VectorIndexBuildArgs;
@@ -89,10 +93,11 @@ fn hnsw_discover_precision() {
     let payload_index_ptr = segment.payload_index.clone();
 
     let hnsw_config = HnswConfig {
+        memory: None,
         m,
         ef_construct,
         full_scan_threshold,
-        max_indexing_threads: 2,
+        max_indexing_threads: 1,
         on_disk: Some(false),
         payload_m: None,
         inline_storage: None,
@@ -120,6 +125,7 @@ fn hnsw_discover_precision() {
             stopped: &stopped,
             hnsw_global_config: &HnswGlobalConfig::default(),
             feature_flags: FeatureFlags::default(),
+            inline_vectors: false,
             progress: ProgressTracker::new_for_test(),
         },
     )
@@ -217,10 +223,11 @@ fn filtered_hnsw_discover_precision() {
         .unwrap();
 
     let hnsw_config = HnswConfig {
+        memory: None,
         m,
         ef_construct,
         full_scan_threshold,
-        max_indexing_threads: 2,
+        max_indexing_threads: 1,
         on_disk: Some(false),
         payload_m: None,
         inline_storage: None,
@@ -248,6 +255,7 @@ fn filtered_hnsw_discover_precision() {
             stopped: &stopped,
             hnsw_global_config: &HnswGlobalConfig::default(),
             feature_flags: FeatureFlags::default(),
+            inline_vectors: false,
             progress: ProgressTracker::new_for_test(),
         },
     )

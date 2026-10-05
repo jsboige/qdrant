@@ -1,11 +1,12 @@
 use std::cmp;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use ahash::AHashMap;
 use common::counter::hardware_counter::HardwareCounterCell;
+use common::flags::feature_flags;
 use common::types::{DeferredBehavior, TelemetryDetail};
 use segment::common::Flusher;
 use segment::common::operation_error::{OperationError, OperationResult, SegmentFailedState};
@@ -14,7 +15,8 @@ use segment::data_types::facets::{FacetParams, FacetValue};
 use segment::data_types::named_vectors::NamedVectors;
 use segment::data_types::order_by::OrderValue;
 use segment::data_types::query_context::{FormulaContext, QueryContext, SegmentQueryContext};
-use segment::data_types::segment_record::SegmentRecord;
+use segment::data_types::segment_record::{SegmentRecord, SegmentRecordRaw};
+use segment::data_types::vector_name_config::VectorNameConfig;
 use segment::data_types::vectors::{QueryVector, VectorInternal};
 use segment::entry::StorageSegmentEntry;
 use segment::entry::entry_point::{NonAppendableSegmentEntry, ReadSegmentEntry, SegmentEntry};
@@ -27,11 +29,109 @@ use uuid::Uuid;
 use super::{ProxyDeletedPoint, ProxyIndexChange, ProxySegment};
 use crate::locked_segment::LockedSegment;
 
-impl ReadSegmentEntry for ProxySegment {
-    fn version(&self) -> SeqNumberType {
-        cmp::max(self.wrapped_segment.get().read().version(), self.version)
+impl ProxySegment {
+    /// Shared preamble of `retrieve` and `retrieve_raw`: strip any vector
+    /// names that the proxy intends to delete or replace with a different
+    /// schema, and drop proxy-deleted points, before delegating to the
+    /// wrapped segment.
+    fn redact_and_filter_for_retrieve<'a>(
+        &self,
+        with_vector: &'a WithVector,
+        point_ids: &[PointIdType],
+    ) -> (std::borrow::Cow<'a, WithVector>, Vec<PointIdType>) {
+        let with_vector = self
+            .pending_changes
+            .vector_name_changes()
+            .redact_with_vector(with_vector, &self.wrapped_config);
+        let filtered_point_ids = point_ids
+            .iter()
+            .copied()
+            .filter(|id| !self.pending_changes.deleted_points().contains_key(id))
+            .collect();
+        (with_vector, filtered_point_ids)
     }
 
+    /// Restate the wrapped segment's info as the proxy's own: drop stale vector
+    /// data, and net out the points and vectors the proxy has deleted.
+    ///
+    /// Takes the wrapped info rather than fetching it, so both
+    /// [`SegmentEntry::info`] (which needs `index_schema`, and can fail) and
+    /// [`SegmentEntry::size_info`] (which cannot) can share it.
+    fn adjusted_info(&self, wrapped_info: SegmentInfo) -> SegmentInfo {
+        // Remove vector-data entries for names that the proxy has deleted or
+        // superseded with a different schema — their counts and size reflect
+        // the old, stale storage and should not be surfaced.
+        let mut vector_data = wrapped_info.vector_data;
+        let mut removed_num_vectors = 0usize;
+        let mut removed_num_indexed = 0usize;
+        let mut removed_num_deleted = 0usize;
+        vector_data.retain(|name, info| {
+            if self
+                .pending_changes
+                .vector_name_changes()
+                .is_wrapped_data_stale(name)
+            {
+                removed_num_vectors += info.num_vectors;
+                removed_num_indexed += info.num_indexed_vectors;
+                removed_num_deleted += info.num_deleted_vectors;
+                false
+            } else {
+                true
+            }
+        });
+
+        let vector_name_count = vector_data.len();
+        let deleted_points_count = self.pending_changes.deleted_points().len();
+
+        // Best estimate: start from wrapped aggregate, subtract what we just
+        // removed (stale vectors) and what the proxy deleted (per-point
+        // deletions × remaining vector names).
+        let num_vectors = wrapped_info
+            .num_vectors
+            .saturating_sub(removed_num_vectors)
+            .saturating_sub(deleted_points_count * vector_name_count);
+
+        let num_indexed_vectors = if wrapped_info.segment_type == SegmentType::Indexed {
+            wrapped_info
+                .num_indexed_vectors
+                .saturating_sub(removed_num_indexed)
+                .saturating_sub(deleted_points_count * vector_name_count)
+        } else {
+            0
+        };
+
+        let num_deleted_vectors = wrapped_info
+            .num_deleted_vectors
+            .saturating_sub(removed_num_deleted)
+            + deleted_points_count * vector_name_count;
+
+        SegmentInfo {
+            uuid: wrapped_info.uuid,
+            segment_type: SegmentType::Special,
+            num_vectors,
+            num_indexed_vectors,
+            num_points: self.available_point_count(),
+            num_deferred_points: Some(self.deferred_point_count()),
+            num_deleted_deferred_points: wrapped_info.num_deleted_deferred_points.map(
+                |num_deleted_deferred_points| {
+                    num_deleted_deferred_points.saturating_add(self.deleted_deferred_count)
+                },
+            ),
+            num_deleted_vectors,
+            vectors_size_bytes: wrapped_info.vectors_size_bytes,
+            payloads_size_bytes: wrapped_info.payloads_size_bytes,
+            ram_usage_bytes: wrapped_info.ram_usage_bytes,
+            disk_usage_bytes: wrapped_info.disk_usage_bytes,
+            is_appendable: false,
+            index_schema: wrapped_info.index_schema,
+            vector_data,
+            payload_storage_io_backend: wrapped_info.payload_storage_io_backend,
+            deferred_internal_id: wrapped_info.deferred_internal_id,
+        }
+    }
+}
+
+impl ReadSegmentEntry for ProxySegment {
     fn is_proxy(&self) -> bool {
         true
     }
@@ -45,7 +145,8 @@ impl ReadSegmentEntry for ProxySegment {
         // is deleted. This also prevents `move_if_exists` from moving an old point
         // into the write segment again.
         if self
-            .deleted_points
+            .pending_changes
+            .deleted_points()
             .get(&point_id)
             .is_some_and(|delete| wrapped_version <= delete.local_version)
         {
@@ -66,10 +167,34 @@ impl ReadSegmentEntry for ProxySegment {
         params: Option<&SearchParams>,
         query_context: &SegmentQueryContext,
     ) -> OperationResult<Vec<Vec<ScoredPoint>>> {
+        // If the search target is a vector that the proxy queues for deletion
+        // or schema replacement, the wrapped segment's storage is stale (or
+        // would error on a dimensionality mismatch). Short-circuit to an
+        // empty result-per-query batch — semantically the new vector has no
+        // points indexed in this segment yet.
+        if self
+            .pending_changes
+            .vector_name_changes()
+            .is_wrapped_data_stale(vector_name)
+        {
+            return Ok(vec![Vec::new(); vectors.len()]);
+        }
+
+        // Strip any vector names that the proxy intends to delete or replace
+        // with a different schema, so the wrapped segment doesn't return
+        // stale data for them. `Cow::Borrowed` in the common case.
+        let with_vector = self
+            .pending_changes
+            .vector_name_changes()
+            .redact_with_vector(with_vector, &self.wrapped_config);
+        let with_vector = with_vector.as_ref();
+
+        let filter = filter.map(|f| self.pending_changes.vector_name_changes().redact_filter(f));
+
         // Some point might be deleted after temporary segment creation
         // We need to prevent them from being found by search request
         // That is why we need to pass additional filter for deleted points
-        let do_update_filter = !self.deleted_points.is_empty();
+        let do_update_filter = !self.pending_changes.deleted_points().is_empty();
 
         let wrapped_results = if do_update_filter {
             // If we are wrapping a segment with deleted points,
@@ -79,22 +204,20 @@ impl ReadSegmentEntry for ProxySegment {
                 let query_context_with_deleted =
                     query_context.fork().with_deleted_points(deleted_points);
 
-                let res = self.wrapped_segment.get().read().search_batch(
+                self.wrapped_segment.get().read().search_batch(
                     vector_name,
                     vectors,
                     with_payload,
                     with_vector,
-                    filter,
+                    filter.as_deref(),
                     top,
                     params,
                     &query_context_with_deleted,
-                );
-
-                res?
+                )?
             } else {
                 let wrapped_filter = Self::add_deleted_points_condition_to_filter(
                     filter,
-                    self.deleted_points.keys().copied(),
+                    self.pending_changes.deleted_points().keys().copied(),
                 );
 
                 self.wrapped_segment.get().read().search_batch(
@@ -114,7 +237,7 @@ impl ReadSegmentEntry for ProxySegment {
                 vectors,
                 with_payload,
                 with_vector,
-                filter,
+                filter.as_deref(),
                 top,
                 params,
                 query_context,
@@ -136,12 +259,17 @@ impl ReadSegmentEntry for ProxySegment {
             .rescore_with_formula(formula_ctx, hw_counter)?;
 
         let result = {
-            if self.deleted_points.is_empty() {
+            if self.pending_changes.deleted_points().is_empty() {
                 wrapped_results
             } else {
                 wrapped_results
                     .into_iter()
-                    .filter(|point| !self.deleted_points.contains_key(&point.id))
+                    .filter(|point| {
+                        !self
+                            .pending_changes
+                            .deleted_points()
+                            .contains_key(&point.id)
+                    })
                     .collect()
             }
         };
@@ -155,13 +283,47 @@ impl ReadSegmentEntry for ProxySegment {
         point_id: PointIdType,
         hw_counter: &HardwareCounterCell,
     ) -> OperationResult<Option<VectorInternal>> {
-        if self.deleted_points.contains_key(&point_id) {
+        self.vector_with_behavior(
+            vector_name,
+            point_id,
+            DeferredBehavior::VisibleOnly,
+            hw_counter,
+        )
+    }
+
+    fn vector_with_behavior(
+        &self,
+        vector_name: &VectorName,
+        point_id: PointIdType,
+        deferred_behavior: DeferredBehavior,
+        hw_counter: &HardwareCounterCell,
+    ) -> OperationResult<Option<VectorInternal>> {
+        // The proxy queues a delete or schema-superseding create for this
+        // vector — the wrapped's stored data is no longer authoritative.
+        // Treat the lookup as if the point had no value for this vector.
+        // `all_vectors` enumerates names and skips `None`s, so this also
+        // hides stale entries from the per-point vector dump.
+        if self
+            .pending_changes
+            .vector_name_changes()
+            .is_wrapped_data_stale(vector_name)
+        {
+            return Ok(None);
+        }
+
+        if self
+            .pending_changes
+            .deleted_points()
+            .contains_key(&point_id)
+        {
             Ok(None)
         } else {
-            self.wrapped_segment
-                .get()
-                .read()
-                .vector(vector_name, point_id, hw_counter)
+            self.wrapped_segment.get().read().vector_with_behavior(
+                vector_name,
+                point_id,
+                deferred_behavior,
+                hw_counter,
+            )
         }
     }
 
@@ -174,6 +336,8 @@ impl ReadSegmentEntry for ProxySegment {
         let wrapped = self.wrapped_segment.get();
         let wrapped_guard = wrapped.read();
         let config = wrapped_guard.config();
+
+        // Tip: self.vector already handles dropped vector names
         let vector_names: Vec<_> = config
             .vector_data
             .keys()
@@ -185,7 +349,12 @@ impl ReadSegmentEntry for ProxySegment {
         drop(wrapped_guard);
 
         for vector_name in vector_names {
-            if let Some(vector) = self.vector(&vector_name, point_id, hw_counter)? {
+            if let Some(vector) = self.vector_with_behavior(
+                &vector_name,
+                point_id,
+                DeferredBehavior::VisibleOnly,
+                hw_counter,
+            )? {
                 result.insert(vector_name, vector);
             }
         }
@@ -197,7 +366,11 @@ impl ReadSegmentEntry for ProxySegment {
         point_id: PointIdType,
         hw_counter: &HardwareCounterCell,
     ) -> OperationResult<Payload> {
-        if self.deleted_points.contains_key(&point_id) {
+        if self
+            .pending_changes
+            .deleted_points()
+            .contains_key(&point_id)
+        {
             Ok(Payload::default())
         } else {
             self.wrapped_segment
@@ -216,26 +389,35 @@ impl ReadSegmentEntry for ProxySegment {
         is_stopped: &AtomicBool,
         deferred_behavior: DeferredBehavior,
     ) -> OperationResult<AHashMap<ExtendedPointId, SegmentRecord>> {
-        let filtered_point_ids: Vec<PointIdType> = point_ids
-            .iter()
-            .copied()
-            .filter(|id| !self.deleted_points.contains_key(id))
-            .collect();
+        let (with_vector, filtered_point_ids) =
+            self.redact_and_filter_for_retrieve(with_vector, point_ids);
         self.wrapped_segment.get().read().retrieve(
             &filtered_point_ids,
             with_payload,
-            with_vector,
+            with_vector.as_ref(),
             hw_counter,
             is_stopped,
             deferred_behavior,
         )
     }
 
-    /// Not implemented for proxy
-    fn iter_points(&self) -> Box<dyn Iterator<Item = PointIdType> + '_> {
-        // get_points is not available for Proxy implementation
-        // Due to internal locks it is almost impossible to return iterator with proper owning, lifetimes, e.t.c.
-        unimplemented!("call to get_points is not implemented for Proxy segment")
+    fn retrieve_raw(
+        &self,
+        point_ids: &[PointIdType],
+        with_vector: &WithVector,
+        hw_counter: &HardwareCounterCell,
+        is_stopped: &AtomicBool,
+        deferred_behavior: DeferredBehavior,
+    ) -> OperationResult<AHashMap<ExtendedPointId, SegmentRecordRaw>> {
+        let (with_vector, filtered_point_ids) =
+            self.redact_and_filter_for_retrieve(with_vector, point_ids);
+        self.wrapped_segment.get().read().retrieve_raw(
+            &filtered_point_ids,
+            with_vector.as_ref(),
+            hw_counter,
+            is_stopped,
+            deferred_behavior,
+        )
     }
 
     fn read_filtered<'a>(
@@ -247,11 +429,13 @@ impl ReadSegmentEntry for ProxySegment {
         hw_counter: &HardwareCounterCell,
         deferred_behavior: DeferredBehavior,
     ) -> OperationResult<Vec<PointIdType>> {
-        if self.deleted_points.is_empty() {
+        let filter = filter.map(|f| self.pending_changes.vector_name_changes().redact_filter(f));
+
+        if self.pending_changes.deleted_points().is_empty() {
             self.wrapped_segment.get().read().read_filtered(
                 offset,
                 limit,
-                filter,
+                filter.as_deref(),
                 is_stopped,
                 hw_counter,
                 deferred_behavior,
@@ -259,7 +443,7 @@ impl ReadSegmentEntry for ProxySegment {
         } else {
             let wrapped_filter = Self::add_deleted_points_condition_to_filter(
                 filter,
-                self.deleted_points.keys().copied(),
+                self.pending_changes.deleted_points().keys().copied(),
             );
             self.wrapped_segment.get().read().read_filtered(
                 offset,
@@ -281,10 +465,12 @@ impl ReadSegmentEntry for ProxySegment {
         hw_counter: &HardwareCounterCell,
         deferred_behavior: DeferredBehavior,
     ) -> OperationResult<Vec<(OrderValue, PointIdType)>> {
-        let read_points = if self.deleted_points.is_empty() {
+        let filter = filter.map(|f| self.pending_changes.vector_name_changes().redact_filter(f));
+
+        let read_points = if self.pending_changes.deleted_points().is_empty() {
             self.wrapped_segment.get().read().read_ordered_filtered(
                 limit,
-                filter,
+                filter.as_deref(),
                 order_by,
                 is_stopped,
                 hw_counter,
@@ -293,7 +479,7 @@ impl ReadSegmentEntry for ProxySegment {
         } else {
             let wrapped_filter = Self::add_deleted_points_condition_to_filter(
                 filter,
-                self.deleted_points.keys().copied(),
+                self.pending_changes.deleted_points().keys().copied(),
             );
             self.wrapped_segment.get().read().read_ordered_filtered(
                 limit,
@@ -314,15 +500,19 @@ impl ReadSegmentEntry for ProxySegment {
         is_stopped: &AtomicBool,
         hw_counter: &HardwareCounterCell,
     ) -> OperationResult<Vec<PointIdType>> {
-        if self.deleted_points.is_empty() {
-            self.wrapped_segment
-                .get()
-                .read()
-                .read_random_filtered(limit, filter, is_stopped, hw_counter)
+        let filter = filter.map(|f| self.pending_changes.vector_name_changes().redact_filter(f));
+
+        if self.pending_changes.deleted_points().is_empty() {
+            self.wrapped_segment.get().read().read_random_filtered(
+                limit,
+                filter.as_deref(),
+                is_stopped,
+                hw_counter,
+            )
         } else {
             let wrapped_filter = Self::add_deleted_points_condition_to_filter(
                 filter,
-                self.deleted_points.keys().copied(),
+                self.pending_changes.deleted_points().keys().copied(),
             );
             self.wrapped_segment.get().read().read_random_filtered(
                 limit,
@@ -336,12 +526,12 @@ impl ReadSegmentEntry for ProxySegment {
     /// Read points in [from; to) range
     fn read_range(&self, from: Option<PointIdType>, to: Option<PointIdType>) -> Vec<PointIdType> {
         let read_points = self.wrapped_segment.get().read().read_range(from, to);
-        if self.deleted_points.is_empty() {
+        if self.pending_changes.deleted_points().is_empty() {
             read_points
         } else {
             read_points
                 .into_iter()
-                .filter(|idx| !self.deleted_points.contains_key(idx))
+                .filter(|idx| !self.pending_changes.deleted_points().contains_key(idx))
                 .collect()
         }
     }
@@ -353,11 +543,13 @@ impl ReadSegmentEntry for ProxySegment {
         is_stopped: &AtomicBool,
         hw_counter: &HardwareCounterCell,
     ) -> OperationResult<BTreeSet<FacetValue>> {
-        let values = self
-            .wrapped_segment
-            .get()
-            .read()
-            .unique_values(key, filter, is_stopped, hw_counter)?;
+        let filter = filter.map(|f| self.pending_changes.vector_name_changes().redact_filter(f));
+        let values = self.wrapped_segment.get().read().unique_values(
+            key,
+            filter.as_deref(),
+            is_stopped,
+            hw_counter,
+        )?;
         Ok(values)
     }
 
@@ -367,15 +559,35 @@ impl ReadSegmentEntry for ProxySegment {
         is_stopped: &AtomicBool,
         hw_counter: &HardwareCounterCell,
     ) -> OperationResult<HashMap<FacetValue, usize>> {
-        let hits = if self.deleted_points.is_empty() {
-            self.wrapped_segment
-                .get()
-                .read()
-                .facet(request, is_stopped, hw_counter)?
+        let filter = request
+            .filter
+            .as_ref()
+            .map(|f| self.pending_changes.vector_name_changes().redact_filter(f));
+
+        let hits = if self.pending_changes.deleted_points().is_empty() {
+            match filter {
+                // No filter, or filter unchanged — use original request as-is.
+                None | Some(std::borrow::Cow::Borrowed(_)) => self
+                    .wrapped_segment
+                    .get()
+                    .read()
+                    .facet(request, is_stopped, hw_counter)?,
+                // Filter was redacted — build a new request with the owned filter.
+                Some(std::borrow::Cow::Owned(f)) => {
+                    let new_request = FacetParams {
+                        filter: Some(f),
+                        ..request.clone()
+                    };
+                    self.wrapped_segment
+                        .get()
+                        .read()
+                        .facet(&new_request, is_stopped, hw_counter)?
+                }
+            }
         } else {
             let wrapped_filter = Self::add_deleted_points_condition_to_filter(
-                request.filter.as_ref(),
-                self.deleted_points.keys().copied(),
+                filter,
+                self.pending_changes.deleted_points().keys().copied(),
             );
             let new_request = FacetParams {
                 filter: Some(wrapped_filter),
@@ -390,9 +602,16 @@ impl ReadSegmentEntry for ProxySegment {
         Ok(hits)
     }
 
-    fn has_point(&self, point_id: PointIdType) -> bool {
-        !self.deleted_points.contains_key(&point_id)
-            && self.wrapped_segment.get().read().has_point(point_id)
+    fn has_point(&self, point_id: PointIdType, deferred_behavior: DeferredBehavior) -> bool {
+        !self
+            .pending_changes
+            .deleted_points()
+            .contains_key(&point_id)
+            && self
+                .wrapped_segment
+                .get()
+                .read()
+                .has_point(point_id, deferred_behavior)
     }
 
     fn is_empty(&self) -> bool {
@@ -400,7 +619,7 @@ impl ReadSegmentEntry for ProxySegment {
     }
 
     fn available_point_count(&self) -> usize {
-        let deleted_points_count = self.deleted_points.len();
+        let deleted_points_count = self.pending_changes.deleted_points().len();
         let wrapped_segment_count = self.wrapped_segment.get().read().available_point_count();
         wrapped_segment_count.saturating_sub(deleted_points_count)
     }
@@ -414,7 +633,8 @@ impl ReadSegmentEntry for ProxySegment {
 
         // Amount of visible points that are deleted in this proxy.
         let deleted_visible = self
-            .deleted_points
+            .pending_changes
+            .deleted_points()
             .len()
             .saturating_sub(self.deleted_deferred_count);
 
@@ -422,10 +642,24 @@ impl ReadSegmentEntry for ProxySegment {
     }
 
     fn deleted_point_count(&self) -> usize {
-        self.wrapped_segment.get().read().deleted_point_count() + self.deleted_points.len()
+        self.wrapped_segment.get().read().deleted_point_count()
+            + self.pending_changes.deleted_points().len()
     }
 
     fn available_vectors_size_in_bytes(&self, vector_name: &VectorName) -> OperationResult<usize> {
+        // Stale vectors contribute zero bytes to the size estimate: the
+        // wrapped's storage is doomed to be discarded by the optimiser, and
+        // any new schema has no points indexed in this segment yet. Also
+        // avoids calling into the wrapped with a name whose query may now
+        // mean a different shape.
+        if self
+            .pending_changes
+            .vector_name_changes()
+            .is_wrapped_data_stale(vector_name)
+        {
+            return Ok(0);
+        }
+
         let wrapped_segment = self.wrapped_segment.get();
         let wrapped_segment_guard = wrapped_segment.read();
         let wrapped_size = wrapped_segment_guard.available_vectors_size_in_bytes(vector_name)?;
@@ -435,7 +669,7 @@ impl ReadSegmentEntry for ProxySegment {
         let stored_points = wrapped_count;
         // because we don't know the exact size of deleted vectors, we assume that they are the same avg size as the wrapped ones
         if stored_points > 0 {
-            let deleted_points_count = self.deleted_points.len();
+            let deleted_points_count = self.pending_changes.deleted_points().len();
             let available_points = stored_points.saturating_sub(deleted_points_count);
             Ok(
                 ((wrapped_size as u128) * available_points as u128 / stored_points as u128)
@@ -451,8 +685,11 @@ impl ReadSegmentEntry for ProxySegment {
         filter: Option<&'a Filter>,
         hw_counter: &HardwareCounterCell,
     ) -> OperationResult<CardinalityEstimation> {
+        let filter = filter.map(|f| self.pending_changes.vector_name_changes().redact_filter(f));
+
         let deleted_point_count = self
-            .deleted_points
+            .pending_changes
+            .deleted_points()
             .len()
             .saturating_sub(self.deleted_deferred_count);
 
@@ -460,7 +697,7 @@ impl ReadSegmentEntry for ProxySegment {
             let wrapped_segment = self.wrapped_segment.get();
             let wrapped_segment_guard = wrapped_segment.read();
             (
-                wrapped_segment_guard.estimate_point_count(filter, hw_counter)?,
+                wrapped_segment_guard.estimate_point_count(filter.as_deref(), hw_counter)?,
                 wrapped_segment_guard.available_point_count_without_deferred(),
             )
         };
@@ -496,56 +733,15 @@ impl ReadSegmentEntry for ProxySegment {
     }
 
     fn size_info(&self) -> SegmentInfo {
-        // To reduce code complexity for estimations, we use `.info()` directly here.
-        self.info()
+        // Same proxy adjustments as `info`, over the wrapped segment's size
+        // info. Uses `size_info` rather than `info` so it stays infallible:
+        // only `info`'s `index_schema` can fail to compute.
+        self.adjusted_info(self.wrapped_segment.get().read().size_info())
     }
 
-    fn info(&self) -> SegmentInfo {
-        let wrapped_info = self.wrapped_segment.get().read().info();
-
-        let vector_name_count =
-            self.config().vector_data.len() + self.config().sparse_vector_data.len();
-
-        let deleted_points_count = self.deleted_points.len();
-
-        // This is a best estimate
-        let num_vectors = wrapped_info
-            .num_vectors
-            .saturating_sub(deleted_points_count * vector_name_count);
-
-        let num_indexed_vectors = if wrapped_info.segment_type == SegmentType::Indexed {
-            wrapped_info
-                .num_vectors
-                .saturating_sub(deleted_points_count * vector_name_count)
-        } else {
-            0
-        };
-
-        let vector_data = wrapped_info.vector_data;
-
-        SegmentInfo {
-            uuid: wrapped_info.uuid,
-            segment_type: SegmentType::Special,
-            num_vectors,
-            num_indexed_vectors,
-            num_points: self.available_point_count(),
-            num_deferred_points: Some(self.deferred_point_count()),
-            num_deleted_deferred_points: wrapped_info.num_deleted_deferred_points.map(
-                |num_deleted_deferred_points| {
-                    num_deleted_deferred_points.saturating_add(self.deleted_deferred_count)
-                },
-            ),
-            num_deleted_vectors: wrapped_info.num_deleted_vectors
-                + deleted_points_count * vector_name_count,
-            vectors_size_bytes: wrapped_info.vectors_size_bytes, //  + write_info.vectors_size_bytes,
-            payloads_size_bytes: wrapped_info.payloads_size_bytes,
-            ram_usage_bytes: wrapped_info.ram_usage_bytes,
-            disk_usage_bytes: wrapped_info.disk_usage_bytes,
-            is_appendable: false,
-            index_schema: wrapped_info.index_schema,
-            vector_data,
-            deferred_internal_id: wrapped_info.deferred_internal_id,
-        }
+    fn info(&self) -> OperationResult<SegmentInfo> {
+        let wrapped_info = self.wrapped_segment.get().read().info()?;
+        Ok(self.adjusted_info(wrapped_info))
     }
 
     fn config(&self) -> &SegmentConfig {
@@ -559,7 +755,7 @@ impl ReadSegmentEntry for ProxySegment {
     fn get_indexed_fields(&self) -> HashMap<PayloadKeyType, PayloadFieldSchema> {
         let mut indexed_fields = self.wrapped_segment.get().read().get_indexed_fields();
 
-        for (field_name, change) in self.changed_indexes.iter_unordered() {
+        for (field_name, change) in self.pending_changes.index_changes().iter_unordered() {
             match change {
                 ProxyIndexChange::Create(schema, _) => {
                     indexed_fields.insert(field_name.to_owned(), schema.to_owned());
@@ -580,19 +776,15 @@ impl ReadSegmentEntry for ProxySegment {
         indexed_fields
     }
 
-    fn check_error(&self) -> Option<SegmentFailedState> {
-        self.wrapped_segment.get().read().check_error()
-    }
-
-    fn vector_names(&self) -> HashSet<VectorNameBuf> {
+    fn vector_names(&self) -> Vec<VectorNameBuf> {
         self.wrapped_segment.get().read().vector_names()
     }
 
-    fn get_telemetry_data(&self, detail: TelemetryDetail) -> SegmentTelemetry {
+    fn get_telemetry_data(&self, detail: TelemetryDetail) -> OperationResult<SegmentTelemetry> {
         self.wrapped_segment.get().read().get_telemetry_data(detail)
     }
 
-    fn fill_query_context(&self, query_context: &mut QueryContext) {
+    fn fill_query_context(&self, query_context: &mut QueryContext) -> OperationResult<()> {
         // Information from temporary segment is not too important for query context
         self.wrapped_segment
             .get()
@@ -601,7 +793,10 @@ impl ReadSegmentEntry for ProxySegment {
     }
 
     fn point_is_deferred(&self, point_id: PointIdType) -> bool {
-        !self.deleted_points.contains_key(&point_id)
+        !self
+            .pending_changes
+            .deleted_points()
+            .contains_key(&point_id)
             && self
                 .wrapped_segment
                 .get()
@@ -612,7 +807,7 @@ impl ReadSegmentEntry for ProxySegment {
     fn deferred_point_ids(&self) -> Vec<PointIdType> {
         let mut ids = self.wrapped_segment.get().read().deferred_point_ids();
         if self.deleted_deferred_count > 0 {
-            ids.retain(|point_id| !self.deleted_points.contains_key(point_id));
+            ids.retain(|point_id| !self.pending_changes.deleted_points().contains_key(point_id));
         }
         ids
     }
@@ -631,18 +826,60 @@ impl ReadSegmentEntry for ProxySegment {
 }
 
 impl StorageSegmentEntry for ProxySegment {
-    fn persistent_version(&self) -> SeqNumberType {
-        self.wrapped_segment.get().read().persistent_version()
+    fn version(&self) -> SeqNumberType {
+        cmp::max(self.wrapped_segment.get().read().version(), self.version)
     }
 
-    fn flusher(&self, force: bool) -> Option<Flusher> {
-        let wrapped_segment = self.wrapped_segment.get();
-        let wrapped_segment_guard = wrapped_segment.read();
-        wrapped_segment_guard.flusher(force)
+    fn check_error(&self) -> Option<SegmentFailedState> {
+        self.wrapped_segment.get().read().check_error()
+    }
+
+    fn persistent_version(&self) -> SeqNumberType {
+        if !feature_flags().persist_proxy_segments {
+            return self.wrapped_segment.get().read().persistent_version();
+        }
+
+        // Everything this proxy buffers at or below the persisted pending changes version is
+        // durable in the pending changes log, on top of whatever the wrapped segment persisted
+        // itself. Reporting it here is what allows the WAL to be acknowledged past operations
+        // that only live in this proxy: on a restart the log is replayed onto the segment
+        // instead of replaying the WAL.
+        cmp::max(
+            self.wrapped_segment.get().read().persistent_version(),
+            self.pending_changes.persisted_version(),
+        )
+    }
+
+    fn flusher(&self, force: bool, up_to: Option<SeqNumberType>) -> Option<Flusher> {
+        let wrapped_flusher = self.wrapped_segment.get().read().flusher(force, up_to);
+        let pending_changes_flusher = self.pending_changes.flusher(self.version, up_to);
+
+        match (wrapped_flusher, pending_changes_flusher) {
+            (None, None) => None,
+            (wrapped_flusher, pending_changes_flusher) => Some(Box::new(move || {
+                if let Some(wrapped_flusher) = wrapped_flusher {
+                    wrapped_flusher()?;
+                }
+                if let Some(pending_changes_flusher) = pending_changes_flusher
+                    && feature_flags().persist_proxy_segments
+                {
+                    pending_changes_flusher()?;
+                }
+                Ok(())
+            })),
+        }
     }
 
     fn drop_data(self) -> OperationResult<()> {
-        self.wrapped_segment.drop_data()
+        let ProxySegment {
+            wrapped_segment,
+            pending_changes,
+            ..
+        } = self;
+        // Drop the pending changes first: this waits for any in-flight pending changes flusher,
+        // so it cannot append to the segment directory while it is being deleted
+        drop(pending_changes);
+        wrapped_segment.drop_data()
     }
 
     fn data_path(&self) -> PathBuf {
@@ -656,6 +893,32 @@ impl SegmentEntry for ProxySegment {
         op_num: SeqNumberType,
         point_id: PointIdType,
         _vectors: NamedVectors,
+        _hw_counter: &HardwareCounterCell,
+    ) -> OperationResult<bool> {
+        Err(OperationError::service_error(format!(
+            "Upsert is disabled for proxy segments: operation {op_num} on point {point_id}",
+        )))
+    }
+
+    fn upsert_point_raw(
+        &mut self,
+        op_num: SeqNumberType,
+        point_id: PointIdType,
+        _vectors: &[(VectorNameBuf, Vec<u8>)],
+        _hw_counter: &HardwareCounterCell,
+    ) -> OperationResult<bool> {
+        Err(OperationError::service_error(format!(
+            "Upsert is disabled for proxy segments: operation {op_num} on point {point_id}",
+        )))
+    }
+
+    fn upsert_moved_point(
+        &mut self,
+        op_num: SeqNumberType,
+        point_id: PointIdType,
+        _raw_vectors: &[(VectorNameBuf, Vec<u8>)],
+        _updated_vectors: NamedVectors,
+        _payload: &Payload,
         _hw_counter: &HardwareCounterCell,
     ) -> OperationResult<bool> {
         Err(OperationError::service_error(format!(
@@ -760,7 +1023,7 @@ impl NonAppendableSegmentEntry for ProxySegment {
                 was_deferred_point = is_deferred;
 
                 if point_offset.is_some() {
-                    let prev = self.deleted_points.insert(
+                    let prev = self.pending_changes.register_delete_point(
                         point_id,
                         ProxyDeletedPoint {
                             local_version: op_num,
@@ -781,14 +1044,14 @@ impl NonAppendableSegmentEntry for ProxySegment {
                 let (has_point, is_deferred) = {
                     let read_proxy = proxy.read();
                     (
-                        read_proxy.has_point(point_id),
+                        read_proxy.has_point(point_id, DeferredBehavior::WithDeferred),
                         read_proxy.point_is_deferred(point_id),
                     )
                 };
                 was_deferred_point = is_deferred;
 
                 if has_point {
-                    let prev = self.deleted_points.insert(
+                    let prev = self.pending_changes.register_delete_point(
                         point_id,
                         ProxyDeletedPoint {
                             local_version: op_num,
@@ -825,8 +1088,8 @@ impl NonAppendableSegmentEntry for ProxySegment {
         self.version = cmp::max(self.version, op_num);
 
         // Store index change to later propagate to optimized/wrapped segment
-        self.changed_indexes
-            .insert(key.clone(), ProxyIndexChange::Delete(op_num));
+        self.pending_changes
+            .register_index_change(key.clone(), ProxyIndexChange::Delete(op_num));
 
         Ok(true)
     }
@@ -843,7 +1106,7 @@ impl NonAppendableSegmentEntry for ProxySegment {
 
         self.version = cmp::max(self.version, op_num);
 
-        self.changed_indexes.insert(
+        self.pending_changes.register_index_change(
             key.clone(),
             ProxyIndexChange::DeleteIfIncompatible(op_num, field_schema.clone()),
         );
@@ -882,8 +1145,50 @@ impl NonAppendableSegmentEntry for ProxySegment {
         self.version = cmp::max(self.version, op_num);
 
         // Store index change to later propagate to optimized/wrapped segment
-        self.changed_indexes
-            .insert(key, ProxyIndexChange::Create(field_schema, op_num));
+        self.pending_changes
+            .register_index_change(key, ProxyIndexChange::Create(field_schema, op_num));
+
+        Ok(true)
+    }
+
+    fn create_vector_name(
+        &mut self,
+        op_num: SeqNumberType,
+        vector_name: &VectorName,
+        vector_config: &VectorNameConfig,
+    ) -> OperationResult<bool> {
+        if self.version() > op_num {
+            return Ok(false);
+        }
+
+        self.version = cmp::max(self.version, op_num);
+
+        // `register_vector_name_create` consults `wrapped_config` (and any earlier intent
+        // recorded for this name) to compute `supersedes_wrapped`, so the
+        // optimiser/propagator can clear stale wrapped storage when needed.
+        self.pending_changes.register_vector_name_create(
+            vector_name.to_owned(),
+            vector_config.clone(),
+            op_num,
+            &self.wrapped_config,
+        );
+
+        Ok(true)
+    }
+
+    fn delete_vector_name(
+        &mut self,
+        op_num: SeqNumberType,
+        vector_name: &VectorName,
+    ) -> OperationResult<bool> {
+        if self.version() > op_num {
+            return Ok(false);
+        }
+
+        self.version = cmp::max(self.version, op_num);
+
+        self.pending_changes
+            .register_vector_name_delete(vector_name.to_owned(), op_num);
 
         Ok(true)
     }

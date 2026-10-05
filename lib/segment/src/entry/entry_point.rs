@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -15,7 +15,8 @@ use crate::data_types::facets::{FacetParams, FacetValue};
 use crate::data_types::named_vectors::NamedVectors;
 use crate::data_types::order_by::{OrderBy, OrderValue};
 use crate::data_types::query_context::{FormulaContext, QueryContext, SegmentQueryContext};
-use crate::data_types::segment_record::SegmentRecord;
+use crate::data_types::segment_record::{SegmentRecord, SegmentRecordRaw};
+use crate::data_types::vector_name_config::VectorNameConfig;
 use crate::data_types::vectors::{QueryVector, VectorInternal};
 use crate::entry::snapshot_entry::SnapshotEntry;
 use crate::index::field_index::{CardinalityEstimation, FieldIndex};
@@ -31,10 +32,7 @@ use crate::types::{
 ///
 /// Assume all operations are idempotent - which means that no matter how many times an operation
 /// is executed - the storage state will be the same.
-pub trait ReadSegmentEntry: SnapshotEntry {
-    /// Get current update version of the segment
-    fn version(&self) -> SeqNumberType;
-
+pub trait ReadSegmentEntry {
     fn is_proxy(&self) -> bool;
 
     /// Get version of specified point
@@ -71,6 +69,18 @@ pub trait ReadSegmentEntry: SnapshotEntry {
         hw_counter: &HardwareCounterCell,
     ) -> OperationResult<Option<VectorInternal>>;
 
+    /// Like [`ReadSegmentEntry::vector`], but with explicit deferred semantics.
+    ///
+    /// With [`DeferredBehavior::WithDeferred`] this resolves the latest head of
+    /// the point, including a deferred head that is invisible to ordinary reads.
+    fn vector_with_behavior(
+        &self,
+        vector_name: &VectorName,
+        point_id: PointIdType,
+        deferred_behavior: DeferredBehavior,
+        hw_counter: &HardwareCounterCell,
+    ) -> OperationResult<Option<VectorInternal>>;
+
     fn all_vectors(
         &self,
         point_id: PointIdType,
@@ -92,6 +102,21 @@ pub trait ReadSegmentEntry: SnapshotEntry {
         deferred_behavior: DeferredBehavior,
     ) -> OperationResult<AHashMap<ExtendedPointId, SegmentRecord>>;
 
+    /// Byte-blob analogue of [`ReadSegmentEntry::retrieve`]: returns vectors and
+    /// payload as stored ([`SegmentRecordRaw`]), to avoid a lossy round-trip and
+    /// a needless parse when relocating points (copy-on-write moves, shard
+    /// transfer). A caller that needs the parsed payload decodes it itself.
+    ///
+    /// Like `retrieve`, may return fewer records than requested and in any order.
+    fn retrieve_raw(
+        &self,
+        point_ids: &[PointIdType],
+        with_vector: &WithVector,
+        hw_counter: &HardwareCounterCell,
+        is_stopped: &AtomicBool,
+        deferred_behavior: DeferredBehavior,
+    ) -> OperationResult<AHashMap<ExtendedPointId, SegmentRecordRaw>>;
+
     /// Retrieve payload for the point
     /// If not found, return empty payload
     fn payload(
@@ -99,9 +124,6 @@ pub trait ReadSegmentEntry: SnapshotEntry {
         point_id: PointIdType,
         hw_counter: &HardwareCounterCell,
     ) -> OperationResult<Payload>;
-
-    /// Iterator over all points in segment in ascending order.
-    fn iter_points(&self) -> Box<dyn Iterator<Item = PointIdType> + '_>;
 
     /// Paginate over points which satisfies filtering condition starting with `offset` id including.
     ///
@@ -164,8 +186,9 @@ pub trait ReadSegmentEntry: SnapshotEntry {
 
     /// Check if there is point with `point_id` in this segment.
     ///
-    /// Soft deleted points are excluded.
-    fn has_point(&self, point_id: PointIdType) -> bool;
+    /// Soft deleted points are excluded. `deferred_behavior` selects whether a
+    /// deferred-only point counts as present.
+    fn has_point(&self, point_id: PointIdType, deferred_behavior: DeferredBehavior) -> bool;
 
     /// Estimate available point count in this segment for given filter.
     fn estimate_point_count<'a>(
@@ -174,7 +197,8 @@ pub trait ReadSegmentEntry: SnapshotEntry {
         hw_counter: &HardwareCounterCell,
     ) -> OperationResult<CardinalityEstimation>;
 
-    fn vector_names(&self) -> HashSet<VectorNameBuf>;
+    /// Names of all vectors in this segment, sorted.
+    fn vector_names(&self) -> Vec<VectorNameBuf>;
 
     /// Whether this segment is completely empty in terms of points
     ///
@@ -217,7 +241,7 @@ pub trait ReadSegmentEntry: SnapshotEntry {
     fn segment_type(&self) -> SegmentType;
 
     /// Get current stats of the segment
-    fn info(&self) -> SegmentInfo;
+    fn info(&self) -> OperationResult<SegmentInfo>;
 
     /// Get size related stats of the segment.
     /// This returns `SegmentInfo` with some non size-related data (like `schema`) unset to improve performance.
@@ -235,13 +259,10 @@ pub trait ReadSegmentEntry: SnapshotEntry {
     /// Get indexed fields
     fn get_indexed_fields(&self) -> HashMap<PayloadKeyType, PayloadFieldSchema>;
 
-    /// Checks if segment errored during last operations
-    fn check_error(&self) -> Option<SegmentFailedState>;
-
     // Get collected telemetry data of segment
-    fn get_telemetry_data(&self, detail: TelemetryDetail) -> SegmentTelemetry;
+    fn get_telemetry_data(&self, detail: TelemetryDetail) -> OperationResult<SegmentTelemetry>;
 
-    fn fill_query_context(&self, query_context: &mut QueryContext);
+    fn fill_query_context(&self, query_context: &mut QueryContext) -> OperationResult<()>;
 
     /// Check whether the point is marked as deferred in the segment
     fn point_is_deferred(&self, point_id: PointIdType) -> bool;
@@ -263,19 +284,37 @@ pub trait ReadSegmentEntry: SnapshotEntry {
 }
 
 /// Segment with storage.
-pub trait StorageSegmentEntry: ReadSegmentEntry {
+pub trait StorageSegmentEntry: ReadSegmentEntry + SnapshotEntry {
+    /// Get current update version of the segment
+    fn version(&self) -> SeqNumberType;
+
+    /// Checks if segment errored during last operations
+    fn check_error(&self) -> Option<SegmentFailedState>;
+
     /// Get current persistent version of the segment
     fn persistent_version(&self) -> SeqNumberType;
 
     /// Returns a function, which when called, will flush all pending changes to disk.
     /// If there are currently no changes to flush, returns None.
     /// If `force` is true, will return a flusher even if there are no changes to flush.
-    fn flusher(&self, force: bool) -> Option<Flusher>;
+    ///
+    /// `up_to` caps the version the flush is allowed to claim as persisted, and must be the
+    /// last operation known to be fully applied when the flusher is captured. It may still write
+    /// newer operations to disk though. One update operation writes a segment in several
+    /// separately locked phases under the same operation number, so a flush capturing the segment
+    /// between them holds only part of that operation. Claiming its version would leave the
+    /// segment at `version == persisted_version` with the rest still in memory: every later flush
+    /// skips it and the WAL acknowledge moves past the operation, dropping the rest for good
+    /// (#10402). Pass `None` only when the flush cannot race an update operation.
+    fn flusher(&self, force: bool, up_to: Option<SeqNumberType>) -> Option<Flusher>;
 
     /// Immediately flush all changes to disk and return persisted version.
     /// Blocks the current thread.
+    ///
+    /// Claims everything the segment holds, so only for flushes that cannot race an update
+    /// operation. See `flusher`.
     fn flush(&self, force: bool) -> OperationResult<SeqNumberType> {
-        if let Some(flusher) = self.flusher(force) {
+        if let Some(flusher) = self.flusher(force, None) {
             flusher()?;
         }
         Ok(self.persistent_version())
@@ -371,6 +410,27 @@ pub trait NonAppendableSegmentEntry: StorageSegmentEntry {
 
         self.apply_field_index(op_num, key.to_owned(), schema, indexes)
     }
+
+    /// Create a new named vector in the segment.
+    /// For appendable segments: creates a real, writable vector storage + plain index.
+    /// For immutable segments: creates a placeholder (empty) vector storage.
+    /// Returns Ok(false) if the vector already exists (idempotent).
+    fn create_vector_name(
+        &mut self,
+        op_num: SeqNumberType,
+        vector_name: &VectorName,
+        vector_config: &VectorNameConfig,
+    ) -> OperationResult<bool>;
+
+    /// Delete a named vector from the segment.
+    /// Removes vector storage, index, and quantization data.
+    /// Removes the vector from segment config.
+    /// Returns Ok(false) if the vector does not exist (idempotent).
+    fn delete_vector_name(
+        &mut self,
+        op_num: SeqNumberType,
+        vector_name: &VectorName,
+    ) -> OperationResult<bool>;
 }
 
 /// Define mutable operations which can be performed with Segment or Segment-like entity.
@@ -383,6 +443,44 @@ pub trait SegmentEntry: NonAppendableSegmentEntry {
         op_num: SeqNumberType,
         point_id: PointIdType,
         vectors: NamedVectors,
+        hw_counter: &HardwareCounterCell,
+    ) -> OperationResult<bool>;
+
+    /// Byte-blob analogue of [`SegmentEntry::upsert_point`]: vector values are
+    /// storage-native bytes in the exact form returned by
+    /// [`ReadSegmentEntry::retrieve_raw`], so requantized (e.g. TurboQuant)
+    /// vectors relocate without a lossy decode/re-encode round-trip.
+    ///
+    /// The bytes carry no encoding/version tag: the target segment must have
+    /// the same vector configuration (kind, datatype, dim) as the source. The
+    /// bytes are inserted as-is, without preprocessing — they were already
+    /// preprocessed (e.g. cosine-normalized) when first ingested.
+    fn upsert_point_raw(
+        &mut self,
+        op_num: SeqNumberType,
+        point_id: PointIdType,
+        vectors: &[(VectorNameBuf, Vec<u8>)],
+        hw_counter: &HardwareCounterCell,
+    ) -> OperationResult<bool>;
+
+    /// Upsert a complete point in a single operation: storage-native raw
+    /// vectors (the [`ReadSegmentEntry::retrieve_raw`] form, same contract as
+    /// [`SegmentEntry::upsert_point_raw`]), decoded vectors overriding them
+    /// name-by-name, and the full payload. Named vectors present in neither
+    /// list are deleted.
+    ///
+    /// This is the copy-on-write move primitive: it is equivalent to
+    /// `upsert_point_raw` + `update_vectors` + `set_full_payload`, but writes
+    /// the point once. On append-only segments each of those steps clones the
+    /// whole point to a fresh internal id, so issuing them separately turns
+    /// one moved point into a chain of immediately-dead slots.
+    fn upsert_moved_point(
+        &mut self,
+        op_num: SeqNumberType,
+        point_id: PointIdType,
+        raw_vectors: &[(VectorNameBuf, Vec<u8>)],
+        updated_vectors: NamedVectors,
+        payload: &Payload,
         hw_counter: &HardwareCounterCell,
     ) -> OperationResult<bool>;
 

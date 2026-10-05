@@ -36,6 +36,18 @@ pub struct VerificationPass {
 /// Trait to verify strict mode for requests.
 /// This trait ignores the `enabled` parameter in `StrictModeConfig`.
 pub trait StrictModeVerification {
+    /// Whether executing this request can grow process memory or disk usage
+    /// (e.g. upsert, set payload).
+    ///
+    /// Gates both resource quota checks — resident memory and disk usage — so an
+    /// operation that writes new bytes must return `true` even if it does not grow
+    /// RSS. Delete-style operations should return `false` so they can still run
+    /// when a resource is exhausted; blocking them would deadlock the path that
+    /// frees it.
+    fn consumes_memory(&self) -> bool {
+        false
+    }
+
     /// Implementing this method allows adding a custom check for request specific values.
     #[allow(async_fn_in_trait)]
     async fn check_custom(
@@ -111,6 +123,11 @@ pub trait StrictModeVerification {
                 return Ok(());
             };
 
+            // Before the index check: a filter rejected on its own terms should
+            // not be answered with "create an index for this key", since the
+            // index would not make it acceptable.
+            check_filter_limits(filter, strict_mode_config)?;
+
             // Check for filter indices
             if allow_unindexed_filter == Some(false)
                 && let Some((key, schemas)) = collection.one_unindexed_key(filter)
@@ -130,8 +147,6 @@ pub trait StrictModeVerification {
                     "Create an index for this key or use a different filter.",
                 ));
             }
-
-            check_filter_limits(filter, strict_mode_config)?;
 
             Ok(())
         };
@@ -170,6 +185,18 @@ fn check_filter_limits(
     filter: &Filter,
     strict_mode_config: &StrictModeConfig,
 ) -> CollectionResult<()> {
+    // Substring matching has no bounded access path: whichever index serves the
+    // field, the condition is answered by looking at every distinct value of
+    // it. Too expensive to allow under strict mode, indexed or not.
+    if let Some(key) = filter.one_substring_match_key() {
+        return Err(CollectionError::strict_mode(
+            format!(
+                "Substring matching is not allowed, used for \"{key}\": it scans every value of the field, with or without an index",
+            ),
+            "Use a prefix match or a full-text match instead.",
+        ));
+    }
+
     // Filter condition count limit
     if let Some(filter_condition_limit) = strict_mode_config.filter_max_conditions {
         let filter_conditions = filter.total_conditions_count();
@@ -217,6 +244,43 @@ pub fn check_search_batch_size(
         strict_mode_config.search_max_batchsize,
         "search batch size",
     )
+}
+
+/// Reject a memory-consuming update when process resident memory has reached the
+/// collection's deprecated `max_resident_memory_percent`.
+///
+/// Superseded by the node-wide quota, which caps the same resource for every
+/// collection whether or not strict mode is on. This only tightens that cap for
+/// one collection, and is deliberately self-contained so that retiring the
+/// setting in 1.21 is a matter of deleting this function and its single caller.
+///
+/// The measurement comes from the quota manager, the node's single reader of
+/// process memory, so the two checks share one reading rather than each taking
+/// their own.
+#[allow(deprecated)] // this *is* the deprecated setting's enforcement
+pub fn check_resident_memory(strict_mode_config: &StrictModeConfig) -> CollectionResult<()> {
+    let Some(limit) = strict_mode_config.max_resident_memory_percent else {
+        return Ok(());
+    };
+
+    // Unreadable stats let the update through: a limit we cannot evaluate must
+    // not become a limit of zero.
+    let Some(used_percent) = shard::quota::global().resident_memory_percent(Some(limit)) else {
+        return Ok(());
+    };
+
+    if used_percent < limit {
+        return Ok(());
+    }
+
+    Err(CollectionError::strict_mode(
+        format!(
+            "Resident memory usage is at {used_percent}% of total memory, \
+             exceeding the configured limit of {limit}%",
+        ),
+        "Reduce memory usage (e.g. delete points or drop collections), or raise \
+         `max_resident_memory_percent` in the strict mode config of this collection.",
+    ))
 }
 
 pub(crate) fn check_bool_opt(
@@ -298,7 +362,9 @@ impl StrictModeVerification for SearchParams {
     }
 
     fn indexed_filter_read(&self) -> Option<&Filter> {
-        None
+        // The IDF corpus filter is evaluated on the read path and must obey
+        // the same unindexed-field restrictions as a search filter.
+        self.idf.as_ref().and_then(|idf| idf.corpus())
     }
 
     fn indexed_filter_write(&self) -> Option<&Filter> {
@@ -371,9 +437,11 @@ mod test {
         let collection = fixture().await;
 
         test_query_limit(&collection).await;
+        test_scroll_query_limit(&collection).await;
         test_search_params(&collection).await;
         test_filter_read(&collection).await;
         test_filter_write(&collection).await;
+        test_substring_filter(&collection).await;
         test_request_exact(&collection).await;
         test_search_batch_limit(&collection).await;
         test_upsert_batch_limit(&collection).await;
@@ -382,6 +450,43 @@ mod test {
     async fn test_query_limit(collection: &Collection) {
         assert_strict_mode_error(discover_fixture(Some(10), None, None), collection).await;
         assert_strict_mode_success(discover_fixture(Some(4), None, None), collection).await;
+    }
+
+    async fn test_scroll_query_limit(collection: &Collection) {
+        use shard::scroll::ScrollRequestInternal;
+
+        // Default limit (10) exceeds max_query_limit (4), so omitted limit should error
+        let request_omitted_limit = ScrollRequestInternal {
+            offset: None,
+            limit: None,
+            filter: None,
+            with_payload: None,
+            with_vector: Default::default(),
+            order_by: None,
+        };
+        assert_strict_mode_error(request_omitted_limit, collection).await;
+
+        // Explicit limit (10) exceeds max_query_limit (4)
+        let request_explicit_exceeding_limit = ScrollRequestInternal {
+            offset: None,
+            limit: Some(10),
+            filter: None,
+            with_payload: None,
+            with_vector: Default::default(),
+            order_by: None,
+        };
+        assert_strict_mode_error(request_explicit_exceeding_limit, collection).await;
+
+        // Explicit limit (4) matches max_query_limit (4)
+        let request_valid_limit = ScrollRequestInternal {
+            offset: None,
+            limit: Some(4),
+            filter: None,
+            with_payload: None,
+            with_vector: Default::default(),
+            order_by: None,
+        };
+        assert_strict_mode_success(request_valid_limit, collection).await;
     }
 
     async fn test_filter_read(collection: &Collection) {
@@ -420,6 +525,57 @@ mod test {
             shard_key: None,
         });
         assert_strict_mode_success(allowed_request, collection).await;
+    }
+
+    /// Substring matching is rejected whatever indexes the field has, on read
+    /// and on write, and however deeply it is nested in the filter.
+    async fn test_substring_filter(collection: &Collection) {
+        let substring_filter = |key: &str| {
+            Filter::new_must(Condition::Field(FieldCondition::new_match(
+                key.try_into().unwrap(),
+                Match::new_substring("abc"),
+            )))
+        };
+
+        // The indexed key rules out a rejection by the unindexed-field check.
+        assert_strict_mode_error_contains(
+            discover_fixture(None, Some(substring_filter(INDEXED_KEY)), None),
+            collection,
+            "Substring matching is not allowed",
+        )
+        .await;
+
+        // Nested in a sub-filter.
+        assert_strict_mode_error_contains(
+            discover_fixture(
+                None,
+                Some(Filter::new_must(Condition::Filter(substring_filter(
+                    INDEXED_KEY,
+                )))),
+                None,
+            ),
+            collection,
+            "Substring matching is not allowed",
+        )
+        .await;
+
+        // On the write path.
+        assert_strict_mode_error_contains(
+            PointsSelector::FilterSelector(FilterSelector {
+                filter: substring_filter(INDEXED_KEY),
+                shard_key: None,
+            }),
+            collection,
+            "Substring matching is not allowed",
+        )
+        .await;
+
+        // An exact match on the same key is unaffected.
+        assert_strict_mode_success(
+            discover_fixture(None, Some(filter_fixture(INDEXED_KEY)), None),
+            collection,
+        )
+        .await;
     }
 
     async fn test_request_exact(collection: &Collection) {
@@ -478,6 +634,56 @@ mod test {
         assert_strict_mode_success(request, collection).await;
     }
 
+    #[test]
+    fn test_consumes_memory_flags() {
+        use api::rest::{PointInsertOperations, PointsList};
+
+        use crate::operations::payload_ops::{DeletePayload, SetPayload};
+        use crate::operations::point_ops::{FilterSelector, PointsSelector};
+        use crate::operations::vector_ops::DeleteVectors;
+
+        // Insert-type ops consume memory.
+        let insert = PointInsertOperations::PointsList(PointsList {
+            points: vec![],
+            shard_key: None,
+            update_filter: None,
+            update_mode: None,
+        });
+        assert!(insert.consumes_memory());
+
+        let set_payload = SetPayload {
+            payload: Default::default(),
+            points: None,
+            filter: None,
+            key: None,
+            shard_key: None,
+        };
+        assert!(set_payload.consumes_memory());
+
+        // Delete-type ops must NOT consume memory (they free it).
+        let delete_vecs = DeleteVectors {
+            points: None,
+            filter: None,
+            vector: Default::default(),
+            shard_key: None,
+        };
+        assert!(!delete_vecs.consumes_memory());
+
+        let delete_payload = DeletePayload {
+            keys: vec![],
+            points: None,
+            filter: None,
+            shard_key: None,
+        };
+        assert!(!delete_payload.consumes_memory());
+
+        let delete_points = PointsSelector::FilterSelector(FilterSelector {
+            filter: Filter::default(),
+            shard_key: None,
+        });
+        assert!(!delete_points.consumes_memory());
+    }
+
     async fn test_upsert_batch_limit(collection: &Collection) {
         let request = PointInsertOperations::PointsList(PointsList {
             points: vec![
@@ -522,6 +728,25 @@ mod test {
         if !matches!(error, CollectionError::StrictMode { .. }) {
             panic!("Expected strict mode error but got {error:#}");
         }
+    }
+
+    async fn assert_strict_mode_error_contains<R: StrictModeVerification>(
+        request: R,
+        collection: &Collection,
+        expected: &str,
+    ) {
+        let strict_mode_config = collection.strict_mode_config().await.unwrap();
+        let error = request
+            .check_strict_mode(collection, &strict_mode_config)
+            .await
+            .expect_err("Expected strict mode error but got Ok() value");
+        let CollectionError::StrictMode { description } = &error else {
+            panic!("Expected strict mode error but got {error:#}");
+        };
+        assert!(
+            description.contains(expected),
+            "Expected {expected:?} in strict mode error, got {description:?}",
+        );
     }
 
     async fn assert_strict_mode_success<R: StrictModeVerification>(

@@ -13,6 +13,7 @@ use parking_lot::RwLock;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use storage::content_manager::errors::StorageError;
+use tokio_util::task::AbortOnDropHandle;
 
 pub use super::inference_input::InferenceInput;
 use super::local_model;
@@ -155,8 +156,18 @@ impl InferenceService {
                 }
             });
 
-        // Run inference on local models
-        let local_model_results = local_model::infer_local(local_inference_inputs, inference_type)?;
+        // Run inference on local models. This is synchronous CPU work
+        // (tokenization, stemming, hashing), so move it off the async worker.
+        // Skip the round-trip through the blocking pool when every input is
+        // remote, which is the common case with no local models in play.
+        let local_model_results = if local_inference_inputs.is_empty() {
+            vec![]
+        } else {
+            AbortOnDropHandle::new(tokio::task::spawn_blocking(move || {
+                local_model::infer_local(local_inference_inputs, inference_type)
+            }))
+            .await??
+        };
 
         // Early return with the local model's results if no other inference_inputs were passed.
         // If local models is also empty, we automatically return an empty response here.
@@ -397,6 +408,7 @@ fn merge_position_items<I>(
 
 #[cfg(test)]
 mod test {
+    use std::assert_matches;
     use std::collections::HashMap;
 
     use api::rest::Bm25Config;
@@ -407,7 +419,7 @@ mod test {
 
     use super::*;
     use crate::common::inference::api_keys::InferenceApiKeys;
-    use crate::common::inference::bm25::Bm25;
+    use crate::common::inference::bm25_inference::Bm25;
     use crate::common::inference::inference_input::InferenceDataType;
 
     const BM25_LOCAL_MODEL_NAME: &str = "bm25";
@@ -505,11 +517,13 @@ mod test {
             if input.model == BM25_LOCAL_MODEL_NAME {
                 // In our test-setup, only BM25 returns sparse vectors. Normal inference is mocked
                 // and always returns dense vectors.
-                assert!(matches!(response, VectorPersisted::Sparse(..)));
+                assert_matches!(response, VectorPersisted::Sparse(..));
                 let bm25_config = InferenceInput::parse_bm25_config(input.options).unwrap();
 
                 // Re-run bm25 and check that response is correct.
-                let bm25 = Bm25::new(bm25_config).doc_embed(input.data.as_str().unwrap());
+                let bm25 = Bm25::new(bm25_config)
+                    .unwrap()
+                    .doc_embed(input.data.as_str().unwrap());
                 assert_eq!(response, bm25);
             } else {
                 let expected_vector = VectorPersisted::Dense(vec![0.0; idx]);

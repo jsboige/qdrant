@@ -35,11 +35,9 @@ use crate::shards::shard_config::ShardConfig;
 
 pub type CollectionId = String;
 
-pub type ShardVersion = usize;
-
 /// Path to a shard directory
 pub fn shard_path(collection_path: &Path, shard_id: ShardId) -> PathBuf {
-    collection_path.join(format!("{shard_id}"))
+    collection_path.join(shard_id.to_string())
 }
 
 /// Path to a shard directory
@@ -103,7 +101,7 @@ async fn await_consensus_sync(
     consensus: &dyn ShardTransferConsensus,
     channel_service: &ChannelService,
 ) {
-    let wait_until = tokio::time::Instant::now() + defaults::CONSENSUS_META_OP_WAIT;
+    let wait_until = tokio::time::Instant::now() + defaults::CONSENSUS_META_OP_WAIT * 2;
     let sync_consensus =
         timeout_at(wait_until, consensus.await_consensus_sync(channel_service)).await;
 

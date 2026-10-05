@@ -48,9 +48,9 @@ pub fn read_local_audit_logs(
     cancel: &CancellationToken,
 ) -> Result<Vec<AuditEvent>, StorageError> {
     if !config.enabled {
-        return Err(StorageError::BadRequest {
-            description: "Audit logging is not enabled".to_string(),
-        });
+        return Err(StorageError::bad_request(
+            "Audit logging is not enabled".to_string(),
+        ));
     }
 
     let dir = &config.dir;
@@ -235,6 +235,7 @@ fn read_entries_from_file(
     Ok(Vec::from(window))
 }
 
+#[derive(Debug)]
 enum MatchResult {
     Match,
     NoMatch,
@@ -288,6 +289,7 @@ fn event_field_matches(event: &AuditEvent, key: &str, expected: &str) -> Option<
     let AuditEvent {
         timestamp: _, // filtered separately via time_from/time_to
         method,
+        api,
         auth_type,
         subject,
         remote,
@@ -298,7 +300,8 @@ fn event_field_matches(event: &AuditEvent, key: &str, expected: &str) -> Option<
     } = event;
 
     match key {
-        "method" => Some(method == expected),
+        "method" => Some(method.as_deref() == Some(expected)),
+        "api" => Some(api.as_deref() == Some(expected)),
         "auth_type" => {
             // Compare against the serde-serialized form of the enum variant.
             let serialized = serde_json::to_value(auth_type).ok()?;
@@ -319,6 +322,8 @@ fn event_field_matches(event: &AuditEvent, key: &str, expected: &str) -> Option<
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
     use crate::audit::AuditResult;
     use crate::rbac::AuthType;
@@ -326,7 +331,8 @@ mod tests {
     fn make_event() -> AuditEvent {
         AuditEvent {
             timestamp: "2024-06-15T10:30:00Z".parse().unwrap(),
-            method: "upsert_points".to_string(),
+            method: Some("upsert_points".to_string()),
+            api: None,
             auth_type: AuthType::ApiKey,
             subject: None,
             remote: None,
@@ -374,10 +380,7 @@ mod tests {
             HashMap::from([("method".to_string(), "upsert_points".to_string())]),
             None,
         );
-        assert!(matches!(
-            matches_query_result(&event, &query),
-            MatchResult::Match
-        ));
+        assert_matches!(matches_query_result(&event, &query), MatchResult::Match);
 
         let query2 = AuditLogQuery::new(
             None,
@@ -385,10 +388,7 @@ mod tests {
             HashMap::from([("method".to_string(), "delete_points".to_string())]),
             None,
         );
-        assert!(matches!(
-            matches_query_result(&event, &query2),
-            MatchResult::NoMatch
-        ));
+        assert_matches!(matches_query_result(&event, &query2), MatchResult::NoMatch);
     }
 
     #[test]
@@ -400,10 +400,7 @@ mod tests {
             HashMap::new(),
             None,
         );
-        assert!(matches!(
-            matches_query_result(&event, &query),
-            MatchResult::Match
-        ));
+        assert_matches!(matches_query_result(&event, &query), MatchResult::Match);
 
         let query_before = AuditLogQuery::new(
             Some("2024-06-16T00:00:00Z".parse().unwrap()),
@@ -411,10 +408,10 @@ mod tests {
             HashMap::new(),
             None,
         );
-        assert!(matches!(
+        assert_matches!(
             matches_query_result(&event, &query_before),
-            MatchResult::NoMatch
-        ));
+            MatchResult::NoMatch,
+        );
     }
 
     #[test]
@@ -423,6 +420,7 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         let deserialized: AuditEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.method, event.method);
+        assert_eq!(deserialized.api, event.api);
         assert_eq!(deserialized.timestamp, event.timestamp);
         assert_eq!(deserialized.auth_type, event.auth_type);
         assert_eq!(deserialized.result, event.result);

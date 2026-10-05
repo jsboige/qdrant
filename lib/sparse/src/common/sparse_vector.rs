@@ -1,8 +1,9 @@
 use std::borrow::Cow;
 use std::hash::Hash;
 
+use blobstore::Blob;
+use blobstore::error::BlobstoreError;
 use common::types::ScoreType;
-use gridstore::Blob;
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use schemars::JsonSchema;
@@ -86,7 +87,7 @@ pub fn score_vectors<T: Ord + Eq>(
             }
         }
     }
-    if overlap { Some(score) } else { None }
+    overlap.then_some(score)
 }
 
 impl RemappedSparseVector {
@@ -130,6 +131,11 @@ impl SparseVector {
         let vector = SparseVector { indices, values };
         vector.validate()?;
         Ok(vector)
+    }
+
+    #[cfg(feature = "testing")]
+    pub fn new_unchecked(indices: Vec<DimId>, values: Vec<DimWeight>) -> Self {
+        SparseVector { indices, values }
     }
 
     /// Sort this vector by indices.
@@ -263,8 +269,10 @@ impl Blob for SparseVector {
         bincode::serialize(&self).expect("Sparse vector serialization should not fail")
     }
 
-    fn from_bytes(data: &[u8]) -> Self {
-        bincode::deserialize(data).expect("Sparse vector deserialization should not fail")
+    fn from_bytes(data: &[u8]) -> Result<Self, BlobstoreError> {
+        bincode::deserialize(data).map_err(|err| {
+            BlobstoreError::decode_error(format!("Failed to deserialize sparse vector: {err}"))
+        })
     }
 }
 

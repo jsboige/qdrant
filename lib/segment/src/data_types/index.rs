@@ -1,3 +1,7 @@
+// Deprecated storage placement params (`on_disk`, `always_ram`, `on_disk_payload`) are still
+// handled here for backward compatibility with the new `memory` parameter
+#![allow(deprecated)]
+
 use std::collections::BTreeSet;
 use std::fmt;
 use std::str::FromStr;
@@ -5,6 +9,8 @@ use std::str::FromStr;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::{Validate, ValidationError, ValidationErrors};
+
+use crate::types::Memory;
 
 // Keyword
 
@@ -25,15 +31,27 @@ pub struct KeywordIndexParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_tenant: Option<bool>,
 
+    /// Deprecated: use `memory` instead.
     /// If true, store the index on disk. Default: false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[deprecated(since = "1.19.0", note = "Use `memory` instead")]
     pub on_disk: Option<bool>,
+
+    /// Memory placement of the index. Overrides the deprecated `on_disk` flag if both are set.
+    /// Default: `pinned` (`cold` if `on_disk` is set to true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<Memory>,
 
     /// Enable HNSW graph building for this payload field.
     /// If true, builds additional HNSW links (Need payload_m > 0).
     /// Default: true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_hnsw: Option<bool>,
+
+    /// If true, enable prefix matching (`match: { "prefix": ... }`) on this
+    /// field. Default: false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<bool>,
 }
 
 // Integer
@@ -64,10 +82,16 @@ pub struct IntegerIndexParams {
     /// Default is false.
     pub is_principal: Option<bool>,
 
+    /// Deprecated: use `memory` instead.
     /// If true, store the index on disk. Default: false.
-    /// Default is false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[deprecated(since = "1.19.0", note = "Use `memory` instead")]
     pub on_disk: Option<bool>,
+
+    /// Memory placement of the index. Overrides the deprecated `on_disk` flag if both are set.
+    /// Default: `pinned` (`cold` if `on_disk` is set to true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<Memory>,
 
     /// Enable HNSW graph building for this payload field.
     /// If true, builds additional HNSW links (Need payload_m > 0).
@@ -84,6 +108,7 @@ impl Validate for IntegerIndexParams {
             range,
             is_principal: _,
             on_disk: _,
+            memory: _,
             enable_hnsw: _,
         } = &self;
         validate_integer_index_params(lookup, range)
@@ -99,6 +124,27 @@ pub fn validate_integer_index_params(
         let error =
             ValidationError::new("the 'lookup' and 'range' capabilities can't be both disabled");
         errors.add("lookup", error);
+        return Err(errors);
+    }
+    Ok(())
+}
+
+/// Reject a full-text index whose token-length window cannot match any token.
+///
+/// Indexing drops every token shorter than `min_token_len` or longer than
+/// `max_token_len`. When the minimum is greater than the maximum, that filter
+/// rejects every token and the index builds empty. Equal bounds are valid:
+/// tokens of that exact length are kept. Either bound may be unset.
+pub fn validate_text_index_params<T: PartialOrd>(
+    min_token_len: &Option<T>,
+    max_token_len: &Option<T>,
+) -> Result<(), ValidationErrors> {
+    if let (Some(min_len), Some(max_len)) = (min_token_len, max_token_len)
+        && min_len > max_len
+    {
+        let mut errors = ValidationErrors::new();
+        let error = ValidationError::new("min_token_len can't be greater than max_token_len");
+        errors.add("min_token_len", error);
         return Err(errors);
     }
     Ok(())
@@ -123,9 +169,16 @@ pub struct UuidIndexParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_tenant: Option<bool>,
 
+    /// Deprecated: use `memory` instead.
     /// If true, store the index on disk. Default: false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[deprecated(since = "1.19.0", note = "Use `memory` instead")]
     pub on_disk: Option<bool>,
+
+    /// Memory placement of the index. Overrides the deprecated `on_disk` flag if both are set.
+    /// Default: `pinned` (`cold` if `on_disk` is set to true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<Memory>,
 
     /// Enable HNSW graph building for this payload field.
     /// If true, builds additional HNSW links (Need payload_m > 0).
@@ -153,9 +206,16 @@ pub struct FloatIndexParams {
     /// This option assumes that this key will be used in majority of filtered requests.
     pub is_principal: Option<bool>,
 
+    /// Deprecated: use `memory` instead.
     /// If true, store the index on disk. Default: false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[deprecated(since = "1.19.0", note = "Use `memory` instead")]
     pub on_disk: Option<bool>,
+
+    /// Memory placement of the index. Overrides the deprecated `on_disk` flag if both are set.
+    /// Default: `pinned` (`cold` if `on_disk` is set to true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<Memory>,
 
     /// Enable HNSW graph building for this payload field.
     /// If true, builds additional HNSW links (Need payload_m > 0).
@@ -179,9 +239,16 @@ pub struct GeoIndexParams {
     // Required for OpenAPI schema without anonymous types, versus #[serde(tag = "type")]
     pub r#type: GeoIndexType,
 
+    /// Deprecated: use `memory` instead.
     /// If true, store the index on disk. Default: false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[deprecated(since = "1.19.0", note = "Use `memory` instead")]
     pub on_disk: Option<bool>,
+
+    /// Memory placement of the index. Overrides the deprecated `on_disk` flag if both are set.
+    /// Default: `pinned` (`cold` if `on_disk` is set to true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<Memory>,
 
     /// Enable HNSW graph building for this payload field.
     /// If true, builds additional HNSW links (Need payload_m > 0).
@@ -242,9 +309,16 @@ pub struct TextIndexParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stopwords: Option<StopwordsInterface>,
 
+    /// Deprecated: use `memory` instead.
     /// If true, store the index on disk. Default: false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[deprecated(since = "1.19.0", note = "Use `memory` instead")]
     pub on_disk: Option<bool>,
+
+    /// Memory placement of the index. Overrides the deprecated `on_disk` flag if both are set.
+    /// Default: `pinned` (`cold` if `on_disk` is set to true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<Memory>,
 
     /// Algorithm for stemming. Default: disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -255,6 +329,26 @@ pub struct TextIndexParams {
     /// Default: true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_hnsw: Option<bool>,
+}
+
+impl Validate for TextIndexParams {
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        let TextIndexParams {
+            r#type: _,
+            tokenizer: _,
+            min_token_len,
+            max_token_len,
+            lowercase: _,
+            ascii_folding: _,
+            phrase_matching: _,
+            stopwords: _,
+            on_disk: _,
+            memory: _,
+            stemmer: _,
+            enable_hnsw: _,
+        } = &self;
+        validate_text_index_params(min_token_len, max_token_len)
+    }
 }
 
 #[derive(Default, Debug, Deserialize, Serialize, JsonSchema, Clone, Copy, PartialEq, Hash, Eq)]
@@ -270,11 +364,29 @@ pub struct SnowballParams {
     pub language: SnowballLanguage,
 }
 
+/// Tag selecting the explicit "no stemming" algorithm.
+#[derive(Default, Debug, Deserialize, Serialize, JsonSchema, Clone, Copy, PartialEq, Hash, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NoStemmer {
+    #[default]
+    None,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone, PartialEq, Hash, Eq)]
+pub struct DisabledStemmerParams {
+    pub r#type: NoStemmer,
+}
+
 /// Different stemming algorithms with their configs.
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Clone, PartialEq, Hash, Eq)]
 #[serde(untagged)]
 pub enum StemmingAlgorithm {
     Snowball(SnowballParams),
+    /// Explicitly opt out of stemming (`{"type": "none"}`).
+    ///
+    /// Differs from leaving `stemmer` unset, which falls back to the
+    /// language default stemmer.
+    Disabled(DisabledStemmerParams),
 }
 
 /// Languages supported by snowball stemmer.
@@ -369,6 +481,65 @@ pub enum StopwordsInterface {
     Set(StopwordsSet),
 }
 
+/// Whether text indexes record per-document lengths, which BM25 needs for
+/// length normalization.
+///
+/// Stands in for a `scoring` field on [`TextIndexParams`] until ranked queries
+/// exist. Not persisted, so `classify()` cannot see it change: it has to be
+/// replaced by the real field rather than flipped.
+const TEXT_INDEX_SCORING: bool = false;
+
+#[cfg(feature = "testing")]
+thread_local! {
+    /// See [`TextIndexParams::override_scoring`].
+    static TEXT_INDEX_SCORING_OVERRIDE: std::cell::Cell<Option<bool>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Restores the previous [`TextIndexParams::scoring`] override when dropped.
+#[cfg(feature = "testing")]
+#[must_use = "the override lasts only as long as the guard lives"]
+pub struct TextIndexScoringOverride {
+    previous: Option<bool>,
+}
+
+#[cfg(feature = "testing")]
+impl Drop for TextIndexScoringOverride {
+    fn drop(&mut self) {
+        TEXT_INDEX_SCORING_OVERRIDE.set(self.previous);
+    }
+}
+
+impl TextIndexParams {
+    /// Whether an index built from these params records document lengths.
+    ///
+    /// When the `scoring` field lands it must also normalize `phrase_matching`
+    /// to `true`, since tf comes from the positions that flag stores. Every
+    /// site derives positions from `phrase_matching`, so normalizing the field
+    /// is the whole change; without it a scoring index can be built with no
+    /// positions, and tf is then not slow to compute but impossible.
+    pub fn scoring(&self) -> bool {
+        #[cfg(feature = "testing")]
+        if let Some(scoring) = TEXT_INDEX_SCORING_OVERRIDE.get() {
+            return scoring;
+        }
+        TEXT_INDEX_SCORING
+    }
+
+    /// Make [`Self::scoring`] answer `scoring` on this thread until the guard
+    /// is dropped, so a test can build a recording index through the same
+    /// constructors production uses while the const stays `false`.
+    ///
+    /// Thread-local on purpose: tests in one binary run concurrently, and an
+    /// index build runs on the thread that asked for it.
+    #[cfg(feature = "testing")]
+    pub fn override_scoring(scoring: bool) -> TextIndexScoringOverride {
+        TextIndexScoringOverride {
+            previous: TEXT_INDEX_SCORING_OVERRIDE.replace(Some(scoring)),
+        }
+    }
+}
+
 impl StopwordsInterface {
     #[cfg(feature = "testing")]
     pub fn new_custom(custom: &[&str]) -> Self {
@@ -376,11 +547,6 @@ impl StopwordsInterface {
             languages: None,
             custom: Some(custom.iter().map(|s| (*s).to_string()).collect()),
         })
-    }
-
-    #[cfg(feature = "testing")]
-    pub fn new_language(language: Language) -> Self {
-        StopwordsInterface::Language(language)
     }
 
     #[cfg(feature = "testing")]
@@ -474,7 +640,7 @@ impl FromStr for Language {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone, PartialEq, Hash, Eq)]
+#[derive(Default, Debug, Deserialize, Serialize, JsonSchema, Clone, PartialEq, Hash, Eq)]
 pub struct StopwordsSet {
     /// Set of languages to use for stopwords.
     /// Multiple pre-defined lists of stopwords can be combined.
@@ -503,9 +669,16 @@ pub struct BoolIndexParams {
     // Required for OpenAPI schema without anonymous types, versus #[serde(tag = "type")]
     pub r#type: BoolIndexType,
 
+    /// Deprecated: use `memory` instead.
     /// If true, store the index on disk. Default: false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[deprecated(since = "1.19.0", note = "Use `memory` instead")]
     pub on_disk: Option<bool>,
+
+    /// Memory placement of the index. Overrides the deprecated `on_disk` flag if both are set.
+    /// Default: `pinned` (`cold` if `on_disk` is set to true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<Memory>,
 
     /// Enable HNSW graph building for this payload field.
     /// If true, builds additional HNSW links (Need payload_m > 0).
@@ -533,9 +706,16 @@ pub struct DatetimeIndexParams {
     /// This option assumes that this key will be used in majority of filtered requests.
     pub is_principal: Option<bool>,
 
+    /// Deprecated: use `memory` instead.
     /// If true, store the index on disk. Default: false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[deprecated(since = "1.19.0", note = "Use `memory` instead")]
     pub on_disk: Option<bool>,
+
+    /// Memory placement of the index. Overrides the deprecated `on_disk` flag if both are set.
+    /// Default: `pinned` (`cold` if `on_disk` is set to true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<Memory>,
 
     /// Enable HNSW graph building for this payload field.
     /// If true, builds additional HNSW links (Need payload_m > 0).
@@ -547,6 +727,32 @@ pub struct DatetimeIndexParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_stemming_algorithm_serialization() {
+        // Snowball round-trips with its `type`/`language` shape.
+        let snowball = StemmingAlgorithm::Snowball(SnowballParams {
+            r#type: Snowball::Snowball,
+            language: SnowballLanguage::English,
+        });
+        let json = serde_json::to_string(&snowball).unwrap();
+        assert_eq!(json, r#"{"type":"snowball","language":"english"}"#);
+        let deserialized: StemmingAlgorithm = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, snowball);
+
+        // Disabled is selected by `{"type": "none"}` and round-trips.
+        let disabled = StemmingAlgorithm::Disabled(DisabledStemmerParams {
+            r#type: NoStemmer::None,
+        });
+        let json = serde_json::to_string(&disabled).unwrap();
+        assert_eq!(json, r#"{"type":"none"}"#);
+        let deserialized: StemmingAlgorithm = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, disabled);
+
+        // The two variants must not alias each other.
+        let from_none: StemmingAlgorithm = serde_json::from_str(r#"{"type":"none"}"#).unwrap();
+        assert!(matches!(from_none, StemmingAlgorithm::Disabled(_)));
+    }
 
     #[test]
     fn test_stopwords_option_language_serialization() {
