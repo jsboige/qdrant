@@ -14,7 +14,11 @@
       3. Download to GDrive offsite (-SharedPath) and, unless skipped, to a local dir (-LocalCopyDir).
       4. SIZE-GUARD: if the new snapshot is < 50% of the largest existing one, SKIP retention and warn.
       5. Delete server-side snapshot.
-      6. Retention: 7 daily + 4 weekly Mondays (per destination).
+      6. Retention: DailyKeep most recent + WeeklyKeep weekly Mondays (per destination).
+         Defaults = 3 + 0 (user ruling 2026-10-07, dossier Q4 "A+B"). Historical: 7 + 4.
+         NOTE: deletions go through DriveFS -> Google Drive TRASH (30 d). Part B of the ruling
+         (permanent delete via Drive API) is pending a service-account key; until then trash
+         keeps filling ~1 snapshot/night and needs periodic manual emptying.
 
 .PARAMETER MinPoints
     Poison-guard floor. Default 100000 (roo_tasks_semantic_index ~380k as of 2026-05-21).
@@ -38,6 +42,9 @@ param(
     [string]$SharedPath  = '',
     [string]$LocalCopyDir = 'D:\qdrant-backups',
     [int]$MinPoints      = 100000,
+    # Retention: user ruling 2026-10-07 (Q4, "A+B") = keep 3 total. Historical default was 7 daily + 4 weekly Mondays.
+    [int]$DailyKeep      = 3,
+    [int]$WeeklyKeep     = 0,
     [string]$LogDir      = ''
 )
 
@@ -297,11 +304,13 @@ foreach ($d in $destinations) {
 
     $dayDirs = Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d{4}-\d{2}-\d{2}$' }
     $keep = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($x in ($dayDirs | Sort-Object Name -Descending | Select-Object -First 7)) { [void]$keep.Add($x.Name) }
-    $mondays = $dayDirs | Where-Object {
-        try { ([DateTime]::ParseExact($_.Name, 'yyyy-MM-dd', $null)).DayOfWeek -eq [DayOfWeek]::Monday } catch { $false }
-    } | Sort-Object Name -Descending | Select-Object -First 4
-    foreach ($m in $mondays) { [void]$keep.Add($m.Name) }
+    foreach ($x in ($dayDirs | Sort-Object Name -Descending | Select-Object -First $DailyKeep)) { [void]$keep.Add($x.Name) }
+    if ($WeeklyKeep -gt 0) {
+        $mondays = $dayDirs | Where-Object {
+            try { ([DateTime]::ParseExact($_.Name, 'yyyy-MM-dd', $null)).DayOfWeek -eq [DayOfWeek]::Monday } catch { $false }
+        } | Sort-Object Name -Descending | Select-Object -First $WeeklyKeep
+        foreach ($m in $mondays) { [void]$keep.Add($m.Name) }
+    }
 
     $deleted = 0
     foreach ($x in $dayDirs) {

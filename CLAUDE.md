@@ -78,7 +78,9 @@ curl http://localhost:6335/healthz   # Students
 # Snapshots roo_tasks_semantic_index -> GDrive offsite (scheduled) / + D:\qdrant-backups local (manual runs only).
 # Poison-guard (abort if points < MinPoints), size-guard (skip retention if new < 50% of largest),
 # bounded retry on copy failure (3x300s, DriveFS degradation), orphan cleanup (>48h server-side),
-# 7 daily + 4 weekly Mondays retention PER destination, idempotent per day.
+# retention = DailyKeep 3 + WeeklyKeep 0 PER destination (user ruling 2026-10-07, dossier Q4 "A+B";
+# historical 7+4). Deletions go to Drive TRASH — part B (permanent delete via Drive API, needs a
+# service-account key) pending; until then trash grows ~1 snapshot/night (manual emptying palliative).
 .\myia_qdrant\scripts\qdrant_snapshot_backup.ps1                  # all defaults (offsite + local)
 .\myia_qdrant\scripts\qdrant_snapshot_backup.ps1 -SharedPath -    # local-only (skip offsite)
 
