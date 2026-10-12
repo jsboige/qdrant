@@ -1,12 +1,12 @@
 <#
 .SYNOPSIS
-    Watchdog backend embeddings (vLLM po-2026 + proxy IIS embeddings.myia.io).
+    Watchdog backend embeddings (vLLM po-2023 + proxy IIS embeddings.myia.io).
     ALERT-ONLY : detecte la coupure du chemin semantique fleet et alerte immediatement
     sur les dashboards roosync (workspace-qdrant + global), sans remediation.
 
 .DESCRIPTION
     Verifie periodiquement (schtask 5 min, machine myia-ai-01) :
-      1) Backend direct : http://192.168.0.51:8004/health (vLLM qwen3-4b-awq-embedding, po-2026)
+      1) Backend direct : http://192.168.0.46:8004/health (vLLM qwen3-4b-awq-embedding, po-2023)
       2) Proxy IIS : https://embeddings.myia.io/v1/models (401/404 = vivant, 5xx/000 = down)
       3) Contexte qdrant : http://localhost:6333/healthz (pour qualifier l'alerte :
          "embeddings DOWN, qdrant UP" — le pattern 17/08/2026 ou la flotte declara
@@ -18,10 +18,13 @@
       DOWN-> UP : alerte [DONE] (recovery) sur les memes canaux
       UP -> UP : silencieux
 
-    POURQUOI sur ai-01 et pas po-2026 : le backend vit sur po-2026 ; quand po-2026
-    meurt, ses propres watchdogs meurent avec lui (incident 17/08 : 3e episode en 24h
-    de "qdrant HS" = SPOF embeddings). Ce watchdog, sur une machine differente, ferme
-    la breche de detection.
+    POURQUOI sur ai-01 et pas sur le siege du backend : le backend a vecu sur po-2026
+    jusqu'a sa panne materielle (09-10/10/2026), puis a ete redeploye sur po-2023
+    (GPU interne) ; quand la machine qui porte le backend meurt, ses propres
+    watchdogs meurent avec elle (incident 17/08 : 3e episode en 24h de "qdrant HS"
+    = SPOF embeddings). Ce watchdog, sur une machine differente, ferme la breche.
+    Cible mise a jour po-2023 le 2026-10-12 (etape 5 du plan de redeploiement) ;
+    la tache reste Disabled jusqu'au cutover IIS (web.config du site po-2023).
 
     Concu pour scheduled task toutes les 5 min (pwsh, MYIA/Limited, sans UAC).
     Le log file est append-only, dernieres lignes = etat le plus recent.
@@ -38,12 +41,13 @@
     les dashboards. Risque de course avec la condensation MCP (faible : appends
     petits) — accepte, cf. README.md.
 
-    REMEDIATION NON INCLUSE volontairement : le restart Docker po-2026 exige le mdp
-    maint-admin (hygiene secret : jamais stocke dans un script). Le role de ce
-    watchdog = DETECTION + ALERTE IMMEDIATE ; la remontée route vers user/Embeddings lane.
+    REMEDIATION NON INCLUSE volontairement : l'infra du siege backend appartient a
+    sa lane (po-2023:Maintenance) — depuis ai-01 on ne redemarre rien sur une infra
+    d'autrui. Le role de ce watchdog = DETECTION + ALERTE IMMEDIATE ; la remontee
+    route vers user / lane du siege / Embeddings lane.
 
 .MACHINES
-    myia-ai-01 (doit joindre 192.168.0.51 et le proxy public)
+    myia-ai-01 (doit joindre 192.168.0.46 et le proxy public)
 
 .EXAMPLE
     .\embedding_watchdog.ps1
@@ -61,7 +65,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$BackendUrl       = 'http://192.168.0.51:8004/health',
+    [string]$BackendUrl       = 'http://192.168.0.46:8004/health',
     [string]$ProxyUrl         = 'https://embeddings.myia.io/v1/models',
     [string]$QdrantUrl        = 'http://localhost:6333/healthz',
     [string]$StateDir         = 'C:\ProgramData\maint-scripts\logs',
@@ -259,10 +263,10 @@ if ($alertNow) {
     # ont pollue global la nuit du 05->06/09 pendant une saturation NAT Livebox.
     if ($exitCode -eq 2) {
         $headline = "[WARN][WATCHDOG] Proxy embeddings.myia.io INJOIGNABLE — backend :8004 SAIN ($($b.code)/$($b.ms)ms). Chemin semantique LAN intact."
-        $reco     = "NE PAS redemarrer Docker po-2026 (le backend repond). Suspecter le chemin public : IIS po-2023, NAT/lien du site. Verifier AVANT d'escalader : ping du 1er saut (passerelle 192.168.0.1 — resoudre Get-NetRoute 0.0.0.0/0 si doute ; l'ancien 192.168.0.254 est une IP morte) + une cible hors-hairpin (cloudflare) — si elles sont lentes aussi, c'est le reseau du site, pas un service."
+        $reco     = "NE PAS redemarrer le moteur du siege backend (le backend repond). Suspecter le chemin public : IIS po-2023, NAT/lien du site. Verifier AVANT d'escalader : ping du 1er saut (passerelle 192.168.0.1 — resoudre Get-NetRoute 0.0.0.0/0 si doute ; l'ancien 192.168.0.254 est une IP morte) + une cible hors-hairpin (cloudflare) — si elles sont lentes aussi, c'est le reseau du site, pas un service."
     } else {
         $headline = "[ERROR][WATCHDOG] Backend embeddings DOWN — chemin semantique fleet coupe. Qdrant: $qStatus"
-        $reco     = "restart Docker po-2026 par le user (WinRM maint-admin) — pattern 17/08/2026 (SPOF embeddings sur po-2026). NB : les episodes recents se sont souvent retablis SEULS en <10 min — verifier l'etat AVANT de restart"
+        $reco     = "alerter la lane du siege backend (po-2023:Maintenance) sur son dashboard — depuis ai-01 on ne redemarre rien sur une infra d'autrui. NB : les episodes recents se sont souvent retablis SEULS en <10 min — verifier l'etat AVANT d'escalader"
     }
     $body = @"
 **$headline**
