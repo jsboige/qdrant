@@ -634,4 +634,6 @@ docker compose -f docker-compose.production.yml up -d
 
 **Dernière mise à jour**: 2025-10-15  
 **Version**: 1.0  
+
+> **Voir aussi** — [`runbook_upstream_sync_bump_v1.20.0.md`](runbook_upstream_sync_bump_v1.20.0.md) : procédure de synchronisation du fork avec l'amont et de montée d'image sur les deux tenants (ce runbook-ci ne la couvre pas).
 **Prochain audit**: 2025-11-15
