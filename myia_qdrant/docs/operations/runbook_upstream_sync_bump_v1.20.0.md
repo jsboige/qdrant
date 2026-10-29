@@ -1,6 +1,6 @@
 # Runbook — Sync upstream + montée d'image Qdrant v1.19.2 → v1.20.0 (2 tenants)
 
-Lane `myia-ai-01:qdrant` · rédigé 2026-10-28 00:35 · **non exécuté**
+Lane `myia-ai-01:qdrant` · rédigé 2026-10-28 00:35 · **Phase A exécutée 29/10 (PR #6) · Phase B exécutée 29/10 17:15 (students) · Phase C en attente (compaction Q7 + soak 24 h)**
 
 ## 0. Mesures de départ (faites le 28/10 00:30)
 
@@ -115,3 +115,28 @@ docker compose -f myia_qdrant/docker-compose.production.yml up -d
 | C — vague d'optimisation | 10 min → 1 h | aucune (en ligne) |
 | C — bench | 20 min | aucune |
 | **Total hors compaction** | **~1 h 15 actives** | **quelques dizaines de secondes** |
+
+## 9. Journal d'exécution (29/10/2026)
+
+**Phase A — sync git (FAITE, ~17:00).** Branche `sync/upstream-v1.20.0` (from master) · `git merge upstream/master` = **172 commits amont / 1083 fichiers (+79 756 / −20 843)** · **1 seul conflit**, `CLAUDE.md` (add/add) : la version fork est conservée (doc de déploiement MyIA), celle de l'amont reste lisible via `git show upstream/master:CLAUDE.md` — pointeur d'une ligne ajouté en `8cdf899b1`. Aucun fichier Rust touché par nos 42 commits ⇒ aucun conflit possible sur le moteur. **PR #6.** Merge commit `9917c3031`.
+
+**Phase B — students (FAITE, 17:15).**
+- `docker pull qdrant/qdrant:v1.20.0` a d'abord échoué `authentication required - incorrect username or password` (credential Docker Hub périmé) → **`docker logout`** puis pull anonyme OK, digest `sha256:9bfc89f9…`.
+- `docker-compose.students.yml` épinglé `v1.20.0` + `up -d` (recréation obligatoire, pas `restart`).
+- **Récupération à froid ~2 min** : 349 collections rechargées une à une (~0,4 s chacune) ⇒ pendant ce temps les connexions HTTP sont **abandonnées** (le serveur n'accepte pas encore) — **ce n'est pas une panne**, ne pas conclure à un crash.
+- **Critères d'acceptation : TOUS VERTS** — version **1.20.0 build 222b2e44** (`GET /` + log de démarrage) · healthz 200 · **349 collections** (le runbook annonçait 347 : deux index `ws-*` créés depuis, pas une perte) · **401 sans clé / 200 avec** · probe `ws-009a20068fece012` dim 1536, 3 041 pts, `green` · **search 3 hits / 15 ms** · **aucune** ligne ERROR/WARN/`enforce_internal_auth` dans les logs.
+- Les volumes students vivent dans `docker_data.vhdx` **sur C:** (663,5 Go, C: à 707 Go libres) ⇒ **le bump students n'écrit PAS dans le VHDX E:** — la règle « compaction avant bump » ne contraint que la **production** (Phase C).
+
+**Phase C — production : EN ATTENTE.** Prérequis bloquants : compaction VHDX (**Q7 — clic UAC du user**), soak 24 h des students, backup du jour, débit d'ingest mesuré hors vague, bench vs **archive du 07/10**.
+
+**Enquête « optimisations disponibles » en v1.20.0 (lu dans le tree mergé, pas dans les notes de release)**
+| Nouveauté | Où | Ce que ça change | Verdict pour nous |
+|---|---|---|---|
+| **TurboQuant `turbo8`** | datatype de collection (`"datatype":"turbo8"` sur la def vector) + enum `Bits8` (`lib/segment/src/types.rs`) | TurboQuant 8 bits compressé, à la place de `Turbo4`/`Uint8` | **à tester** sur une collection témoin — pas de changement en prod tant que le recall n'est pas benché |
+| **TurboQuant `turbo16`** | datatype (`Turbo16`, `types.rs` + `graph_inline.rs`) | TurboQuant 16 bits ≈ quasi sans perte | idem — option « qualité » si le recall prime |
+| **Kernels VNNI** | `lib/quantization/src/turboquant/simd/{query8bit,query16bit}/x64.rs` | SIMD AVX512-VNNI sur les chemins turbo 8/16 bits | explains the latency upside of turbo8 vs scalar int8 — **à mesurer, pas à supposer** |
+| **`hnsw_config.inline_storage`** | `lib/segment/src/types.rs:885` + proto (`collections.proto:262`) | vecteurs stockés **dans le fichier du graphe HNSW** ; **contraintes** : exige `quantization` activée, incompatible **multivectors** | **piste disque** : moins de fichiers/seeks sur E:. `roo_tasks` est mono-vecteur + int8 ⇒ compatible. Un changement à la fois |
+| HNSW `m: 0` / `payload_m` | `config/config.yaml` | `m=0` désactive le graphe principal ; `payload_m` devient le nombre de liens payload-aware | hors périmètre (qualité/recall) |
+| `enforce_internal_auth` | `config/config.yaml` (service) | défaut **activé** si une clé API est configurée ; **sans effet en mono-nœud** (aucun pair) ; rotation via `alt_api_key` | vérifié au démarrage students : **aucune erreur** ✔ |
+| Snapshot durci | amont | noms uniques (plus d'écrasement), timeouts 60 s | utile pour notre script de backup |
+
