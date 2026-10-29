@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
-use common::counter::hardware_accumulator::HwMeasurementAcc;
+use common::ambient;
+use common::reason::Reason;
 use common::types::DeferredBehavior;
 use itertools::Itertools as _;
 use rand::RngExt;
@@ -23,6 +24,7 @@ impl<H: ReadSegmentHandle> EdgeReadView<H> {
         request: ScrollRequestInternal,
     ) -> OperationResult<(Vec<RecordInternal>, Option<PointIdType>)> {
         self.check_stopped()?;
+        let _scope = ambient::unmeasured_guard(Reason::EDGE_UNMEASURED);
         let ScrollRequestInternal {
             offset,
             limit,
@@ -44,7 +46,6 @@ impl<H: ReadSegmentHandle> EdgeReadView<H> {
                     &with_payload,
                     &with_vector,
                     filter.as_ref(),
-                    HwMeasurementAcc::disposable_edge(),
                 )?;
                 let next_offset = if records.len() > limit {
                     let last_record = records.pop().unwrap();
@@ -67,7 +68,6 @@ impl<H: ReadSegmentHandle> EdgeReadView<H> {
                     &with_vector,
                     filter.as_ref(),
                     &order_by,
-                    HwMeasurementAcc::disposable_edge(),
                 )?;
                 Ok((records, None))
             }
@@ -79,6 +79,7 @@ impl<H: ReadSegmentHandle> EdgeReadView<H> {
         request: &QueryScrollRequestInternal,
     ) -> OperationResult<Vec<ScoredPoint>> {
         self.check_stopped()?;
+        let _scope = ambient::unmeasured_guard(Reason::EDGE_UNMEASURED);
         let QueryScrollRequestInternal {
             limit,
             with_vector,
@@ -88,29 +89,15 @@ impl<H: ReadSegmentHandle> EdgeReadView<H> {
         } = request;
 
         let records = match scroll_order {
-            ScrollOrder::ById => self.scroll_by_id(
-                None,
-                *limit,
-                with_payload,
-                with_vector,
-                filter.as_ref(),
-                HwMeasurementAcc::disposable_edge(),
-            )?,
-            ScrollOrder::ByField(order_by) => self.scroll_by_field(
-                *limit,
-                with_payload,
-                with_vector,
-                filter.as_ref(),
-                order_by,
-                HwMeasurementAcc::disposable_edge(),
-            )?,
-            ScrollOrder::Random => self.scroll_randomly(
-                *limit,
-                with_payload,
-                with_vector,
-                filter.as_ref(),
-                HwMeasurementAcc::disposable_edge(),
-            )?,
+            ScrollOrder::ById => {
+                self.scroll_by_id(None, *limit, with_payload, with_vector, filter.as_ref())?
+            }
+            ScrollOrder::ByField(order_by) => {
+                self.scroll_by_field(*limit, with_payload, with_vector, filter.as_ref(), order_by)?
+            }
+            ScrollOrder::Random => {
+                self.scroll_randomly(*limit, with_payload, with_vector, filter.as_ref())?
+            }
         };
 
         let point_results = records
@@ -123,6 +110,7 @@ impl<H: ReadSegmentHandle> EdgeReadView<H> {
                 vector: record.vector,
                 shard_key: record.shard_key,
                 order_value: record.order_value,
+                location: None,
             })
             .collect();
 
@@ -136,7 +124,6 @@ impl<H: ReadSegmentHandle> EdgeReadView<H> {
         with_payload_interface: &WithPayloadInterface,
         with_vector: &WithVector,
         filter: Option<&Filter>,
-        hw_measurement_acc: HwMeasurementAcc,
     ) -> OperationResult<Vec<RecordInternal>> {
         self.check_stopped()?;
         let per_segment = self.par_map_segments(|segment| {
@@ -145,7 +132,6 @@ impl<H: ReadSegmentHandle> EdgeReadView<H> {
                 Some(limit),
                 filter,
                 &self.is_stopped,
-                &hw_measurement_acc.get_counter_cell(),
                 DeferredBehavior::VisibleOnly,
             )
         })?;
@@ -164,7 +150,6 @@ impl<H: ReadSegmentHandle> EdgeReadView<H> {
             &WithPayload::from(with_payload_interface),
             with_vector,
             &self.is_stopped,
-            hw_measurement_acc,
             DeferredBehavior::VisibleOnly,
         )?;
         self.check_stopped()?;
@@ -184,7 +169,6 @@ impl<H: ReadSegmentHandle> EdgeReadView<H> {
         with_vector: &WithVector,
         filter: Option<&Filter>,
         order_by: &OrderBy,
-        hw_measurement_acc: HwMeasurementAcc,
     ) -> OperationResult<Vec<RecordInternal>> {
         self.check_stopped()?;
         let read_results = self.par_map_segments(|segment| {
@@ -193,7 +177,6 @@ impl<H: ReadSegmentHandle> EdgeReadView<H> {
                 filter,
                 order_by,
                 &self.is_stopped,
-                &hw_measurement_acc.get_counter_cell(),
                 DeferredBehavior::VisibleOnly,
             )
         })?;
@@ -214,7 +197,6 @@ impl<H: ReadSegmentHandle> EdgeReadView<H> {
             &WithPayload::from(with_payload_interface),
             with_vector,
             &self.is_stopped,
-            hw_measurement_acc,
             DeferredBehavior::VisibleOnly,
         )?;
         self.check_stopped()?;
@@ -238,19 +220,13 @@ impl<H: ReadSegmentHandle> EdgeReadView<H> {
         with_payload_interface: &WithPayloadInterface,
         with_vector: &WithVector,
         filter: Option<&Filter>,
-        hw_measurement_acc: HwMeasurementAcc,
     ) -> OperationResult<Vec<RecordInternal>> {
         self.check_stopped()?;
         let per_segment = self.par_map_segments(|segment| {
             let segment = segment.read_segment();
 
             let point_count = segment.available_point_count_without_deferred();
-            let point_ids = segment.read_random_filtered(
-                limit,
-                filter,
-                &self.is_stopped,
-                &hw_measurement_acc.get_counter_cell(),
-            )?;
+            let point_ids = segment.read_random_filtered(limit, filter, &self.is_stopped)?;
 
             OperationResult::Ok((point_count, point_ids))
         })?;
@@ -320,7 +296,6 @@ impl<H: ReadSegmentHandle> EdgeReadView<H> {
             &WithPayload::from(with_payload_interface),
             with_vector,
             &self.is_stopped,
-            hw_measurement_acc,
             DeferredBehavior::VisibleOnly,
         )?
         .into_values()

@@ -3,7 +3,6 @@ use point_scorer::{FilteredBytesScorer, FilteredScorer};
 
 use crate::vector_storage::query_scorer::QueryScorerBytes;
 
-pub mod build_condition_checker;
 mod config;
 mod entry_points;
 mod graph;
@@ -32,7 +31,7 @@ pub struct GraphWithVectorsScorers<'a> {
 }
 
 /// Maximum number of links per level.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HnswM {
     /// M for all levels except level 0.
     pub m: usize,
@@ -68,9 +67,7 @@ pub mod gpu {
 
     pub mod gpu_insert_context {
         /// Placeholder for GPU insertion context to process indexing on.
-        pub struct GpuInsertContext<'a> {
-            phantom: std::marker::PhantomData<&'a usize>,
-        }
+        pub struct GpuInsertContext {}
     }
 
     pub mod gpu_vector_storage {

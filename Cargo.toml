@@ -1,6 +1,6 @@
 [package]
 name = "qdrant"
-version = "1.19.2"
+version = "1.20.0"
 description = "Qdrant - Vector Search engine"
 authors = [
     "Andrey Vasnetsov <andrey@vasnetsov.com>",
@@ -118,7 +118,7 @@ raft-proto = { git = "https://github.com/tikv/raft-rs", rev = "aafb07c7bab439c61
     "prost-codec",
 ], default-features = false }
 
-common = { path = "lib/common/common" }
+common = { workspace = true }
 cancel = { path = "lib/common/cancel" }
 issues = { path = "lib/common/issues" }
 segment = { path = "lib/segment", default-features = false }
@@ -204,6 +204,7 @@ actix-web = { version = "4.13.0", features = ["rustls-0_23", "actix-tls"] }
 actix-files = "0.7.0"
 ahash = { version = "0.8.12", features = ["serde"] }
 anyhow = "1.0.102"
+arc-swap = "1.9.1"
 async-trait = "0.1.89"
 atomicwrites = "0.4.4"
 bincode = "1.3.3" # no upgrade because 2.0.x is much slower https://github.com/qdrant/qdrant/pull/6134
@@ -219,7 +220,9 @@ bytes = "1.11.1"
 cc = "1.2"
 chrono = { version = "0.4.44", features = ["serde"] }
 clap = { version = "4.6.1", features = ["derive", "env"] }
+common = { path = "lib/common/common" }
 core_affinity = "0.8.3"
+crc-fast = "1.10.0"
 criterion = "0.8.2"
 data-encoding = "2.11.0"
 duplicate = { version = "2.0.1", default-features = false }
@@ -245,13 +248,14 @@ url = { version = "2.5.8", features = ["serde"] }
 urlencoding = "2.1.3"
 indicatif = { version = "0.18.4", features = ["rayon"] }
 integer-encoding = "4.1.0"
+io_bridge = { path = "lib/common/io_bridge" }
 itertools = "0.15.0"
 log = "0.4.31"
 memchr = "2.8.0"
 memmap2 = "0.9.10"
 mockito = "1.7"
 murmur3_32 = "0.1"
-nix = { version = "0.31", features = ["fs", "feature"] }
+nix = { version = "0.31", features = ["feature", "fs", "resource"] }
 num-traits = "0.2.19"
 num_cpus = "1.17"
 object_store = { version = "0.14.0", features = ["aws", "gcp", "azure"] }
@@ -259,6 +263,7 @@ ordered-float = { version = "5.3.0", features = ["serde", "schemars", "bytemuck"
 rayon = "1.12.0"
 parking_lot = { version = "0.12.5", features = ["arc_lock", "deadlock_detection", "serde"] }
 ph = "0.8.5"
+pin-project-lite = "0.2.17"
 pprof = { version = "0.15.0", default-features = false, features = ["flamegraph", "prost-codec"] }
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 prost = "0.14.0"
@@ -407,6 +412,7 @@ inherits = "release"
 debug-assertions = true
 lto = false
 opt-level = 0
+codegen-units = 256 # restore default value for faster compilation
 
 # Inherits by default from release
 [profile.bench]
@@ -428,8 +434,16 @@ debug = "line-tables-only"
 [profile.dev.package.sha2]
 opt-level = 3
 
+# Override for fast quantization (k-means, encoding, scoring) in dev and test builds
+[profile.dev.package.quantization]
+opt-level = 3
+
 # Override for fast sha256 hashing in ci builds
 [profile.ci.package.sha2]
+opt-level = 3
+
+# Override for fast quantization in ci builds
+[profile.ci.package.quantization]
 opt-level = 3
 
 [package.metadata.deb]

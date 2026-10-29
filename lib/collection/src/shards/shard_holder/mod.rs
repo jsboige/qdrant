@@ -48,7 +48,7 @@ use crate::hash_ring::HashRingRouter;
 use crate::operations::cluster_ops::ReshardingDirection;
 use crate::operations::shard_selector_internal::ShardSelectorInternal;
 use crate::operations::shared_storage_config::SharedStorageConfig;
-use crate::operations::snapshot_ops::SnapshotDescription;
+use crate::operations::snapshot_ops::{SnapshotDescription, unique_snapshot_timestamp};
 use crate::operations::types::{
     CollectionError, CollectionResult, ReshardingInfo, ShardTransferInfo,
 };
@@ -76,6 +76,10 @@ pub const SHARD_KEY_MAPPING_FILE: &str = "shard_key_mapping.json";
 /// block it forever. See [`TimeoutWriter`].
 const SNAPSHOT_STREAM_WRITE_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
+/// Pipe and read-buffer size for streaming shard snapshots.
+/// A small pipe makes the tar writer and the HTTP body ping-pong in tiny chunks.
+const SNAPSHOT_STREAM_BUFFER_SIZE: usize = 4 * 1024 * 1024;
+
 pub struct ShardHolder {
     /// `BTreeMap` for deterministic iteration order by `ShardId` — iteration is externally
     /// observable (fan-out, telemetry, consensus state apply).
@@ -86,7 +90,7 @@ pub struct ShardHolder {
     /// every `core_search` await would block writers (e.g. shard creation)
     /// for the duration of the search.
     shards: BTreeMap<ShardId, Arc<ShardReplicaSet>>,
-    pub(crate) shard_transfers: SaveOnDisk<HashSet<ShardTransfer>>,
+    pub(crate) shard_transfers: Arc<SaveOnDisk<HashSet<ShardTransfer>>>,
     pub(crate) shard_transfer_changes: broadcast::Sender<ShardTransferChange>,
     pub(crate) resharding_state: SaveOnDisk<Option<ReshardState>>,
     /// Hash rings per shard key
@@ -112,8 +116,9 @@ impl ShardHolder {
     }
 
     pub fn new(collection_path: &Path, sharding_method: ShardingMethod) -> CollectionResult<Self> {
-        let shard_transfers =
-            SaveOnDisk::load_or_init_default(collection_path.join(SHARD_TRANSFERS_FILE))?;
+        let shard_transfers = Arc::new(SaveOnDisk::load_or_init_default(
+            collection_path.join(SHARD_TRANSFERS_FILE),
+        )?);
         let resharding_state: SaveOnDisk<Option<ReshardState>> =
             SaveOnDisk::load_or_init_default(collection_path.join(RESHARDING_STATE_FILE))?;
 
@@ -204,7 +209,10 @@ impl ShardHolder {
     }
 
     pub async fn drop_and_remove_shard(&mut self, shard_id: ShardId) -> CollectionResult<()> {
-        if let Some(replica_set) = self.shards.remove(&shard_id) {
+        // A process crash after saving the reduced shard count or key mapping can leave
+        // shard files behind. Those shards are not loaded after restart, so replay may
+        // skip their cleanup.
+        if let Some(replica_set) = self.shards.get(&shard_id) {
             let shard_path = replica_set.shard_path.clone();
             replica_set.stop_gracefully().await;
 
@@ -221,6 +229,8 @@ impl ShardHolder {
             sync_parent_dir_async(&shard_config_path).await?;
 
             tokio_fs::remove_dir_all(shard_path).await?;
+
+            self.shards.remove(&shard_id);
         }
         Ok(())
     }
@@ -277,18 +287,30 @@ impl ShardHolder {
         // Persist mapping first: it is the only fallible step, so a failed write leaves
         // in-memory state untouched.
         if let Some(shard_key) = &shard_key {
-            self.key_mapping.write_optional(|mapping| {
-                let mut mapping = mapping.clone();
-                let shard_ids = mapping.entry(shard_key.clone()).or_default();
+            let result = self
+                .key_mapping
+                .write_optional(|mapping| {
+                    let mut mapping = mapping.clone();
+                    let shard_ids = mapping.entry(shard_key.clone()).or_default();
 
-                let mut changed = false;
+                    let mut changed = false;
 
-                for &(shard_id, _) in &shards {
-                    changed |= shard_ids.insert(shard_id);
+                    for &(shard_id, _) in &shards {
+                        changed |= shard_ids.insert(shard_id);
+                    }
+
+                    if changed { Some(mapping) } else { None }
+                })
+                .map_err(CollectionError::from);
+
+            if let Err(error) = result {
+                // Replay rebuilds these directories, so their workers must stop before retry
+                for (_, shard) in shards {
+                    shard.stop_gracefully().await;
                 }
 
-                if changed { Some(mapping) } else { None }
-            })?;
+                return Err(error);
+            }
         }
 
         let ring = self
@@ -317,28 +339,39 @@ impl ShardHolder {
         Ok(())
     }
 
-    pub async fn remove_shard_key(&mut self, shard_key: &ShardKey) -> CollectionResult<()> {
-        let mut remove_shard_ids = Vec::new();
-
+    /// Remove the key's routing and persisted mapping, leaving shards for separate cleanup
+    pub fn remove_shard_key_mapping(&mut self, shard_key: &ShardKey) -> CollectionResult<()> {
         self.key_mapping.write_optional(|key_mapping| {
-            if key_mapping.contains_key(shard_key) {
-                let mut new_key_mapping = key_mapping.clone();
-                if let Some(shard_ids) = new_key_mapping.remove(shard_key) {
-                    for shard_id in shard_ids {
-                        remove_shard_ids.push(shard_id);
-                    }
-                }
-                Some(new_key_mapping)
-            } else {
-                None
+            if !key_mapping.contains_key(shard_key) {
+                return None;
             }
+
+            let mut key_mapping = key_mapping.clone();
+            key_mapping.remove(shard_key);
+            Some(key_mapping)
         })?;
 
-        self.rings.remove(&shard_key.clone().into());
+        self.rings.remove(&Some(shard_key.clone()));
+        self.shard_id_to_key_mapping
+            .retain(|_, key| key != shard_key);
+
+        Ok(())
+    }
+
+    pub async fn remove_shard_key(&mut self, shard_key: &ShardKey) -> CollectionResult<()> {
+        let remove_shard_ids = self
+            .key_mapping
+            .read()
+            .get(shard_key)
+            .cloned()
+            .unwrap_or_default();
+
+        self.remove_shard_key_mapping(shard_key)?;
+
         for shard_id in remove_shard_ids {
             self.drop_and_remove_shard(shard_id).await?;
-            self.shard_id_to_key_mapping.remove(&shard_id);
         }
+
         Ok(())
     }
 
@@ -1239,7 +1272,7 @@ impl ShardHolder {
 
         let snapshot_file_name = format!(
             "{collection_name}-shard-{shard_id}-{}.snapshot",
-            chrono::Utc::now().format("%Y-%m-%d-%H-%M-%S"),
+            unique_snapshot_timestamp(),
         );
 
         let snapshot_temp_dir = tempfile::Builder::new()
@@ -1315,14 +1348,14 @@ impl ShardHolder {
 
         let snapshot_file_name = format!(
             "{collection_name}-shard-{shard_id}-{}.snapshot",
-            chrono::Utc::now().format("%Y-%m-%d-%H-%M-%S"),
+            unique_snapshot_timestamp(),
         );
 
         let snapshot_temp_dir = tempfile::Builder::new()
             .prefix(&format!("{snapshot_file_name}-temp-"))
             .tempdir_in(temp_dir)?;
 
-        let (read_half, write_half) = tokio::io::duplex(4096);
+        let (read_half, write_half) = tokio::io::duplex(SNAPSHOT_STREAM_BUFFER_SIZE);
 
         // Abort the snapshot if the consumer stops draining the stream. This
         // write holds a read lock on the shard's segment holder and occupies a
@@ -1368,32 +1401,28 @@ impl ShardHolder {
         });
 
         Ok(SnapshotStream::new_stream(
-            FramedRead::new(read_half, BytesCodec::new()).map_ok(|bytes| bytes.freeze()),
+            FramedRead::with_capacity(read_half, BytesCodec::new(), SNAPSHOT_STREAM_BUFFER_SIZE)
+                .map_ok(|bytes| bytes.freeze()),
             Some(snapshot_file_name),
         ))
     }
 
+    /// Extract a shard snapshot and prepare its files for recovering the local replica.
+    ///
     /// # Cancel safety
     ///
-    /// This method is *not* cancel safe.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn restore_shard_snapshot(
-        &self,
+    /// This method is cancel safe.
+    #[expect(clippy::too_many_arguments)]
+    pub async fn prepare_shard_snapshot(
         snapshot_data: SnapshotData,
-        recovery_type: RecoveryType,
-        collection_path: &Path,
         collection_name: &str,
         shard_id: ShardId,
         this_peer_id: PeerId,
         is_distributed: bool,
         temp_dir: &Path,
-        recovery_progress: Option<RecoveryProgressHandle>,
+        recovery_progress: Option<&RecoveryProgressHandle>,
         cancel: cancel::CancellationToken,
-    ) -> CollectionResult<()> {
-        if !self.contains_shard(shard_id) {
-            return Err(shard_not_found_error(shard_id));
-        }
-
+    ) -> CollectionResult<tempfile::TempDir> {
         if !temp_dir.exists() {
             fs::create_dir_all(temp_dir)?;
         }
@@ -1403,47 +1432,68 @@ impl ShardHolder {
             .tempdir_in(temp_dir)?;
 
         // Set unpacking stage
-        if let Some(recovery_progress) = &recovery_progress {
+        if let Some(recovery_progress) = recovery_progress {
             recovery_progress.lock().set_stage(RecoveryStage::Unpacking);
         }
 
-        let extract = {
-            let snapshot_temp_dir = snapshot_temp_dir.path().to_path_buf();
+        #[cfg(test)]
+        snapshot_preparation_tests::pause_preparation(temp_dir).await;
 
-            cancel::blocking::spawn_cancel_on_token(
-                cancel.child_token(),
-                move |cancel| -> CollectionResult<_> {
-                    match snapshot_data {
-                        SnapshotData::Packed(snapshot_path) => {
-                            if cancel.is_cancelled() {
-                                return Err(cancel::Error::Cancelled.into());
-                            }
-                            tar_unpack_file(&snapshot_path, &snapshot_temp_dir)?;
-                            snapshot_path.close()?;
+        let extract = cancel::blocking::spawn_cancel_on_token(
+            cancel.child_token(),
+            move |cancel| -> CollectionResult<_> {
+                // TODO: Make `tar_unpack_file`/`move_all` cancellable?
+                match snapshot_data {
+                    SnapshotData::Packed(snapshot_path) => {
+                        if cancel.is_cancelled() {
+                            return Err(cancel::Error::Cancelled.into());
                         }
-                        SnapshotData::Unpacked(snapshot_dir) => {
-                            move_all(snapshot_dir.path(), &snapshot_temp_dir)?;
-                        }
+
+                        tar_unpack_file(&snapshot_path, snapshot_temp_dir.path())?;
+                        snapshot_path.close()?;
                     }
 
-                    if cancel.is_cancelled() {
-                        return Err(cancel::Error::Cancelled.into());
+                    SnapshotData::Unpacked(snapshot_dir) => {
+                        move_all(snapshot_dir.path(), snapshot_temp_dir.path())?;
                     }
+                }
 
-                    ShardReplicaSet::restore_snapshot(
-                        &snapshot_temp_dir,
-                        this_peer_id,
-                        is_distributed,
-                    )?;
-                    common::fs::bulk_sync_dir(&snapshot_temp_dir)?;
+                #[cfg(test)]
+                snapshot_preparation_tests::pause_extraction(snapshot_temp_dir.path());
 
-                    Ok(())
-                },
-            )
-        };
+                if cancel.is_cancelled() {
+                    return Err(cancel::Error::Cancelled.into());
+                }
 
-        extract.await??;
+                ShardReplicaSet::restore_snapshot(
+                    snapshot_temp_dir.path(),
+                    this_peer_id,
+                    is_distributed,
+                )?;
 
+                common::fs::bulk_sync_dir(snapshot_temp_dir.path())?;
+                Ok(snapshot_temp_dir)
+            },
+        );
+
+        extract.await?
+    }
+
+    /// Replace or merge the local replica's files with files from the extracted snapshot directory,
+    /// then load the recovered shard.
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is *not* cancel safe.
+    pub async fn restore_shard_snapshot(
+        &self,
+        snapshot_temp_dir: &Path,
+        recovery_type: RecoveryType,
+        collection_path: &Path,
+        shard_id: ShardId,
+        recovery_progress: Option<RecoveryProgressHandle>,
+        cancel: cancel::CancellationToken,
+    ) -> CollectionResult<()> {
         // Set restoring stage
         if let Some(recovery_progress) = &recovery_progress {
             recovery_progress.lock().set_stage(RecoveryStage::Restoring);
@@ -1453,7 +1503,7 @@ impl ShardHolder {
         // (see `ShardReplicaSet::restore_local_replica_from`)
         let recovered = self
             .recover_local_shard_from(
-                snapshot_temp_dir.path(),
+                snapshot_temp_dir,
                 recovery_type,
                 collection_path,
                 shard_id,
@@ -1682,12 +1732,93 @@ pub fn shard_not_found_error(shard_id: ShardId) -> CollectionError {
     CollectionError::not_found(format!("shard {shard_id}"))
 }
 
+/// Transfer registration must notify watchers even when replay leaves the record unchanged.
 /// `register_restart_transfer` completes transfer restart by updating its record on disk.
 /// These tests assert its replay-safety: the record is never removed, so replaying operation
 /// after record is already updated should be a no-op instead of returning "no transfer" error.
 #[cfg(test)]
-mod restart_transfer_tests {
+mod transfer_registration_tests {
     use super::*;
+
+    #[test]
+    fn register_transfer_replay_notifies() {
+        let (_dir, holder) = make_holder();
+        let transfer = wal_delta_transfer();
+        let mut changes = holder.shard_transfer_changes.subscribe();
+
+        for _ in 0..2 {
+            holder
+                .register_start_shard_transfer(transfer.clone())
+                .unwrap();
+
+            assert_eq!(
+                changes.try_recv().unwrap(),
+                ShardTransferChange::Start(transfer.clone()),
+            );
+            assert!(changes.is_empty());
+        }
+    }
+
+    #[test]
+    fn restart_transfer_replay_notifies() {
+        let (_dir, holder) = make_holder();
+        let transfer = wal_delta_transfer();
+        holder
+            .register_start_shard_transfer(transfer.clone())
+            .unwrap();
+        let mut changes = holder.shard_transfer_changes.subscribe();
+
+        for _ in 0..2 {
+            let updated = holder
+                .register_restart_transfer(&transfer.key(), ShardTransferMethod::Snapshot)
+                .unwrap()
+                .unwrap();
+
+            assert_eq!(
+                changes.try_recv().unwrap(),
+                ShardTransferChange::Abort(transfer.key()),
+            );
+            assert_eq!(
+                changes.try_recv().unwrap(),
+                ShardTransferChange::Start(updated),
+            );
+            assert!(changes.is_empty());
+        }
+    }
+
+    #[test]
+    fn finish_transfer_replay_notifies() {
+        unregister_transfer_replay_notifies(true);
+    }
+
+    #[test]
+    fn abort_transfer_replay_notifies() {
+        unregister_transfer_replay_notifies(false);
+    }
+
+    fn unregister_transfer_replay_notifies(finish: bool) {
+        let (_dir, holder) = make_holder();
+        let transfer = wal_delta_transfer();
+        let key = transfer.key();
+        holder.register_start_shard_transfer(transfer).unwrap();
+        let mut changes = holder.shard_transfer_changes.subscribe();
+        let expected = if finish {
+            ShardTransferChange::Finish(key)
+        } else {
+            ShardTransferChange::Abort(key)
+        };
+
+        for _ in 0..2 {
+            if finish {
+                holder.register_finish_transfer(&key).unwrap();
+            } else {
+                holder.register_abort_transfer(&key).unwrap();
+            }
+
+            assert_eq!(changes.try_recv().unwrap(), expected);
+            assert!(changes.is_empty());
+        }
+    }
 
     fn make_holder() -> (tempfile::TempDir, ShardHolder) {
         let dir = tempfile::tempdir().unwrap();
@@ -1793,3 +1924,68 @@ mod restart_transfer_tests {
         assert_eq!(holder.shard_transfers.read().len(), 1);
     }
 }
+
+#[cfg(test)]
+mod shard_key_mapping_tests {
+    use super::*;
+
+    #[test]
+    fn remove_shard_key_mapping_save_failure_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut holder = ShardHolder::new(dir.path(), ShardingMethod::Custom).unwrap();
+        let key = ShardKey::from("tenant");
+        let mut mapping = ShardKeyMapping::default();
+        mapping.insert(key.clone(), HashSet::from([1, 2]));
+        holder.set_shard_key_mappings(mapping.clone()).unwrap();
+        holder
+            .rings
+            .insert(Some(key.clone()), HashRingRouter::single());
+
+        // A directory at the destination makes the atomic rename fail
+        let path = dir.path().join(SHARD_KEY_MAPPING_FILE);
+        let backup = dir.path().join("mapping-backup");
+        fs::rename(&path, &backup).unwrap();
+        fs::create_dir(&path).unwrap();
+
+        assert!(holder.remove_shard_key_mapping(&key).is_err());
+        assert_eq!(holder.get_shard_key_to_ids_mapping(), mapping);
+        assert_eq!(
+            holder.get_shard_id_to_key_mapping(),
+            &mapping.shard_id_to_shard_key()
+        );
+        assert!(holder.rings.contains_key(&Some(key.clone())));
+
+        fs::remove_dir(&path).unwrap();
+        fs::rename(&backup, &path).unwrap();
+        holder.remove_shard_key_mapping(&key).unwrap();
+
+        assert!(holder.get_shard_key_to_ids_mapping().is_empty());
+        assert!(holder.get_shard_id_to_key_mapping().is_empty());
+        assert!(holder.rings.is_empty());
+        let persisted = ShardHolder::new(dir.path(), ShardingMethod::Custom).unwrap();
+        assert!(persisted.get_shard_key_to_ids_mapping().is_empty());
+    }
+
+    #[test]
+    fn remove_shard_key_mapping_empty_and_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut holder = ShardHolder::new(dir.path(), ShardingMethod::Custom).unwrap();
+        let key = ShardKey::from("tenant");
+        let mut mapping = ShardKeyMapping::default();
+        mapping.insert(key.clone(), HashSet::new());
+        holder.set_shard_key_mappings(mapping).unwrap();
+        holder
+            .rings
+            .insert(Some(key.clone()), HashRingRouter::single());
+
+        for _ in 0..2 {
+            holder.remove_shard_key_mapping(&key).unwrap();
+
+            assert!(holder.get_shard_key_to_ids_mapping().is_empty());
+            assert!(holder.rings.is_empty());
+        }
+    }
+}
+
+#[cfg(test)]
+mod snapshot_preparation_tests;

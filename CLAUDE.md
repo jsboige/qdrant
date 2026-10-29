@@ -253,3 +253,4 @@ cargo test
 ```
 
 See `docs/DEVELOPMENT.md` for Rust development setup.
+Upstream maintains its own code map in their CLAUDE.md (Rust workspace layout, build/lint/test, API-change steps): `git show upstream/master:CLAUDE.md`. Our fork keeps only this file at the root — read theirs from upstream history when touching core.

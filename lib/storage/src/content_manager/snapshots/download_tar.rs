@@ -19,6 +19,18 @@ use crate::StorageError;
 /// Timeout for stream reads - if no data is received within this duration, the download fails.
 const STREAM_READ_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Timeout for receiving response headers. A server that accepts the connection but never
+/// responds (e.g. a handler blocked on a lock) would otherwise stall the download forever,
+/// as `STREAM_READ_TIMEOUT` only covers the response body.
+#[cfg(not(test))]
+const RESPONSE_TIMEOUT: Duration = STREAM_READ_TIMEOUT;
+#[cfg(test)]
+const RESPONSE_TIMEOUT: Duration = Duration::from_millis(100);
+
+/// Read buffer between the HTTP body and the tar unpacker, so the unpacker
+/// doesn't block on the async runtime for every small read.
+const STREAM_READ_BUFFER_SIZE: usize = 4 * 1024 * 1024;
+
 /// An async reader wrapper that times out if no data is received within a specified duration.
 ///
 /// This implements an inactivity timeout - the timeout resets each time data is successfully read.
@@ -165,7 +177,11 @@ pub async fn download_and_unpack_tar(
         target_dir.display()
     );
 
-    let response = client.get(url.clone()).send().await?;
+    let response = tokio::time::timeout(RESPONSE_TIMEOUT, client.get(url.clone()).send())
+        .await
+        .map_err(|_| {
+            StorageError::timeout(RESPONSE_TIMEOUT, format!("waiting for response from {url}"))
+        })??;
 
     if !response.status().is_success() {
         return Err(StorageError::bad_input(format!(
@@ -195,6 +211,7 @@ pub async fn download_and_unpack_tar(
         // SyncIoBridge converts an AsyncRead into a sync Read
         // It must be used within a tokio runtime context (spawn_blocking provides this)
         let sync_reader = tokio_util::io::SyncIoBridge::new(async_reader);
+        let sync_reader = std::io::BufReader::with_capacity(STREAM_READ_BUFFER_SIZE, sync_reader);
 
         // Wrap the reader with cancellation support
         let cancellable_reader = CancellableReader::new(sync_reader, cancel);
@@ -309,6 +326,35 @@ mod tests {
         let (value, unit) = rate.strip_suffix("/s").unwrap().split_once(' ').unwrap();
         assert!(value.parse::<f64>().unwrap() > 0.0, "{comment}");
         assert!(["B", "KiB", "MiB", "GiB"].contains(&unit), "{comment}");
+    }
+
+    #[tokio::test]
+    async fn test_download_and_unpack_tar_times_out_without_response() {
+        // Accept connections, but never respond
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _server = tokio::spawn(async move {
+            let mut connections = Vec::new();
+            loop {
+                let (socket, _) = listener.accept().await.unwrap();
+                connections.push(socket);
+            }
+        });
+
+        let url = Url::parse(&format!("http://{addr}/test-shard.snapshot")).unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            download_and_unpack_tar(&reqwest::Client::new(), &url, temp_dir.path(), false, None),
+        )
+        .await
+        .expect("download must time out on its own");
+
+        assert!(
+            matches!(result, Err(StorageError::Timeout { .. })),
+            "{result:?}",
+        );
     }
 
     #[tokio::test]

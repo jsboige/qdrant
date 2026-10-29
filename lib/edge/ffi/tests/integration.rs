@@ -36,6 +36,7 @@ fn make_config() -> EdgeConfig {
         sparse_vector_data: HashMap::new(),
         payload_memory: None,
         id_tracker_memory: None,
+        wal_enabled: None,
     }
 }
 
@@ -379,6 +380,7 @@ fn scalar_quantization_accepted_at_load() {
         sparse_vector_data: HashMap::new(),
         payload_memory: None,
         id_tracker_memory: None,
+        wal_enabled: None,
     };
 
     let shard = EdgeShard::load(path, Some(config)).expect("Scalar quantization must be accepted");
@@ -649,6 +651,7 @@ fn product_quantization_accepted_at_load() {
         sparse_vector_data: HashMap::new(),
         payload_memory: None,
         id_tracker_memory: None,
+        wal_enabled: None,
     };
 
     let shard = EdgeShard::load(path, Some(config));
@@ -694,6 +697,7 @@ fn turbo_quantization_accepted_at_load() {
         sparse_vector_data: HashMap::new(),
         payload_memory: None,
         id_tracker_memory: None,
+        wal_enabled: None,
     };
 
     let shard = EdgeShard::load(path, Some(config));
@@ -738,6 +742,7 @@ fn binary_quantization_accepted_at_load() {
         sparse_vector_data: HashMap::new(),
         payload_memory: None,
         id_tracker_memory: None,
+        wal_enabled: None,
     };
 
     let shard = EdgeShard::load(path, Some(config)).expect("Binary quantization must be accepted");
@@ -886,6 +891,7 @@ fn hnsw_config_optimize_and_search() {
         sparse_vector_data: HashMap::new(),
         payload_memory: None,
         id_tracker_memory: None,
+        wal_enabled: None,
     };
 
     let shard: Arc<EdgeShard> =
@@ -969,6 +975,7 @@ fn oversized_hnsw_params_rejected_not_allocated() {
         sparse_vector_data: HashMap::new(),
         payload_memory: None,
         id_tracker_memory: None,
+        wal_enabled: None,
     };
     let sane = HnswIndexConfig {
         m: 16,
@@ -1130,6 +1137,7 @@ fn config_with_distance(distance: Distance) -> EdgeConfig {
         sparse_vector_data: HashMap::new(),
         payload_memory: None,
         id_tracker_memory: None,
+        wal_enabled: None,
     }
 }
 
@@ -1150,6 +1158,7 @@ fn two_field_config() -> EdgeConfig {
         sparse_vector_data: HashMap::new(),
         payload_memory: None,
         id_tracker_memory: None,
+        wal_enabled: None,
     }
 }
 
@@ -2220,6 +2229,7 @@ fn multivector_round_trips() {
         sparse_vector_data: HashMap::new(),
         payload_memory: None,
         id_tracker_memory: None,
+        wal_enabled: None,
     };
     let shard: Arc<EdgeShard> =
         EdgeShard::load(path, Some(config)).expect("load with multivector config failed");
@@ -2377,6 +2387,7 @@ fn sparse_vector_round_trips() {
         )]),
         payload_memory: None,
         id_tracker_memory: None,
+        wal_enabled: None,
     };
     let shard: Arc<EdgeShard> =
         EdgeShard::load(path, Some(config)).expect("load with sparse config failed");
@@ -4446,6 +4457,7 @@ fn field_index_params_echo_in_info_and_survive_reload() {
                             is_tenant: Some(true),
                             memory: Some(Memory::Cold),
                             enable_hnsw: Some(false),
+                            nested: None,
                             prefix: Some(true),
                         },
                     },
@@ -4495,6 +4507,8 @@ fn text_index_with_params_filters_with_stopwords() {
                         memory: None,
                         stemmer: None,
                         enable_hnsw: None,
+                        nested: None,
+                        scoring: None,
                     },
                 },
             )
@@ -4535,4 +4549,270 @@ fn text_index_with_params_filters_with_stopwords() {
     // "point" is in the custom stopword set: it was never indexed, so no
     // point matches even though every title contains it.
     assert_eq!(count_matching("point"), 0);
+}
+
+/// A text query ranks points by BM25 over a text index created with
+/// `scoring`, and is refused on one created without it.
+#[test]
+fn text_query_ranks_by_bm25() {
+    use qdrant_edge_ffi::{
+        Bm25Params, PayloadIndexParams, QueryRequest, ScoringQuery, TextIndexParams,
+        TextQueryScoring, TextScoringParams, TextScoringType,
+    };
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().to_str().unwrap().to_string();
+    let shard: Arc<EdgeShard> = EdgeShard::load(path, Some(make_config())).expect("load failed");
+    upsert_three(&shard);
+
+    let text_index = |scoring| PayloadIndexParams::Text {
+        config: TextIndexParams {
+            tokenizer: None,
+            min_token_len: None,
+            max_token_len: None,
+            lowercase: None,
+            ascii_folding: None,
+            phrase_matching: None,
+            stopwords: None,
+            memory: None,
+            stemmer: None,
+            enable_hnsw: None,
+            nested: None,
+            scoring,
+        },
+    };
+    let bm25 = TextScoringParams {
+        r#type: TextScoringType::Bm25,
+    };
+    for (field, scoring) in [("title", Some(bm25)), ("plain", None)] {
+        let op =
+            UpdateOperation::create_field_index_with_params(field.to_string(), text_index(scoring))
+                .expect("create_field_index_with_params failed");
+        shard.update(op).expect("update failed");
+    }
+
+    let text_query = |field: &str, query: &str, scoring| QueryRequest {
+        limit: 3,
+        offset: None,
+        query: Some(ScoringQuery::Text {
+            field: field.to_string(),
+            query: query.to_string(),
+            scoring,
+        }),
+        prefetches: vec![],
+        with_vector: None,
+        with_payload: None,
+        filter: None,
+        score_threshold: None,
+        params: None,
+    };
+
+    // Only "point two" holds "two"; "point" is in every title.
+    let hits = shard
+        .query(text_query("title", "two point", None))
+        .expect("text query failed");
+    assert_eq!(hits.len(), 3);
+    assert!(matches!(hits[0].id, PointId::NumId { value: 2 }));
+    assert!(hits[0].score > hits[1].score);
+
+    let err = shard
+        .query(text_query(
+            "title",
+            "two",
+            Some(TextQueryScoring::Bm25 {
+                params: Bm25Params {
+                    k: None,
+                    b: Some(2.0),
+                },
+            }),
+        ))
+        .expect_err("b out of range must be refused");
+    assert!(err.to_string().contains("BM25 b"), "{err}");
+
+    let err = shard
+        .query(text_query("plain", "two", None))
+        .expect_err("a text index without scoring must be refused");
+    assert!(err.to_string().contains("does not score"), "{err}");
+}
+
+/// `wal_enabled: Some(false)` reaches the engine on create, reads back from
+/// `config()`, survives a reload, and cannot be flipped on an existing shard.
+#[test]
+fn wal_less_shard_roundtrip() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().to_str().unwrap().to_string();
+
+    {
+        let config = EdgeConfig {
+            wal_enabled: Some(false),
+            ..make_config()
+        };
+        let shard = EdgeShard::create(path.clone(), config).expect("create failed");
+        upsert_three(&shard);
+        assert_eq!(shard.config().unwrap().wal_enabled, Some(false));
+        assert!(!dir.path().join(edge::WAL_PATH).exists());
+        shard.unload().expect("unload failed");
+    }
+
+    let flipped = EdgeConfig {
+        wal_enabled: Some(true),
+        ..make_config()
+    };
+    assert!(EdgeShard::load(path.clone(), Some(flipped)).is_err());
+
+    let shard = EdgeShard::load(path, None).expect("reload failed");
+    assert_eq!(shard.info().unwrap().points_count, 3);
+    assert_eq!(shard.config().unwrap().wal_enabled, Some(false));
+}
+
+/// A per-element index created through the FFI: its params report the array path as the
+/// engine stores it, also after a reload, a nested filter matches conditions on the same
+/// element only, and a field outside the array is rejected.
+#[test]
+fn nested_field_index_through_ffi() {
+    use qdrant_edge_ffi::filter::{
+        Condition, FieldCondition, Filter, Match, RangeFloat, ValueVariants,
+    };
+    use qdrant_edge_ffi::{IntegerIndexParams, KeywordIndexParams, PayloadIndexParams};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().to_str().unwrap().to_string();
+
+    let keyword = |nested: &str| PayloadIndexParams::Keyword {
+        config: KeywordIndexParams {
+            is_tenant: None,
+            memory: None,
+            enable_hnsw: None,
+            prefix: None,
+            nested: Some(nested.to_string()),
+        },
+    };
+    let integer = PayloadIndexParams::Integer {
+        config: IntegerIndexParams {
+            lookup: None,
+            range: None,
+            is_principal: None,
+            memory: None,
+            enable_hnsw: None,
+            nested: Some("offers".to_string()),
+        },
+    };
+    let field = |key: &str, r#match: Option<Match>, range: Option<RangeFloat>| Condition::Field {
+        condition: FieldCondition {
+            key: key.to_string(),
+            r#match,
+            range,
+            datetime_range: None,
+            geo_bounding_box: None,
+            geo_radius: None,
+            geo_polygon: None,
+            values_count: None,
+        },
+    };
+    // An offer of shop "a" under 20, in a single element
+    let cheap_offer_of_a = Filter {
+        must: Some(vec![Condition::Nested {
+            key: "offers".to_string(),
+            filter: Filter {
+                must: Some(vec![
+                    field(
+                        "shop",
+                        Some(Match::Value {
+                            value: ValueVariants::String {
+                                value: "a".to_string(),
+                            },
+                        }),
+                        None,
+                    ),
+                    field(
+                        "price",
+                        None,
+                        Some(RangeFloat {
+                            gte: None,
+                            gt: None,
+                            lte: None,
+                            lt: Some(20.0),
+                        }),
+                    ),
+                ]),
+                should: None,
+                must_not: None,
+                min_should: None,
+            },
+        }]),
+        should: None,
+        must_not: None,
+        min_should: None,
+    };
+    let assert_nested = |shard: &EdgeShard| {
+        let info = shard.info().expect("info failed");
+        for key in ["offers[].shop", "offers[].price"] {
+            let params = info.payload_schema[key].params.clone().expect("params");
+            let nested = match params {
+                PayloadIndexParams::Keyword { config } => config.nested,
+                PayloadIndexParams::Integer { config } => config.nested,
+                PayloadIndexParams::Float { .. }
+                | PayloadIndexParams::Geo { .. }
+                | PayloadIndexParams::Text { .. }
+                | PayloadIndexParams::Bool { .. }
+                | PayloadIndexParams::Datetime { .. }
+                | PayloadIndexParams::Uuid { .. } => panic!("unexpected params for {key}"),
+            };
+            assert_eq!(nested.as_deref(), Some("offers[]"), "{key}");
+        }
+        let n = shard
+            .count(CountRequest {
+                filter: Some(cheap_offer_of_a.clone()),
+                exact: true,
+            })
+            .expect("count failed");
+        // Point 2 has shop "a" and a price under 20, but in different offers
+        assert_eq!(n, 1);
+    };
+
+    {
+        let shard: Arc<EdgeShard> =
+            EdgeShard::load(path.clone(), Some(make_config())).expect("load failed");
+        let points = vec![
+            Point {
+                id: PointId::NumId { value: 1 },
+                vector: named_vec([0.1, 0.2, 0.3, 0.4]),
+                payload: Some(r#"{"offers":[{"shop":"a","price":10}]}"#.to_string()),
+            },
+            Point {
+                id: PointId::NumId { value: 2 },
+                vector: named_vec([0.4, 0.3, 0.2, 0.1]),
+                payload: Some(
+                    r#"{"offers":[{"shop":"a","price":30},{"shop":"b","price":5}]}"#.to_string(),
+                ),
+            },
+        ];
+        shard
+            .update(UpdateOperation::upsert_points(points, None, None).expect("upsert failed"))
+            .expect("update failed");
+        for (key, params) in [
+            ("offers[].shop", keyword("offers")),
+            ("offers[].price", integer),
+        ] {
+            shard
+                .update(
+                    UpdateOperation::create_field_index_with_params(key.to_string(), params)
+                        .expect("create_field_index_with_params failed"),
+                )
+                .expect("update failed");
+        }
+        assert_nested(&shard);
+
+        // The field must be inside the elements of the array
+        let outside =
+            UpdateOperation::create_field_index_with_params("title".to_string(), keyword("offers"))
+                .expect("params convert");
+        assert!(shard.update(outside).is_err());
+
+        shard.flush().expect("flush failed");
+        shard.unload().expect("unload failed");
+    }
+
+    let shard: Arc<EdgeShard> = EdgeShard::load(path, None).expect("reload failed");
+    assert_nested(&shard);
 }

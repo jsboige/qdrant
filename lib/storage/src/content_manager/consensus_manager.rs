@@ -44,6 +44,8 @@ use crate::types::{
     PeerInfo, PeerMetadataById, RaftInfo,
 };
 
+mod action_applier;
+
 pub mod prelude {
     use crate::content_manager::toc::TableOfContent;
 
@@ -327,25 +329,35 @@ impl<C: CollectionContainer> ConsensusManager<C> {
     ///
     /// Return if consensus should be stopped.
     pub fn on_peer_remove(&self, peer_id: PeerId) -> Result<bool, StorageError> {
-        let mut stop_consensus: bool = false;
-
-        let report = match self.remove_peer(peer_id) {
-            Ok(()) => {
-                if self.this_peer_id() == peer_id {
-                    stop_consensus = true;
-                }
-                Ok(true)
-            }
-            #[expect(clippy::wildcard_enum_match_arm, reason = "error handling")]
-            Err(err) => match err {
-                err @ StorageError::ServiceError { .. } => {
-                    return Err(err);
-                }
-                _ => Err(err),
-            },
-        };
         let operation = ConsensusOperations::RemovePeer(peer_id);
+
+        let result = if self.this_peer_id() == peer_id {
+            // If the current peer is removed, we stop consensus and no longer need CSM validation
+            self.invalidate_shadow();
+            self.remove_peer(peer_id)
+        } else {
+            self.apply_with_shadow(&operation, || self.remove_peer(peer_id))
+        };
+
+        let (report, stop_consensus) = match result {
+            Ok(()) => {
+                // If `remove_peer` returned `Ok`, report `Ok(true)` to the client
+                // and stop consensus if the *current* peer is being removed
+                (Ok(true), self.this_peer_id() == peer_id)
+            }
+            Err(err @ StorageError::ServiceError { .. }) => {
+                // If `remove_peer` returned a service error, propagate it to the consensus thread.
+                // The consensus thread restarts after a backoff delay and retries the operation.
+                return Err(err);
+            }
+            Err(err) => {
+                // If `remove_peer` returned a user error, report the error to the client and continue
+                (Err(err), false)
+            }
+        };
+
         let on_apply = self.on_consensus_op_apply.lock().remove(&operation);
+
         if let Some(on_apply) = on_apply
             && on_apply.send(report).is_err()
         {
@@ -353,6 +365,7 @@ impl<C: CollectionContainer> ConsensusManager<C> {
                 "Failed to notify on consensus operation completion: channel receiver is dropped",
             )
         }
+
         Ok(stop_consensus)
     }
 
@@ -496,9 +509,16 @@ impl<C: CollectionContainer> ConsensusManager<C> {
     ) -> Result<bool, StorageError> {
         let change: ConfChangeV2 = prost_for_raft::Message::decode(entry.get_data())?;
 
-        // Consensus state machine does not handle peer changes yet.
-        // Invalidate it so it reloads state after this handler runs.
-        self.invalidate_shadow();
+        // TODO: Check all peer changes with CSM before applying and persisting `conf_state`.
+        //
+        // Currently, we update Raft membership *before* running the peer-change handlers.
+        // We call `apply_conf_change` *before* `match single_change.change_type() { ... }`.
+        //
+        // For example, if we are removing a peer and `remove_peer` returns `BadRequest` error,
+        // the peer is already absent from Raft and no longer receives new Raft log entries,
+        // but is still present in `peer_address_by_id`. Replicas and transfers still refer to it.
+        //
+        // When CSM applies operations, user errors must leave Raft membership unchanged.
 
         let conf_state = raw_node.apply_conf_change(&change)?;
         log::debug!("Applied conf state {conf_state:?}");
@@ -513,7 +533,7 @@ impl<C: CollectionContainer> ConsensusManager<C> {
                     let context = entry.get_context();
 
                     if !context.is_empty() {
-                        let peer_uri = str::from_utf8(context)
+                        let peer_uri: Uri = str::from_utf8(context)
                             .map_err(|err| {
                                 StorageError::service_error(format!(
                                     "failed to parse peer URI: {err}"
@@ -526,7 +546,13 @@ impl<C: CollectionContainer> ConsensusManager<C> {
                                 ))
                             })?;
 
-                        self.add_peer(single_change.node_id, peer_uri)?;
+                        let operation = ConsensusOperations::AddPeer {
+                            peer_id: single_change.node_id,
+                            uri: peer_uri.to_string(),
+                        };
+                        self.apply_with_shadow(&operation, || {
+                            self.add_peer(single_change.node_id, peer_uri)
+                        })?;
                     } else {
                         debug_assert!(
                             self.peer_address_by_id()
@@ -537,7 +563,8 @@ impl<C: CollectionContainer> ConsensusManager<C> {
                 }
                 ConfChangeType::RemoveNode => {
                     log::debug!("Removing node {}", single_change.node_id);
-                    stop_consensus |= self.on_peer_remove(single_change.node_id)?;
+                    let stop = self.on_peer_remove(single_change.node_id)?;
+                    stop_consensus |= stop;
                 }
                 ConfChangeType::AddLearnerNode => {
                     log::debug!("Adding learner node {}", single_change.node_id);
@@ -546,15 +573,18 @@ impl<C: CollectionContainer> ConsensusManager<C> {
                         .try_into()
                     {
                         let peer_uri: Uri = peer_uri;
+                        let operation = ConsensusOperations::AddPeer {
+                            peer_id: single_change.node_id,
+                            uri: peer_uri.to_string(),
+                        };
+
                         // Add peer to state
-                        self.add_peer(single_change.node_id, peer_uri.clone())?;
+                        self.apply_with_shadow(&operation, || {
+                            self.add_peer(single_change.node_id, peer_uri.clone())
+                        })?;
 
                         // Notify the submitter, that operation was performed
                         {
-                            let operation = ConsensusOperations::AddPeer {
-                                peer_id: single_change.node_id,
-                                uri: peer_uri.to_string(),
-                            };
                             let on_apply = self.on_consensus_op_apply.lock().remove(&operation);
                             if let Some(on_apply) = on_apply
                                 && on_apply.send(Ok(true)).is_err()
@@ -682,11 +712,11 @@ impl<C: CollectionContainer> ConsensusManager<C> {
         Some(outcome)
     }
 
-    fn shadow_compare(
+    fn shadow_compare<T>(
         &self,
         operation: &ConsensusOperations,
         outcome: &ApplyOutcome,
-        result: &StorageResult<bool>,
+        result: &StorageResult<T>,
     ) {
         let Some(shadow) = self.shadow.as_ref() else {
             return;
@@ -697,6 +727,22 @@ impl<C: CollectionContainer> ConsensusManager<C> {
         shadow
             .lock()
             .compare(self.toc.as_ref(), &persistent, operation, outcome, result);
+    }
+
+    /// Run one non-normal-entry handler between state-machine planning and comparison
+    fn apply_with_shadow<T>(
+        &self,
+        operation: &ConsensusOperations,
+        apply: impl FnOnce() -> StorageResult<T>,
+    ) -> StorageResult<T> {
+        let outcome = self.shadow_apply(operation);
+        let result = apply();
+
+        if let Some(outcome) = outcome {
+            self.shadow_compare(operation, &outcome, &result);
+        }
+
+        result
     }
 
     fn invalidate_shadow(&self) {
@@ -1474,6 +1520,7 @@ mod tests {
     use std::time::Duration;
 
     use collection::shards::shard::PeerId;
+    use parking_lot::RwLock;
     use proptest::prelude::*;
     use raft::eraftpb::{
         ConfChange, ConfChangeSingle, ConfChangeType, ConfChangeV2, Entry, EntryType,
@@ -1489,6 +1536,7 @@ mod tests {
     use crate::content_manager::consensus::operation_sender::OperationSender;
     use crate::content_manager::consensus::persistent::Persistent;
     use crate::quota::QuotaConfig;
+    use crate::types::PeerAddressById;
 
     #[test]
     fn update_is_applied() {
@@ -1595,7 +1643,13 @@ mod tests {
         assert_eq!(wal.entries(4, 5, Some(0)).unwrap().len(), 1)
     }
 
-    struct NoCollections;
+    #[derive(Default)]
+    struct NoCollections {
+        this_peer_id: PeerId,
+        peer_addresses: Arc<RwLock<PeerAddressById>>,
+        peer_channel_removals: parking_lot::Mutex<Vec<PeerId>>,
+        peer_channel_error: parking_lot::Mutex<Option<crate::StorageError>>,
+    }
 
     impl CollectionContainer for NoCollections {
         fn apply_action(
@@ -1632,6 +1686,22 @@ mod tests {
 
         fn peer_has_shards(&self, _peer_id: PeerId) -> bool {
             false
+        }
+
+        fn remove_peer_channels(&self, peer_id: PeerId) -> Result<(), crate::StorageError> {
+            self.peer_channel_removals.lock().push(peer_id);
+            if let Some(error) = self.peer_channel_error.lock().clone() {
+                return Err(error);
+            }
+
+            let mut peers = self.peer_addresses.write();
+            if peer_id == self.this_peer_id {
+                peers.clear();
+            } else {
+                peers.remove(&peer_id);
+            }
+
+            Ok(())
         }
 
         fn sync_local_state(&self) -> Result<(), crate::content_manager::errors::StorageError> {
@@ -1675,6 +1745,44 @@ mod tests {
         ) -> std::collections::BTreeSet<collection::shards::CollectionId> {
             std::collections::BTreeSet::new()
         }
+    }
+
+    #[test]
+    fn remove_peer_action_channel_failure_retry() {
+        use crate::content_manager::consensus_state_machine::Action;
+        use crate::content_manager::errors::StorageError;
+
+        let dir = Builder::new().prefix("raft_state_test").tempdir().unwrap();
+        let (manager, _) = setup_storages(vec![], dir.path());
+        manager
+            .add_peer(1, "http://127.0.0.1:6335".parse().unwrap())
+            .unwrap();
+        *manager.toc.peer_channel_error.lock() = Some(StorageError::bad_request("channel failure"));
+        let action = Action::RemovePeer { peer_id: 1 };
+
+        let error = manager.apply_action(action.clone()).unwrap_err();
+
+        assert!(matches!(error, StorageError::ServiceError { .. }));
+        assert!(
+            manager
+                .persistent
+                .read()
+                .peer_address_by_id()
+                .contains_key(&1)
+        );
+        manager.toc.peer_channel_error.lock().take();
+
+        manager.apply_action(action.clone()).unwrap();
+        manager.apply_action(action).unwrap();
+
+        assert!(
+            !manager
+                .persistent
+                .read()
+                .peer_address_by_id()
+                .contains_key(&1)
+        );
+        assert_eq!(*manager.toc.peer_channel_removals.lock(), [1, 1, 1]);
     }
 
     /// Regression test for the shared awaiter slot.
@@ -1899,10 +2007,15 @@ mod tests {
         path: &std::path::Path,
     ) -> (ConsensusManager<NoCollections>, MemStorage) {
         let persistent = Persistent::load_or_init(path, true, false, None).unwrap();
+        let toc = NoCollections {
+            this_peer_id: persistent.this_peer_id,
+            peer_addresses: persistent.peer_address_by_id.clone(),
+            ..Default::default()
+        };
         let (sender, _) = mpsc::channel();
         let consensus_state = ConsensusManager::new(
             persistent,
-            Arc::new(NoCollections),
+            Arc::new(toc),
             OperationSender::new(sender),
             path,
         )
@@ -2038,7 +2151,7 @@ mod tests {
         let (sender, _) = mpsc::channel();
         let consensus = ConsensusManager::new(
             persistent,
-            Arc::new(NoCollections),
+            Arc::new(NoCollections::default()),
             OperationSender::new(sender),
             dir.path(),
         )
@@ -2116,7 +2229,7 @@ mod tests {
         let (sender, _) = mpsc::channel();
         let consensus = ConsensusManager::new(
             persistent,
-            Arc::new(NoCollections),
+            Arc::new(NoCollections::default()),
             OperationSender::new(sender),
             dir.path(),
         )

@@ -375,6 +375,7 @@ fn closed_shard_returns_shard_closed() {
         sparse_vector_data: HashMap::new(),
         payload_memory: None,
         id_tracker_memory: None,
+        wal_enabled: None,
     };
 
     let shard: Arc<EdgeShard> =
@@ -943,6 +944,7 @@ fn payload_index_params_all_variants_convert_to_matching_engine_type() {
                     is_tenant: None,
                     memory: None,
                     enable_hnsw: None,
+                    nested: None,
                     prefix: None,
                 },
             },
@@ -956,6 +958,7 @@ fn payload_index_params_all_variants_convert_to_matching_engine_type() {
                     is_principal: None,
                     memory: None,
                     enable_hnsw: None,
+                    nested: None,
                 },
             },
             SegmentPayloadSchemaType::Integer,
@@ -966,6 +969,7 @@ fn payload_index_params_all_variants_convert_to_matching_engine_type() {
                     is_principal: None,
                     memory: None,
                     enable_hnsw: None,
+                    nested: None,
                 },
             },
             SegmentPayloadSchemaType::Float,
@@ -975,6 +979,7 @@ fn payload_index_params_all_variants_convert_to_matching_engine_type() {
                 config: GeoIndexParams {
                     memory: None,
                     enable_hnsw: None,
+                    nested: None,
                 },
             },
             SegmentPayloadSchemaType::Geo,
@@ -992,6 +997,8 @@ fn payload_index_params_all_variants_convert_to_matching_engine_type() {
                     memory: None,
                     stemmer: None,
                     enable_hnsw: None,
+                    nested: None,
+                    scoring: None,
                 },
             },
             SegmentPayloadSchemaType::Text,
@@ -1001,6 +1008,7 @@ fn payload_index_params_all_variants_convert_to_matching_engine_type() {
                 config: BoolIndexParams {
                     memory: None,
                     enable_hnsw: None,
+                    nested: None,
                 },
             },
             SegmentPayloadSchemaType::Bool,
@@ -1011,6 +1019,7 @@ fn payload_index_params_all_variants_convert_to_matching_engine_type() {
                     is_principal: None,
                     memory: None,
                     enable_hnsw: None,
+                    nested: None,
                 },
             },
             SegmentPayloadSchemaType::Datetime,
@@ -1021,6 +1030,7 @@ fn payload_index_params_all_variants_convert_to_matching_engine_type() {
                     is_tenant: None,
                     memory: None,
                     enable_hnsw: None,
+                    nested: None,
                 },
             },
             SegmentPayloadSchemaType::Uuid,
@@ -1048,6 +1058,7 @@ fn integer_index_params_both_capabilities_disabled_rejected() {
                 is_principal: None,
                 memory: None,
                 enable_hnsw: None,
+                nested: None,
             },
         },
     );
@@ -1063,6 +1074,7 @@ fn integer_index_params_both_capabilities_disabled_rejected() {
                 is_principal: None,
                 memory: None,
                 enable_hnsw: None,
+                nested: None,
             },
         },
     );
@@ -1081,6 +1093,7 @@ fn payload_index_params_bad_field_name_rejected() {
                 is_tenant: None,
                 memory: None,
                 enable_hnsw: None,
+                nested: None,
                 prefix: None,
             },
         },
@@ -1093,7 +1106,7 @@ fn text_index_params_full_fidelity_round_trip() {
     use qdrant_edge_ffi::config::Memory;
     use qdrant_edge_ffi::{
         Language, PayloadIndexParams, SnowballLanguage, Stemmer, Stopwords, TextIndexParams,
-        TokenizerType,
+        TextScoringParams, TextScoringType, TokenizerType,
     };
     use segment::data_types::index as segment_index;
     use segment::types::PayloadSchemaParams;
@@ -1115,6 +1128,10 @@ fn text_index_params_full_fidelity_round_trip() {
                 language: SnowballLanguage::English,
             }),
             enable_hnsw: Some(false),
+            nested: None,
+            scoring: Some(TextScoringParams {
+                r#type: TextScoringType::Bm25,
+            }),
         },
     };
 
@@ -1159,6 +1176,10 @@ fn text_index_params_full_fidelity_round_trip() {
         ))
     );
     assert_eq!(engine_text.enable_hnsw, Some(false));
+    assert_eq!(
+        engine_text.scoring,
+        Some(segment_index::TextScoringParams::default())
+    );
 
     // Engine → FFI: converting back must echo every option.
     let echoed = qdrant_edge_ffi::PayloadIndexParams::from(engine);
@@ -1182,6 +1203,12 @@ fn text_index_params_full_fidelity_round_trip() {
         Some([Language::English, Language::Spanish])
     ));
     assert_eq!(custom, Some(vec!["qdrant".to_string()]));
+    assert!(matches!(
+        config.scoring,
+        Some(TextScoringParams {
+            r#type: TextScoringType::Bm25
+        })
+    ));
     assert!(matches!(config.memory, Some(Memory::Cold)));
     assert!(matches!(
         config.stemmer,
@@ -1242,6 +1269,7 @@ fn legacy_on_disk_flag_resolves_to_memory_on_read() {
             memory,
             enable_hnsw: None,
             prefix: None,
+            nested: None,
         })
     };
     let reported_memory = |params: PayloadSchemaParams| {
@@ -1264,4 +1292,90 @@ fn legacy_on_disk_flag_resolves_to_memory_on_read() {
         Some(Memory::Cached)
     ));
     assert!(reported_memory(keyword(None, None)).is_none());
+}
+
+/// A text query converts with the defaults filled in for each parameter left
+/// unset, and refuses a field that is not a valid JSON path.
+#[test]
+fn text_query_converts() {
+    use qdrant_edge_ffi::{Bm25Params, ScoringQuery, TextQueryScoring};
+    use segment::index::field_index::full_text_index::Bm25Params as SegmentBm25Params;
+
+    let text = |field: &str, scoring| ScoringQuery::Text {
+        field: field.to_string(),
+        query: "quick fox".to_string(),
+        scoring,
+    };
+
+    let converted = shard::query::ScoringQuery::try_from(text(
+        "title",
+        Some(TextQueryScoring::Bm25 {
+            params: Bm25Params {
+                k: Some(2.0),
+                b: None,
+            },
+        }),
+    ))
+    .expect("text query must convert");
+    let shard::query::ScoringQuery::Text(converted) = converted else {
+        panic!("expected a text query, got {converted:?}");
+    };
+    assert_eq!(converted.field.to_string(), "title");
+    assert_eq!(converted.text, "quick fox");
+    assert_eq!(
+        converted.params,
+        SegmentBm25Params {
+            k1: 2.0,
+            b: SegmentBm25Params::default().b,
+        }
+    );
+
+    let defaults = shard::query::ScoringQuery::try_from(text("title", None)).unwrap();
+    let shard::query::ScoringQuery::Text(defaults) = defaults else {
+        panic!("expected a text query, got {defaults:?}");
+    };
+    assert_eq!(defaults.params, SegmentBm25Params::default());
+
+    let err = shard::query::ScoringQuery::try_from(text("bad[path", None))
+        .expect_err("an invalid field path must be refused");
+    assert!(matches!(err, EdgeError::InvalidArgument { .. }), "{err:?}");
+}
+
+/// `nested` carries the array path of a per-element index to the engine and back, and
+/// a path that doesn't parse is rejected.
+#[test]
+fn payload_index_params_nested_round_trips() {
+    use std::str::FromStr as _;
+
+    use qdrant_edge_ffi::update::UpdateOperation;
+    use qdrant_edge_ffi::{KeywordIndexParams, PayloadIndexParams};
+    use segment::json_path::JsonPath;
+    use segment::types::PayloadSchemaParams;
+
+    let keyword = |nested: &str| PayloadIndexParams::Keyword {
+        config: KeywordIndexParams {
+            is_tenant: None,
+            memory: None,
+            enable_hnsw: None,
+            prefix: None,
+            nested: Some(nested.to_string()),
+        },
+    };
+
+    let converted = PayloadSchemaParams::try_from(keyword("offers")).expect("valid nested");
+    assert_eq!(
+        converted.nested(),
+        Some(&JsonPath::from_str("offers").unwrap())
+    );
+
+    let PayloadIndexParams::Keyword { config } = PayloadIndexParams::from(converted) else {
+        panic!("expected Keyword params");
+    };
+    assert_eq!(config.nested.as_deref(), Some("offers"));
+
+    let r = UpdateOperation::create_field_index_with_params(
+        "offers[].shop".to_string(),
+        keyword("offers["),
+    );
+    assert!(matches!(r, Err(EdgeError::InvalidArgument { .. })));
 }

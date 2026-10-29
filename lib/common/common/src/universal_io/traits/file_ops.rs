@@ -5,6 +5,7 @@ use futures::future::BoxFuture;
 
 use crate::universal_io::cached_fs::FileInfo;
 use crate::universal_io::traits::append::UniversalAppend;
+use crate::universal_io::traits::async_io::UniversalReadFsAsync;
 use crate::universal_io::traits::open_extra::OpenExtra;
 use crate::universal_io::traits::read::UniversalRead;
 use crate::universal_io::{ListedFile, OpenOptions, UioResult};
@@ -143,6 +144,11 @@ pub trait UniversalWriteFs: UniversalReadFs {
 /// only callable when the caller opens through a caching filesystem;
 /// plain-`UniversalReadFs` open paths never see these methods.
 pub trait CachedReadFs: UniversalReadFs {
+    type Inner: UniversalReadFsAsync<File = Self::File>;
+
+    /// The wrapped inner filesystem.
+    fn inner(&self) -> &Self::Inner;
+
     /// Take the file listing snapshot. From this point on, listing and
     /// existence checks are answered locally and opens of unlisted paths
     /// fail with `NotFound` without touching the underlying filesystem.
@@ -181,6 +187,21 @@ pub trait CachedReadFs: UniversalReadFs {
     /// driven after the `&self` borrow ends.
     fn wait_all(&self) -> impl Future<Output = ()> + Send + 'static + use<Self>;
 
+    /// The error of a prefetched open that failed, for a caller that waited on
+    /// [`Self::wait_all`] and must not apply a reload whose files did not arrive.
+    /// Only opens of listed paths count: an unlisted path's `NotFound` is the
+    /// expected answer to a probe for an optional file.
+    fn prefetch_error(&self) -> UioResult<()>;
+
+    /// Drop every prefetched handle without rotating the listing snapshot, so
+    /// the next round schedules every open again against its own snapshot.
+    /// For a round that was staged but will not be applied.
+    fn discard_prefetched(&self);
+
     /// Return the file info from the current snapshot.
     fn cached_file_info(&self, path: &Path) -> Option<FileInfo>;
+
+    /// Return true if the file existed in both the previous and current
+    /// snapshot and its metadata (size, last modified, etag) has not changed.
+    fn is_file_unchanged(&self, path: &Path) -> bool;
 }

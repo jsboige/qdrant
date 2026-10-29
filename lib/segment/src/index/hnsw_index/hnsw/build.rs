@@ -12,7 +12,7 @@ use log::debug;
 use rand::Rng;
 use rayon::ThreadPool;
 
-use super::old_index::OldIndexCandidate;
+use super::old_index::{OldIndexCandidate, payload_hnsw_m, payload_links_reusable};
 use super::telemetry::HNSWSearchesTelemetry;
 use super::{HNSW_USE_HEURISTIC, HNSWIndex, HnswIndexOpenArgs, derive_config};
 use crate::common::operation_error::{OperationError, OperationResult, check_process_stopped};
@@ -84,10 +84,7 @@ impl HNSWIndex {
             debug!("skip building main HNSW graph");
         }
 
-        let payload_m = HnswM::new(
-            config.payload_m.unwrap_or(config.m),
-            config.payload_m0.unwrap_or(config.m0),
-        );
+        let payload_m = payload_hnsw_m(&config);
 
         // Progress subtasks
         let progress_migrate = build_main_graph.then(|| progress.subtask("migrate"));
@@ -193,7 +190,7 @@ impl HNSWIndex {
                 id_tracker_ref.deref(),
                 &vector_storage_ref,
                 &quantized_vectors_ref,
-                old_index,
+                old_index.as_ref(),
                 &graph_layers_builder,
                 config.ef_construct,
                 progress_migrate.unwrap(),
@@ -201,9 +198,11 @@ impl HNSWIndex {
                 &pool,
                 stopped,
             )?;
-        } else {
-            drop(old_index);
         }
+
+        let payload_seed = old_index
+            .as_ref()
+            .filter(|old_index| payload_links_reusable(&config, &old_index.index.config));
 
         if let Some((progress_additional_links, indexed_fields)) = additional_links_params {
             #[cfg(feature = "gpu")]
@@ -215,7 +214,7 @@ impl HNSWIndex {
             #[cfg(not(feature = "gpu"))]
             let mut gpu_insert_context = None;
 
-            let indexed_payload_vectors = build_additional_links(
+            build_additional_links(
                 id_tracker_ref.deref(),
                 &vector_storage_ref,
                 &quantized_vectors_ref,
@@ -225,24 +224,22 @@ impl HNSWIndex {
                 &config,
                 payload_m,
                 indexed_fields,
+                payload_seed,
                 progress_additional_links,
                 &pool,
                 rng,
                 stopped,
             )?;
-
-            debug_assert!(indexed_vectors >= indexed_payload_vectors || config.m == 0);
-            indexed_vectors = indexed_vectors.max(indexed_payload_vectors);
-            debug_assert!(indexed_payload_vectors <= total_vector_count);
         } else {
             debug!("skip building additional HNSW links");
         }
+        drop(old_index);
 
         config.indexed_vector_count.replace(indexed_vectors);
 
         // Always skip loading graph to RAM on build
         // as it will be discarded anyway
-        let is_on_disk = true;
+        let cold = true;
 
         let graph = save_graph(
             graph_layers_builder,
@@ -250,7 +247,7 @@ impl HNSWIndex {
             inline_vectors,
             &vector_storage_ref,
             quantized_vectors_ref.as_ref(),
-            is_on_disk,
+            cold,
         )?;
         debug_assert!(
             deleted_points_unlinked(&graph, deleted_bitslice),
@@ -275,7 +272,6 @@ impl HNSWIndex {
             path: path.to_owned(),
             graph: HnswGraph::Direct(Arc::new(graph)),
             searches_telemetry: HNSWSearchesTelemetry::new(),
-            is_on_disk,
         })
     }
 }
@@ -318,7 +314,7 @@ fn save_graph(
     inline_vectors: bool,
     vector_storage: &VectorStorageEnum,
     quantized_vectors: Option<&QuantizedVectors>,
-    on_disk: bool,
+    cold: bool,
 ) -> OperationResult<GraphLayers> {
     let graph_links_vectors = inline_vectors
         .then(|| {
@@ -333,7 +329,7 @@ fn save_graph(
         Some(v) => GraphLinksFormatParam::CompressedWithVectors(v),
         None => GraphLinksFormatParam::Compressed,
     };
-    graph_layers_builder.into_graph_layers(path, format_param, on_disk)
+    graph_layers_builder.into_graph_layers(path, format_param, cold)
 }
 
 /// Whether no deleted point has links on level 0.

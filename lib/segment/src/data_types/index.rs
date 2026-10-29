@@ -10,6 +10,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::{Validate, ValidationError, ValidationErrors};
 
+use crate::json_path::JsonPath;
 use crate::types::Memory;
 
 // Keyword
@@ -52,6 +53,13 @@ pub struct KeywordIndexParams {
     /// field. Default: false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefix: Option<bool>,
+
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field
+    /// `offers[].price`. The field must be inside the array's elements. `is_empty` on the
+    /// field matches a point when one of its elements lacks the field, and never a point
+    /// without elements. Default: disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested: Option<JsonPath>,
 }
 
 // Integer
@@ -98,6 +106,13 @@ pub struct IntegerIndexParams {
     /// Default: true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_hnsw: Option<bool>,
+
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field
+    /// `offers[].price`. The field must be inside the array's elements. `is_empty` on the
+    /// field matches a point when one of its elements lacks the field, and never a point
+    /// without elements. Default: disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested: Option<JsonPath>,
 }
 
 impl Validate for IntegerIndexParams {
@@ -110,6 +125,7 @@ impl Validate for IntegerIndexParams {
             on_disk: _,
             memory: _,
             enable_hnsw: _,
+            nested: _,
         } = &self;
         validate_integer_index_params(lookup, range)
     }
@@ -185,6 +201,13 @@ pub struct UuidIndexParams {
     /// Default: true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_hnsw: Option<bool>,
+
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field
+    /// `offers[].price`. The field must be inside the array's elements. `is_empty` on the
+    /// field matches a point when one of its elements lacks the field, and never a point
+    /// without elements. Default: disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested: Option<JsonPath>,
 }
 
 // Float
@@ -222,6 +245,13 @@ pub struct FloatIndexParams {
     /// Default: true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_hnsw: Option<bool>,
+
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field
+    /// `offers[].price`. The field must be inside the array's elements. `is_empty` on the
+    /// field matches a point when one of its elements lacks the field, and never a point
+    /// without elements. Default: disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested: Option<JsonPath>,
 }
 
 // Geo
@@ -255,6 +285,13 @@ pub struct GeoIndexParams {
     /// Default: true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_hnsw: Option<bool>,
+
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field
+    /// `offers[].price`. The field must be inside the array's elements. `is_empty` on the
+    /// field matches a point when one of its elements lacks the field, and never a point
+    /// without elements. Default: disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested: Option<JsonPath>,
 }
 
 // Text
@@ -274,6 +311,7 @@ pub enum TokenizerType {
     #[default]
     Word,
     Multilingual,
+    Code,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema, Clone, PartialEq, Hash, Eq)]
@@ -329,6 +367,66 @@ pub struct TextIndexParams {
     /// Default: true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_hnsw: Option<bool>,
+
+    /// Enable ranking points by BM25 over this field; `true` for the defaults.
+    /// Changing it rebuilds the index.
+    /// Default: disabled.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_text_scoring",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<TextScoringInterface>")]
+    pub scoring: Option<TextScoringParams>,
+
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field
+    /// `offers[].title`. The field must be inside the array's elements. Every query on the
+    /// field, not only nested filters, treats each element as its own document: a
+    /// condition matches a point when a single element matches it, and BM25 scores
+    /// elements separately. `is_empty` on the field matches a point when one of its
+    /// elements lacks the field, and never a point without elements. Default: disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested: Option<JsonPath>,
+}
+
+/// How a text index ranks documents.
+#[derive(Default, Debug, Deserialize, Serialize, JsonSchema, Clone, Copy, PartialEq, Hash, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TextScoringType {
+    #[default]
+    Bm25,
+}
+
+/// Parameters of ranking over a text index. The index records the length of
+/// each document, which BM25 normalizes by. `k1` and `b` are set per query.
+#[derive(Default, Debug, Deserialize, Serialize, JsonSchema, Clone, PartialEq, Hash, Eq)]
+pub struct TextScoringParams {
+    pub r#type: TextScoringType,
+}
+
+/// BM25 scoring for a text index: `true` for the default parameters, `false`
+/// to disable it, or the parameters themselves.
+// Only the request accepts this form: it is normalized into
+// `Option<TextScoringParams>` as it is read, so the stored schema holds one shape.
+#[derive(Deserialize, JsonSchema)]
+#[serde(untagged)]
+#[serde(expecting = "Expected a boolean, or an object with a type")]
+enum TextScoringInterface {
+    Enabled(bool),
+    Params(TextScoringParams),
+}
+
+fn deserialize_text_scoring<'de, D>(deserializer: D) -> Result<Option<TextScoringParams>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(
+        match Option::<TextScoringInterface>::deserialize(deserializer)? {
+            None | Some(TextScoringInterface::Enabled(false)) => None,
+            Some(TextScoringInterface::Enabled(true)) => Some(TextScoringParams::default()),
+            Some(TextScoringInterface::Params(params)) => Some(params),
+        },
+    )
 }
 
 impl Validate for TextIndexParams {
@@ -346,6 +444,8 @@ impl Validate for TextIndexParams {
             memory: _,
             stemmer: _,
             enable_hnsw: _,
+            scoring: _,
+            nested: _,
         } = &self;
         validate_text_index_params(min_token_len, max_token_len)
     }
@@ -481,14 +581,6 @@ pub enum StopwordsInterface {
     Set(StopwordsSet),
 }
 
-/// Whether text indexes record per-document lengths, which BM25 needs for
-/// length normalization.
-///
-/// Stands in for a `scoring` field on [`TextIndexParams`] until ranked queries
-/// exist. Not persisted, so `classify()` cannot see it change: it has to be
-/// replaced by the real field rather than flipped.
-const TEXT_INDEX_SCORING: bool = false;
-
 #[cfg(feature = "testing")]
 thread_local! {
     /// See [`TextIndexParams::override_scoring`].
@@ -511,19 +603,14 @@ impl Drop for TextIndexScoringOverride {
 }
 
 impl TextIndexParams {
-    /// Whether an index built from these params records document lengths.
-    ///
-    /// When the `scoring` field lands it must also normalize `phrase_matching`
-    /// to `true`, since tf comes from the positions that flag stores. Every
-    /// site derives positions from `phrase_matching`, so normalizing the field
-    /// is the whole change; without it a scoring index can be built with no
-    /// positions, and tf is then not slow to compute but impossible.
+    /// Whether an index built from these params records document lengths
+    /// and term frequencies.
     pub fn scoring(&self) -> bool {
         #[cfg(feature = "testing")]
         if let Some(scoring) = TEXT_INDEX_SCORING_OVERRIDE.get() {
             return scoring;
         }
-        TEXT_INDEX_SCORING
+        self.scoring.is_some()
     }
 
     /// Make [`Self::scoring`] answer `scoring` on this thread until the guard
@@ -685,6 +772,13 @@ pub struct BoolIndexParams {
     /// Default: true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_hnsw: Option<bool>,
+
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field
+    /// `offers[].price`. The field must be inside the array's elements. `is_empty` on the
+    /// field matches a point when one of its elements lacks the field, and never a point
+    /// without elements. Default: disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested: Option<JsonPath>,
 }
 
 // Datetime
@@ -722,6 +816,13 @@ pub struct DatetimeIndexParams {
     /// Default: true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_hnsw: Option<bool>,
+
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field
+    /// `offers[].price`. The field must be inside the array's elements. `is_empty` on the
+    /// field matches a point when one of its elements lacks the field, and never a point
+    /// without elements. Default: disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested: Option<JsonPath>,
 }
 
 #[cfg(test)]
@@ -892,5 +993,51 @@ mod tests {
             StopwordsInterface::new_set(&[Language::English, Language::French], &["AAA"]);
 
         assert_eq!(stopwords_multiple, expected_set);
+    }
+
+    /// Text index params from the fields of `json`, as a request states them.
+    fn text_params(json: serde_json::Value) -> TextIndexParams {
+        let mut fields = json.as_object().unwrap().clone();
+        fields.insert("type".to_owned(), "text".into());
+        serde_json::from_value(fields.into()).unwrap()
+    }
+
+    /// `scoring` reads in its short form or its canonical one, and is always
+    /// written canonical, so the stored schema holds one shape.
+    #[test]
+    fn scoring_short_form_normalizes_as_it_is_read() {
+        let bm25 = Some(TextScoringParams {
+            r#type: TextScoringType::Bm25,
+        });
+        assert_eq!(text_params(serde_json::json!({})).scoring, None);
+        assert_eq!(
+            text_params(serde_json::json!({ "scoring": null })).scoring,
+            None
+        );
+        assert_eq!(
+            text_params(serde_json::json!({ "scoring": false })).scoring,
+            None
+        );
+        assert_eq!(
+            text_params(serde_json::json!({ "scoring": true })).scoring,
+            bm25
+        );
+        assert_eq!(
+            text_params(serde_json::json!({ "scoring": { "type": "bm25" } })).scoring,
+            bm25,
+        );
+
+        let written =
+            serde_json::to_value(text_params(serde_json::json!({ "scoring": true }))).unwrap();
+        assert_eq!(written["scoring"], serde_json::json!({ "type": "bm25" }));
+        let unset = serde_json::to_value(text_params(serde_json::json!({}))).unwrap();
+        assert!(
+            unset.get("scoring").is_none(),
+            "absent scoring is not written"
+        );
+
+        let invalid: Result<TextIndexParams, _> =
+            serde_json::from_value(serde_json::json!({ "type": "text", "scoring": "bm25" }));
+        assert!(invalid.is_err());
     }
 }
