@@ -229,6 +229,41 @@ $collOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "ls $Mount
 $lines = @(($collOut | Out-String) -split "`r?`n" | Where-Object { $_.Trim() -match "^\d+$" })
 $collCount = if ($lines.Count -gt 0) { [int]$lines[-1].Trim() } else { 0 }
 Log "Collections visibles sur ${MountPoint}: $collCount" "OK"
+# --- Phase 5b: reparer les namespaces de montage PERIMES (proxy Docker Desktop) ---
+# Lecon 2026-10-29 (panne 23:22 -> 23:49) : le proxy docker-desktop-user-distro vit dans un
+# namespace de montage COPIE et PRIVE (mnt:[...] different de PID 1). Apres un detachement /
+# remontage du VHDX, il garde son /mnt/qdrant-e pointe sur l'ANCIEN device -> "input/output
+# error" sur "stating /mnt/qdrant-e/qdrant_data/storage" a chaque compose up, alors que le
+# montage de PID 1 est sain et verifie par label. Aucune propagation ne traverse un namespace
+# prive, et le chemin de repli /srv retombe sur le rootfs (dossier vide) : la seule reparation
+# est un remontage DANS le namespace fautif. Idempotent : on ne touche que les namespaces ou
+# la sentinelle est illisible.
+Log "Phase 5b: verification des namespaces de montage perimes..."
+$nsScript = @'
+expected=285
+mydev=$(readlink /proc/1/ns/mnt)
+srcdev=$(findmnt -n -o SOURCE /mnt/qdrant-e)
+seen=""
+for d in /proc/[0-9]*; do
+  pid=${d#/proc/}
+  ns=$(readlink $d/ns/mnt 2>/dev/null) || continue
+  [ "$ns" = "$mydev" ] && continue
+  case " $seen " in *" $ns "*) continue ;; esac
+  seen="$seen $ns"
+  grep -q " /mnt/qdrant-e " $d/mountinfo 2>/dev/null || continue
+  sz=$(nsenter -t $pid -m -- stat -c %s /mnt/qdrant-e/qdrant_data/storage/.qdrant_vhdx_sentinel 2>/dev/null)
+  [ "$sz" = "$expected" ] && continue
+  echo "ns-perime:$ns (pid $pid) sentinelle='${sz}' -> remontage par LABEL"
+  nsenter -t $pid -m -- bash -c "umount -l /mnt/qdrant-e 2>/dev/null; mount -t ext4 $srcdev /mnt/qdrant-e 2>/dev/null || mount -t ext4 /dev/disk/by-label/qdrant-e /mnt/qdrant-e" 2>&1
+  sz2=$(nsenter -t $pid -m -- stat -c %s /mnt/qdrant-e/qdrant_data/storage/.qdrant_vhdx_sentinel 2>/dev/null)
+  echo "  apres: sentinelle='${sz2}'"
+done
+echo "ns-scan-done"
+'@
+$nsB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($nsScript))
+$nsOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "echo $nsB64 | base64 -d | bash" 2>&1
+foreach ($l in (($nsOut | Out-String).Trim() -split "`r?`n")) { if ($l) { Log "  $l" } }
+
 
 # --- Phase 6: Wait Docker + Restart qdrant_production ---
 if ($SkipDocker) {
