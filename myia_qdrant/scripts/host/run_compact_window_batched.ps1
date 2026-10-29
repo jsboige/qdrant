@@ -59,15 +59,21 @@ function Log {
 function Wait-TaskIdle {
     # Attend que la tache ait DEMARRE (LastRunTime > $After) puis qu'elle ne soit plus
     # 'Running' (le FINALLY du script de compaction fait le remontage AVANT la fin).
+    # NB 2026-10-29 : Get-ScheduledTask ne porte PAS LastRunTime (propriete de
+    # Get-ScheduledTaskInfo) -- la lecture directe renvoyait toujours $null, donc la
+    # detection de demarrage ne fonctionnait pas. On interroge l'info separement.
     param([string]$TaskName, [datetime]$After, [int]$TimeoutMinutes)
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
     $seen = $false
     while ((Get-Date) -lt $deadline) {
         $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         if ($t) {
-            if (-not $seen -and $t.LastRunTime -and $t.LastRunTime -gt $After) {
+            $info = $null
+            try { $info = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction Stop } catch { }
+            $lastRun = if ($info) { $info.LastRunTime } else { $null }
+            if (-not $seen -and $lastRun -and $lastRun -gt $After) {
                 $seen = $true
-                Log "  tache '$TaskName' demarree a $($t.LastRunTime)."
+                Log "  tache '$TaskName' demarree a $lastRun."
             }
             if ($seen -and $t.State -ne 'Running') { Start-Sleep 25; return $true }
         }
