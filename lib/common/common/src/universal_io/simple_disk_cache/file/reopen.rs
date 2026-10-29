@@ -7,12 +7,12 @@
 
 use std::io::{self, ErrorKind};
 use std::path::Path;
+use std::sync::Arc;
 
 use aligned_vec::{AVec, RuntimeAlign};
 use futures::FutureExt;
-use futures::future::{BoxFuture, Shared};
 
-use super::{DiskCache, ScheduledReopen, State};
+use super::{DiskCache, ScheduledReopen, SharedFetch, State};
 use crate::generic_consts::Sequential;
 use crate::universal_io::cached_fs::FileInfo;
 use crate::universal_io::simple_disk_cache::pipeline::REMOTE_READ_ALIGNMENT;
@@ -31,8 +31,9 @@ where
             return Ok(());
         }
 
-        // If not previously done, schedule and wait blockingly
-        futures::executor::block_on(self.live_preload_with_len(None)?);
+        // If not previously done, schedule and wait blockingly. A failed fetch
+        // is reported by the apply, which owns its error.
+        let _ = futures::executor::block_on(self.live_preload_with_len(None)?);
         self.resolve_pending_reload()?;
 
         Ok(())
@@ -72,11 +73,16 @@ where
                 blocks_range,
                 target_len,
             } => {
-                futures::executor::block_on(future);
-                let (new_remote, fetched) = data
-                    .try_recv()
-                    .expect("sender is never dropped before sending")
-                    .expect("data should be available, and no other consumer exists")?;
+                let (new_remote, fetched) = match data.try_recv() {
+                    Ok(Some(res)) => res?,
+                    Ok(None) => {
+                        let _ = futures::executor::block_on(future);
+                        data.try_recv()
+                            .expect("sender is never dropped before sending")
+                            .expect("data should be available, and no other consumer exists")?
+                    }
+                    Err(_) => panic!("sender is never dropped before sending"),
+                };
 
                 // resize only after the fetch succeeded
                 local.resize(&self.local_path, target_len)?;
@@ -95,11 +101,16 @@ where
                 mut data,
                 from,
             } => {
-                futures::executor::block_on(future);
-                let (new_remote, total_len, fetched) = data
-                    .try_recv()
-                    .expect("sender is never dropped before sending")
-                    .expect("data should be available, and no other consumer exists")?;
+                let (new_remote, total_len, fetched) = match data.try_recv() {
+                    Ok(Some(res)) => res?,
+                    Ok(None) => {
+                        let _ = futures::executor::block_on(future);
+                        data.try_recv()
+                            .expect("sender is never dropped before sending")
+                            .expect("data should be available, and no other consumer exists")?
+                    }
+                    Err(_) => panic!("sender is never dropped before sending"),
+                };
 
                 let local_len = local.mmap().len::<u8>()?;
                 check_not_shrunk(local_len, total_len)?;
@@ -125,7 +136,7 @@ where
     pub(super) fn live_preload_impl<F: FnOnce(&Path) -> Option<FileInfo>>(
         &self,
         get_file_info: F,
-    ) -> UioResult<Shared<BoxFuture<'static, ()>>> {
+    ) -> UioResult<SharedFetch> {
         let file_info = get_file_info(&self.remote_path);
         let fut = self.live_preload_with_len(file_info.as_ref().map(|info| info.size))?;
         if let Some(file_info) = file_info {
@@ -142,10 +153,7 @@ where
     /// apply.
     ///
     /// [`UniversalRead::live_preload`]: crate::universal_io::UniversalRead::live_preload
-    pub(super) fn live_preload_with_len(
-        &self,
-        known_len: Option<u64>,
-    ) -> UioResult<Shared<BoxFuture<'static, ()>>> {
+    pub(super) fn live_preload_with_len(&self, known_len: Option<u64>) -> UioResult<SharedFetch> {
         // Wait for scheduled prefill, if any.
         //
         // warn: this will do a length request if uninit, but when using a
@@ -165,8 +173,10 @@ where
         let local_len = local.mmap().len::<u8>()?;
 
         // Already staged for this request: reuse the staged signal so callers
-        // still observe its completion.
-        if let Some(scheduled) = scheduled_reopen.as_ref() {
+        // still observe its completion. A failed fetch is staged anew.
+        if let Some(scheduled) = scheduled_reopen.as_ref()
+            && !scheduled.has_failed()
+        {
             let already_staged = match (scheduled, known_len) {
                 (_, Some(len)) => scheduled.target_len() == Some(len),
                 (ScheduledReopen::UnboundedTail { .. }, None) => true,
@@ -183,7 +193,7 @@ where
                     check_not_shrunk(local_len, remote_len)?;
                     if remote_len == local_len {
                         *scheduled_reopen = Some(ScheduledReopen::Unchanged);
-                        Ok(async {}.boxed().shared())
+                        Ok(async { Ok(()) }.boxed().shared())
                     } else {
                         self.schedule_bounded_tail(scheduled_reopen, local_len, remote_len)
                     }
@@ -209,7 +219,7 @@ where
                     }
                 });
 
-                Ok(async {}.boxed().shared())
+                Ok(async { Ok(()) }.boxed().shared())
             }
         }
     }
@@ -219,7 +229,7 @@ where
         scheduled_reopen: &mut Option<ScheduledReopen<R>>,
         local_len: u64,
         remote_len: u64,
-    ) -> UioResult<Shared<BoxFuture<'static, ()>>> {
+    ) -> UioResult<SharedFetch> {
         let (blocks_range, byte_range) = block_aligned_fetch(local_len..remote_len, remote_len)
             .expect("the byte range is non-empty");
 
@@ -234,7 +244,9 @@ where
                         .into_owned(REMOTE_READ_ALIGNMENT))
                 };
                 let result = fetch().await.map(|fetched| (new_remote, fetched));
+                let outcome = fetch_outcome(&result);
                 tx.send(result).ok();
+                outcome
             }
             .boxed()
             .shared()
@@ -254,7 +266,7 @@ where
         &self,
         scheduled_reopen: &mut Option<ScheduledReopen<R>>,
         local_len: u64,
-    ) -> UioResult<Shared<BoxFuture<'static, ()>>> {
+    ) -> UioResult<SharedFetch> {
         let from = (local_len / BLOCK_SIZE as u64) * BLOCK_SIZE as u64;
 
         let new_remote = self.open_remote()?;
@@ -277,7 +289,9 @@ where
                     Ok((new_remote, collector.total_len, collector.buffer))
                 };
                 let result = fetch().await;
+                let outcome = fetch_outcome(&result);
                 tx.send(result).ok();
+                outcome
             }
             .boxed()
             .shared()
@@ -290,6 +304,14 @@ where
         });
 
         Ok(future)
+    }
+}
+
+/// What a staged fetch reports to its waiters; the owned result goes to the apply.
+fn fetch_outcome<T>(result: &UioResult<T>) -> Result<(), Arc<UniversalIoError>> {
+    match result {
+        Ok(_) => Ok(()),
+        Err(err) => Err(Arc::new(err.duplicate())),
     }
 }
 

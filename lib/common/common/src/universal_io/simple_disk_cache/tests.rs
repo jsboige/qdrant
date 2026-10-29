@@ -501,7 +501,7 @@ mod tests_mod {
         let new_data = scn.grow_remote(BLOCK_SIZE);
         futures::executor::block_on(async {
             let staged = cache.live_preload(scn.snapshot_file_info::<R>()).unwrap();
-            staged.await;
+            staged.await.unwrap();
         });
         cache.live_reload().unwrap();
 
@@ -613,7 +613,7 @@ mod tests_mod {
         let new_data = scn.grow_remote(BLOCK_SIZE);
 
         let staged = cache.live_preload(|_| None).unwrap();
-        futures::executor::block_on(staged);
+        futures::executor::block_on(staged).unwrap();
 
         // Before live_reload, local file is not resized yet
         assert_eq!(cache.len::<u8>().unwrap(), original_len);
@@ -636,14 +636,46 @@ mod tests_mod {
         let staged1 = cache.live_preload(|_| None).unwrap();
         let staged2 = cache.live_preload(|_| None).unwrap();
         futures::executor::block_on(async {
-            staged1.await;
-            staged2.await;
+            staged1.await.unwrap();
+            staged2.await.unwrap();
         });
         cache.live_reload().unwrap();
 
         assert_eq!(cache.len::<u8>().unwrap(), new_data.len() as u64);
         let bytes = cache.read_whole::<u8>().unwrap();
         assert_eq!(&*bytes, &new_data[..]);
+    }
+
+    /// A staged tail fetch that fails resolves to its error, and staging
+    /// again fetches anew instead of handing back the failed fetch.
+    #[test]
+    fn live_preload_reports_failed_fetch_and_restages() {
+        if !PREFILL {
+            // A lazy cache stages a resize, not a fetch.
+            return;
+        }
+        let mut scn = Scenario::new(BLOCK_SIZE * 2);
+        let mut cache = scn.open::<R>(PREFILL);
+        let _ = cache.read::<_, u8>(ReadRange::one(0), Sequential).unwrap();
+
+        // The listing claims a block the remote does not have yet.
+        let claimed_len = (scn.data.len() + BLOCK_SIZE) as u64;
+        let claimed = |_: &Path| {
+            Some(FileInfo {
+                size: claimed_len,
+                last_modified: None,
+                etag: None,
+            })
+        };
+        let staged = cache.live_preload(claimed).unwrap();
+        futures::executor::block_on(staged).unwrap_err();
+
+        let new_data = scn.grow_remote(BLOCK_SIZE);
+        let staged = cache.live_preload(claimed).unwrap();
+        futures::executor::block_on(staged).unwrap();
+        cache.live_reload().unwrap();
+
+        assert_eq!(&*cache.read_whole::<u8>().unwrap(), &new_data[..]);
     }
 
     /// `Populate::Partial` prefetches only the requested (block-aligned) range;
@@ -658,6 +690,10 @@ mod tests_mod {
         // The mirror is materialized lazily; nothing exists before the first read.
         let expected_local = file.local_path.clone();
         assert!(!expected_local.exists());
+        assert!(!file.is_ready());
+
+        // A read hint must not force initialization either.
+        file.will_need(std::iter::once(0..16));
         assert!(!file.is_ready());
 
         // A read within the prefetched range is served from the local mirror.
@@ -677,8 +713,13 @@ mod tests_mod {
             assert!(!local.fetched.lock().contains(3));
         }
 
-        // A read outside the prefetched range faults its block in on demand.
+        // Hints on cached, uncached and past-EOF ranges: only block 0 is advised.
         let start = (BLOCK_SIZE * 2) as u64;
+        let len = scn.data.len() as u64;
+        file.will_need([0..16, start..start + 30, len..len + 16].into_iter());
+        assert!(!file.state().unwrap().local.fetched.lock().contains(2));
+
+        // A read outside the prefetched range faults its block in on demand.
         let bytes = file
             .read::<_, u8>(ReadRange::new(start, 30), Sequential)
             .unwrap();
@@ -1332,6 +1373,13 @@ mod tests_async {
         async fn list_files_async(&self, prefix_path: &Path) -> UioResult<Vec<ListedFile>> {
             self.0.list_files_async(prefix_path).await
         }
+
+        async fn select_files_async<P: AsRef<Path> + Send + Sync>(
+            &self,
+            paths: &[P],
+        ) -> UioResult<Vec<ListedFile>> {
+            self.0.select_files_async(paths).await
+        }
     }
 
     impl UniversalRead for AsyncOnlyRemote {
@@ -1367,6 +1415,8 @@ mod tests_async {
         fn populate_auto() -> bool {
             false
         }
+
+        fn will_need(&self, _byte_ranges: impl Iterator<Item = Range<u64>>) {}
 
         fn clear_ram_cache(&self) -> UioResult<()> {
             Ok(())

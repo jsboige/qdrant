@@ -8,8 +8,8 @@ use std::time::Instant;
 
 use ahash::AHashSet;
 use chrono::{NaiveDateTime, Timelike};
-use common::counter::hardware_accumulator::HwMeasurementAcc;
-use common::counter::hardware_data::HardwareData;
+use common::ambient::AmbientContext;
+use common::ambient::hw::{HardwareData, HwMetric};
 use common::types::ScoreType;
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
@@ -64,9 +64,9 @@ use crate::grpc::qdrant::{
     PointsOperationResponse, PointsOperationResponseInternal, ProductQuantization,
     QuantizationConfig, QuantizationSearchParams, QuantizationType, RepeatedIntegers,
     RepeatedStrings, ScalarQuantization, ScoredPoint, SearchParams, ShardKey, ShardKeyDescription,
-    StopwordsSet, StrictModeConfig, TextIndexParams, TokenizerType, UpdateResult,
-    UpdateResultInternal, ValuesCount, VectorsSelector, WithPayloadSelector, WithVectorsSelector,
-    shard_key, with_vectors_selector,
+    StopwordsSet, StrictModeConfig, TextIndexParams, TextScoringParams, TextScoringType,
+    TokenizerType, UpdateResult, UpdateResultInternal, ValuesCount, VectorsSelector,
+    WithPayloadSelector, WithVectorsSelector, shard_key, with_vectors_selector,
 };
 use crate::grpc::{
     self, BinaryQuantizationEncoding, BinaryQuantizationQueryEncoding, DecayParamsExpression,
@@ -195,6 +195,7 @@ impl From<segment::data_types::index::TokenizerType> for TokenizerType {
             segment::data_types::index::TokenizerType::Whitespace => TokenizerType::Whitespace,
             segment::data_types::index::TokenizerType::Multilingual => TokenizerType::Multilingual,
             segment::data_types::index::TokenizerType::Word => TokenizerType::Word,
+            segment::data_types::index::TokenizerType::Code => TokenizerType::Code,
         }
     }
 }
@@ -248,6 +249,7 @@ impl From<segment::data_types::index::KeywordIndexParams> for PayloadIndexParams
             memory,
             enable_hnsw,
             prefix,
+            nested,
         } = params;
         PayloadIndexParams {
             index_params: Some(IndexParams::KeywordIndexParams(KeywordIndexParams {
@@ -256,6 +258,7 @@ impl From<segment::data_types::index::KeywordIndexParams> for PayloadIndexParams
                 enable_hnsw,
                 prefix: prefix.unwrap_or_default().then_some(KeywordPrefixParams {}),
                 memory: convert_memory_to_proto(memory),
+                nested: nested.map(|nested| nested.to_string()),
             })),
         }
     }
@@ -271,6 +274,7 @@ impl From<segment::data_types::index::IntegerIndexParams> for PayloadIndexParams
             memory,
             is_principal,
             enable_hnsw,
+            nested,
         } = params;
         PayloadIndexParams {
             index_params: Some(IndexParams::IntegerIndexParams(IntegerIndexParams {
@@ -280,6 +284,7 @@ impl From<segment::data_types::index::IntegerIndexParams> for PayloadIndexParams
                 on_disk,
                 enable_hnsw,
                 memory: convert_memory_to_proto(memory),
+                nested: nested.map(|nested| nested.to_string()),
             })),
         }
     }
@@ -293,6 +298,7 @@ impl From<segment::data_types::index::FloatIndexParams> for PayloadIndexParams {
             memory,
             is_principal,
             enable_hnsw,
+            nested,
         } = params;
         PayloadIndexParams {
             index_params: Some(IndexParams::FloatIndexParams(FloatIndexParams {
@@ -300,6 +306,7 @@ impl From<segment::data_types::index::FloatIndexParams> for PayloadIndexParams {
                 is_principal,
                 enable_hnsw,
                 memory: convert_memory_to_proto(memory),
+                nested: nested.map(|nested| nested.to_string()),
             })),
         }
     }
@@ -312,12 +319,14 @@ impl From<segment::data_types::index::GeoIndexParams> for PayloadIndexParams {
             on_disk,
             memory,
             enable_hnsw,
+            nested,
         } = params;
         PayloadIndexParams {
             index_params: Some(IndexParams::GeoIndexParams(GeoIndexParams {
                 on_disk,
                 enable_hnsw,
                 memory: convert_memory_to_proto(memory),
+                nested: nested.map(|nested| nested.to_string()),
             })),
         }
     }
@@ -338,6 +347,8 @@ impl From<segment::data_types::index::TextIndexParams> for PayloadIndexParams {
             stopwords,
             stemmer,
             enable_hnsw,
+            scoring,
+            nested,
         } = params;
         let tokenizer = TokenizerType::from(tokenizer);
 
@@ -359,8 +370,41 @@ impl From<segment::data_types::index::TextIndexParams> for PayloadIndexParams {
                 stemmer: stemming_algo,
                 enable_hnsw,
                 memory: convert_memory_to_proto(memory),
+                scoring: scoring.map(TextScoringParams::from),
+                nested: nested.map(|nested| nested.to_string()),
             })),
         }
+    }
+}
+
+impl From<segment::data_types::index::TextScoringParams> for TextScoringParams {
+    fn from(params: segment::data_types::index::TextScoringParams) -> Self {
+        let segment::data_types::index::TextScoringParams { r#type } = params;
+        let r#type = match r#type {
+            segment::data_types::index::TextScoringType::Bm25 => TextScoringType::Bm25,
+        };
+        Self {
+            r#type: r#type as i32,
+        }
+    }
+}
+
+impl TryFrom<TextScoringParams> for segment::data_types::index::TextScoringParams {
+    type Error = Status;
+
+    fn try_from(params: TextScoringParams) -> Result<Self, Self::Error> {
+        let TextScoringParams {
+            r#type: scoring_type,
+        } = params;
+        let r#type = match TextScoringType::try_from(scoring_type) {
+            Ok(TextScoringType::Bm25) => segment::data_types::index::TextScoringType::Bm25,
+            Err(_) => {
+                return Err(Status::invalid_argument(format!(
+                    "unknown text scoring type {scoring_type}",
+                )));
+            }
+        };
+        Ok(Self { r#type })
     }
 }
 
@@ -371,12 +415,14 @@ impl From<segment::data_types::index::BoolIndexParams> for PayloadIndexParams {
             on_disk,
             memory,
             enable_hnsw,
+            nested,
         } = params;
         PayloadIndexParams {
             index_params: Some(IndexParams::BoolIndexParams(BoolIndexParams {
                 on_disk,
                 enable_hnsw,
                 memory: convert_memory_to_proto(memory),
+                nested: nested.map(|nested| nested.to_string()),
             })),
         }
     }
@@ -390,6 +436,7 @@ impl From<segment::data_types::index::UuidIndexParams> for PayloadIndexParams {
             on_disk,
             memory,
             enable_hnsw,
+            nested,
         } = params;
         PayloadIndexParams {
             index_params: Some(IndexParams::UuidIndexParams(UuidIndexParams {
@@ -397,6 +444,7 @@ impl From<segment::data_types::index::UuidIndexParams> for PayloadIndexParams {
                 on_disk,
                 enable_hnsw,
                 memory: convert_memory_to_proto(memory),
+                nested: nested.map(|nested| nested.to_string()),
             })),
         }
     }
@@ -410,6 +458,7 @@ impl From<segment::data_types::index::DatetimeIndexParams> for PayloadIndexParam
             memory,
             is_principal,
             enable_hnsw,
+            nested,
         } = params;
         PayloadIndexParams {
             index_params: Some(IndexParams::DatetimeIndexParams(DatetimeIndexParams {
@@ -417,6 +466,7 @@ impl From<segment::data_types::index::DatetimeIndexParams> for PayloadIndexParam
                 is_principal,
                 enable_hnsw,
                 memory: convert_memory_to_proto(memory),
+                nested: nested.map(|nested| nested.to_string()),
             })),
         }
     }
@@ -530,6 +580,7 @@ impl TryFrom<TokenizerType> for segment::data_types::index::TokenizerType {
             }
             TokenizerType::Whitespace => Ok(segment::data_types::index::TokenizerType::Whitespace),
             TokenizerType::Word => Ok(segment::data_types::index::TokenizerType::Word),
+            TokenizerType::Code => Ok(segment::data_types::index::TokenizerType::Code),
         }
     }
 }
@@ -558,6 +609,7 @@ impl TryFrom<KeywordIndexParams> for segment::data_types::index::KeywordIndexPar
             enable_hnsw,
             prefix,
             memory,
+            nested,
         } = params;
         Ok(segment::data_types::index::KeywordIndexParams {
             r#type: KeywordIndexType::Keyword,
@@ -568,6 +620,10 @@ impl TryFrom<KeywordIndexParams> for segment::data_types::index::KeywordIndexPar
             // Presence of the (currently empty) message enables prefix
             // matching.
             prefix: prefix.map(|KeywordPrefixParams {}| true),
+            nested: nested
+                .as_deref()
+                .map(crate::conversions::json::json_path_from_proto)
+                .transpose()?,
         })
     }
 }
@@ -582,6 +638,7 @@ impl TryFrom<IntegerIndexParams> for segment::data_types::index::IntegerIndexPar
             on_disk,
             enable_hnsw,
             memory,
+            nested,
         } = params;
         Ok(segment::data_types::index::IntegerIndexParams {
             r#type: IntegerIndexType::Integer,
@@ -591,6 +648,10 @@ impl TryFrom<IntegerIndexParams> for segment::data_types::index::IntegerIndexPar
             on_disk,
             memory: convert_memory_from_proto(memory)?,
             enable_hnsw,
+            nested: nested
+                .as_deref()
+                .map(crate::conversions::json::json_path_from_proto)
+                .transpose()?,
         })
     }
 }
@@ -603,6 +664,7 @@ impl TryFrom<FloatIndexParams> for segment::data_types::index::FloatIndexParams 
             is_principal,
             enable_hnsw,
             memory,
+            nested,
         } = params;
         Ok(segment::data_types::index::FloatIndexParams {
             r#type: FloatIndexType::Float,
@@ -610,6 +672,10 @@ impl TryFrom<FloatIndexParams> for segment::data_types::index::FloatIndexParams 
             memory: convert_memory_from_proto(memory)?,
             is_principal,
             enable_hnsw,
+            nested: nested
+                .as_deref()
+                .map(crate::conversions::json::json_path_from_proto)
+                .transpose()?,
         })
     }
 }
@@ -621,12 +687,17 @@ impl TryFrom<GeoIndexParams> for segment::data_types::index::GeoIndexParams {
             on_disk,
             enable_hnsw,
             memory,
+            nested,
         } = params;
         Ok(segment::data_types::index::GeoIndexParams {
             r#type: GeoIndexType::Geo,
             on_disk,
             memory: convert_memory_from_proto(memory)?,
             enable_hnsw,
+            nested: nested
+                .as_deref()
+                .map(crate::conversions::json::json_path_from_proto)
+                .transpose()?,
         })
     }
 }
@@ -673,6 +744,8 @@ impl TryFrom<TextIndexParams> for segment::data_types::index::TextIndexParams {
             stemmer,
             enable_hnsw,
             memory,
+            scoring,
+            nested,
         } = params;
 
         // Convert stopwords if present
@@ -704,6 +777,13 @@ impl TryFrom<TextIndexParams> for segment::data_types::index::TextIndexParams {
             stopwords: stopwords_converted,
             stemmer,
             enable_hnsw,
+            scoring: scoring
+                .map(segment::data_types::index::TextScoringParams::try_from)
+                .transpose()?,
+            nested: nested
+                .as_deref()
+                .map(crate::conversions::json::json_path_from_proto)
+                .transpose()?,
         })
     }
 }
@@ -742,12 +822,17 @@ impl TryFrom<BoolIndexParams> for segment::data_types::index::BoolIndexParams {
             on_disk,
             enable_hnsw,
             memory,
+            nested,
         } = params;
         Ok(segment::data_types::index::BoolIndexParams {
             r#type: BoolIndexType::Bool,
             on_disk,
             memory: convert_memory_from_proto(memory)?,
             enable_hnsw,
+            nested: nested
+                .as_deref()
+                .map(crate::conversions::json::json_path_from_proto)
+                .transpose()?,
         })
     }
 }
@@ -760,6 +845,7 @@ impl TryFrom<DatetimeIndexParams> for segment::data_types::index::DatetimeIndexP
             is_principal,
             enable_hnsw,
             memory,
+            nested,
         } = params;
         Ok(segment::data_types::index::DatetimeIndexParams {
             r#type: DatetimeIndexType::Datetime,
@@ -767,6 +853,10 @@ impl TryFrom<DatetimeIndexParams> for segment::data_types::index::DatetimeIndexP
             memory: convert_memory_from_proto(memory)?,
             is_principal,
             enable_hnsw,
+            nested: nested
+                .as_deref()
+                .map(crate::conversions::json::json_path_from_proto)
+                .transpose()?,
         })
     }
 }
@@ -779,6 +869,7 @@ impl TryFrom<UuidIndexParams> for segment::data_types::index::UuidIndexParams {
             on_disk,
             enable_hnsw,
             memory,
+            nested,
         } = params;
         Ok(segment::data_types::index::UuidIndexParams {
             r#type: UuidIndexType::Uuid,
@@ -786,6 +877,10 @@ impl TryFrom<UuidIndexParams> for segment::data_types::index::UuidIndexParams {
             on_disk,
             memory: convert_memory_from_proto(memory)?,
             enable_hnsw,
+            nested: nested
+                .as_deref()
+                .map(crate::conversions::json::json_path_from_proto)
+                .transpose()?,
         })
     }
 }
@@ -1186,6 +1281,7 @@ impl From<segment::types::ScoredPoint> for ScoredPoint {
             vector,
             shard_key,
             order_value,
+            location: _,
         } = point;
         Self {
             id: Some(PointId::from(id)),
@@ -1485,6 +1581,7 @@ impl From<segment::types::TurboQuantBitSize> for TurboQuantBitSize {
             segment::types::TurboQuantBitSize::Bits1_5 => TurboQuantBitSize::Bits15,
             segment::types::TurboQuantBitSize::Bits2 => TurboQuantBitSize::Bits2,
             segment::types::TurboQuantBitSize::Bits4 => TurboQuantBitSize::Bits4,
+            segment::types::TurboQuantBitSize::Bits8 => TurboQuantBitSize::Bits8,
         }
     }
 }
@@ -1497,6 +1594,7 @@ fn turbo_quant_bit_size_from_i32(value: i32) -> Result<segment::types::TurboQuan
         TurboQuantBitSize::Bits15 => segment::types::TurboQuantBitSize::Bits1_5,
         TurboQuantBitSize::Bits2 => segment::types::TurboQuantBitSize::Bits2,
         TurboQuantBitSize::Bits4 => segment::types::TurboQuantBitSize::Bits4,
+        TurboQuantBitSize::Bits8 => segment::types::TurboQuantBitSize::Bits8,
     })
 }
 
@@ -3498,26 +3596,18 @@ impl From<rest::SearchMatrixPair> for SearchMatrixPair {
     }
 }
 
-impl From<HwMeasurementAcc> for HardwareUsage {
-    fn from(value: HwMeasurementAcc) -> Self {
-        let HardwareData {
-            cpu,
-            payload_io_read,
-            payload_io_write,
-            payload_index_io_read,
-            payload_index_io_write,
-            vector_io_read,
-            vector_io_write,
-        } = value.hw_data();
-
+impl From<AmbientContext> for HardwareUsage {
+    fn from(value: AmbientContext) -> Self {
+        let data = value.hw_data();
+        let m = |metric: HwMetric| data[metric] as u64;
         Self {
-            cpu: cpu as u64,
-            payload_io_read: payload_io_read as u64,
-            payload_io_write: payload_io_write as u64,
-            payload_index_io_read: payload_index_io_read as u64,
-            payload_index_io_write: payload_index_io_write as u64,
-            vector_io_read: vector_io_read as u64,
-            vector_io_write: vector_io_write as u64,
+            cpu: m(HwMetric::Cpu),
+            payload_io_read: m(HwMetric::PayloadIoRead),
+            payload_io_write: m(HwMetric::PayloadIoWrite),
+            payload_index_io_read: m(HwMetric::PayloadIndexIoRead),
+            payload_index_io_write: m(HwMetric::PayloadIndexIoWrite),
+            vector_io_read: m(HwMetric::VectorIoRead),
+            vector_io_write: m(HwMetric::VectorIoWrite),
         }
     }
 }
@@ -3534,15 +3624,15 @@ impl From<HardwareUsage> for HardwareData {
             vector_io_write,
         } = value;
 
-        HardwareData {
-            cpu: cpu as usize,
-            payload_io_read: payload_io_read as usize,
-            payload_io_write: payload_io_write as usize,
-            payload_index_io_read: payload_index_io_read as usize,
-            payload_index_io_write: payload_index_io_write as usize,
-            vector_io_read: vector_io_read as usize,
-            vector_io_write: vector_io_write as usize,
-        }
+        HardwareData::from_fn(|metric| match metric {
+            HwMetric::Cpu => cpu as usize,
+            HwMetric::PayloadIoRead => payload_io_read as usize,
+            HwMetric::PayloadIoWrite => payload_io_write as usize,
+            HwMetric::PayloadIndexIoRead => payload_index_io_read as usize,
+            HwMetric::PayloadIndexIoWrite => payload_index_io_write as usize,
+            HwMetric::VectorIoRead => vector_io_read as usize,
+            HwMetric::VectorIoWrite => vector_io_write as usize,
+        })
     }
 }
 
@@ -3820,6 +3910,8 @@ fn convert_datatype_from_proto(
         grpc::Datatype::Float16 => Ok(Some(VectorStorageDatatype::Float16)),
         grpc::Datatype::Uint8 => Ok(Some(VectorStorageDatatype::Uint8)),
         grpc::Datatype::Turbo4 => Ok(Some(VectorStorageDatatype::Turbo4)),
+        grpc::Datatype::Turbo8 => Ok(Some(VectorStorageDatatype::Turbo8)),
+        grpc::Datatype::Turbo16 => Ok(Some(VectorStorageDatatype::Turbo16)),
     }
 }
 
@@ -3876,5 +3968,43 @@ fn datatype_to_grpc(dt: VectorStorageDatatype) -> grpc::Datatype {
         VectorStorageDatatype::Float16 => grpc::Datatype::Float16,
         VectorStorageDatatype::Uint8 => grpc::Datatype::Uint8,
         VectorStorageDatatype::Turbo4 => grpc::Datatype::Turbo4,
+        VectorStorageDatatype::Turbo8 => grpc::Datatype::Turbo8,
+        VectorStorageDatatype::Turbo16 => grpc::Datatype::Turbo16,
+    }
+}
+
+#[cfg(test)]
+mod text_scoring_tests {
+    use segment::data_types::index::{
+        TextIndexParams as SegmentTextIndexParams, TextScoringParams as SegmentTextScoringParams,
+    };
+
+    use super::*;
+
+    fn round_trip(params: SegmentTextIndexParams) -> SegmentTextIndexParams {
+        let Some(IndexParams::TextIndexParams(grpc)) =
+            PayloadIndexParams::from(params).index_params
+        else {
+            panic!("expected text index params");
+        };
+        SegmentTextIndexParams::try_from(grpc).unwrap()
+    }
+
+    /// `scoring` crosses gRPC both ways, set or not.
+    #[test]
+    fn text_scoring_survives_grpc_round_trip() {
+        let scoring = SegmentTextIndexParams {
+            scoring: Some(SegmentTextScoringParams::default()),
+            ..SegmentTextIndexParams::default()
+        };
+        assert_eq!(round_trip(scoring.clone()), scoring);
+        let plain = SegmentTextIndexParams::default();
+        assert_eq!(round_trip(plain.clone()), plain);
+    }
+
+    #[test]
+    fn unknown_text_scoring_type_is_refused() {
+        let unknown = TextScoringParams { r#type: 42 };
+        assert!(SegmentTextScoringParams::try_from(unknown).is_err());
     }
 }

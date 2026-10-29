@@ -18,7 +18,7 @@ Payload = Dict[str, Any]
 JsonPath = str
 WithPayloadType = Union[bool, List[str], "PayloadSelector"]
 WithVectorType = Union[bool, List[str]]
-ScoringQueryType = Union["Query", "Fusion", "OrderBy", "Formula", "Sample", "Mmr"]
+ScoringQueryType = Union["Query", "Fusion", "OrderBy", "Formula", "Sample", "Mmr", "TextQuery"]
 ConditionType = Union[
     "FieldCondition",
     "IsEmptyCondition",
@@ -291,6 +291,7 @@ class EdgeConfig:
         search_pool_core: Optional[int] = None,
         payload_memory: Optional["Memory"] = None,
         id_tracker_memory: Optional["Memory"] = None,
+        wal_enabled: Optional[bool] = None,
     ) -> None:
         """
         Create an EdgeConfig.
@@ -323,6 +324,9 @@ class EdgeConfig:
                             (treated as Cached). Defaults to Cold.
             id_tracker_memory: Memory placement of the point id tracker in non-appendable
                                segments. None uses the deployment default.
+            wal_enabled: Whether updates are written to a write-ahead log. None means enabled.
+                         Fixed when the shard is created: loading with a different value fails.
+                         Without a WAL, updates are durable only once flush() returns.
         """
         ...
 
@@ -374,6 +378,11 @@ class EdgeConfig:
     @property
     def id_tracker_memory(self) -> Optional["Memory"]:
         """Memory placement of the point id tracker, or None if not specified."""
+        ...
+
+    @property
+    def wal_enabled(self) -> Optional[bool]:
+        """Whether updates are written to a write-ahead log, or None if not specified (enabled)."""
         ...
 
 class EdgeVectorParams:
@@ -867,6 +876,7 @@ class TurboQuantBitSize(Enum):
     Bits1_5 = ...
     Bits2 = ...
     Bits4 = ...
+    Bits8 = ...
 
 class Modifier(Enum):
     """Sparse vector modifiers."""
@@ -1222,6 +1232,7 @@ class KeywordIndexParams:
         enable_hnsw: Optional[bool] = None,
         prefix: Optional[bool] = None,
         memory: Optional["Memory"] = None,
+        nested: Optional[str] = None,
     ) -> None:
         """
         Create KeywordIndexParams.
@@ -1233,6 +1244,10 @@ class KeywordIndexParams:
             prefix: Whether to enable prefix matching for this field.
             memory: Memory placement of the payload index. Overrides the deprecated
                     on_disk flag if both are set.
+            nested: Index every object of this array as a separate entry, e.g. "offers"
+                    for the field "offers[].price". The field must be inside the array's
+                    elements, and `is_empty` on it matches a point when one of its
+                    elements lacks the field.
         """
         ...
 
@@ -1261,6 +1276,11 @@ class KeywordIndexParams:
         """Memory placement of the payload index, or None if not specified."""
         ...
 
+    @property
+    def nested(self) -> Optional[str]:
+        """The array whose objects are indexed as separate entries, or None if the field is indexed per point."""
+        ...
+
 class IntegerIndexParams:
     """Index parameters for integer fields."""
 
@@ -1272,6 +1292,7 @@ class IntegerIndexParams:
         on_disk: Optional[bool] = None,
         enable_hnsw: Optional[bool] = None,
         memory: Optional["Memory"] = None,
+        nested: Optional[str] = None,
     ) -> None:
         """
         Create IntegerIndexParams.
@@ -1284,6 +1305,10 @@ class IntegerIndexParams:
             enable_hnsw: Whether to enable HNSW index for this field.
             memory: Memory placement of the payload index. Overrides the deprecated
                     on_disk flag if both are set.
+            nested: Index every object of this array as a separate entry, e.g. "offers"
+                    for the field "offers[].price". The field must be inside the array's
+                    elements, and `is_empty` on it matches a point when one of its
+                    elements lacks the field.
         """
         ...
 
@@ -1317,6 +1342,11 @@ class IntegerIndexParams:
         """Memory placement of the payload index, or None if not specified."""
         ...
 
+    @property
+    def nested(self) -> Optional[str]:
+        """The array whose objects are indexed as separate entries, or None if the field is indexed per point."""
+        ...
+
 class FloatIndexParams:
     """Index parameters for float fields."""
 
@@ -1326,6 +1356,7 @@ class FloatIndexParams:
         on_disk: Optional[bool] = None,
         enable_hnsw: Optional[bool] = None,
         memory: Optional["Memory"] = None,
+        nested: Optional[str] = None,
     ) -> None:
         """
         Create FloatIndexParams.
@@ -1336,6 +1367,10 @@ class FloatIndexParams:
             enable_hnsw: Whether to enable HNSW index for this field.
             memory: Memory placement of the payload index. Overrides the deprecated
                     on_disk flag if both are set.
+            nested: Index every object of this array as a separate entry, e.g. "offers"
+                    for the field "offers[].price". The field must be inside the array's
+                    elements, and `is_empty` on it matches a point when one of its
+                    elements lacks the field.
         """
         ...
 
@@ -1359,6 +1394,11 @@ class FloatIndexParams:
         """Memory placement of the payload index, or None if not specified."""
         ...
 
+    @property
+    def nested(self) -> Optional[str]:
+        """The array whose objects are indexed as separate entries, or None if the field is indexed per point."""
+        ...
+
 class GeoIndexParams:
     """Index parameters for geo fields."""
 
@@ -1367,6 +1407,7 @@ class GeoIndexParams:
         on_disk: Optional[bool] = None,
         enable_hnsw: Optional[bool] = None,
         memory: Optional["Memory"] = None,
+        nested: Optional[str] = None,
     ) -> None:
         """
         Create GeoIndexParams.
@@ -1376,6 +1417,10 @@ class GeoIndexParams:
             enable_hnsw: Whether to enable HNSW index for this field.
             memory: Memory placement of the payload index. Overrides the deprecated
                     on_disk flag if both are set.
+            nested: Index every object of this array as a separate entry, e.g. "offers"
+                    for the field "offers[].price". The field must be inside the array's
+                    elements, and `is_empty` on it matches a point when one of its
+                    elements lacks the field.
         """
         ...
 
@@ -1392,6 +1437,11 @@ class GeoIndexParams:
     @property
     def memory(self) -> Optional["Memory"]:
         """Memory placement of the payload index, or None if not specified."""
+        ...
+
+    @property
+    def nested(self) -> Optional[str]:
+        """The array whose objects are indexed as separate entries, or None if the field is indexed per point."""
         ...
 
 class BoolIndexParams:
@@ -1402,6 +1452,7 @@ class BoolIndexParams:
         on_disk: Optional[bool] = None,
         enable_hnsw: Optional[bool] = None,
         memory: Optional["Memory"] = None,
+        nested: Optional[str] = None,
     ) -> None:
         """
         Create BoolIndexParams.
@@ -1411,6 +1462,10 @@ class BoolIndexParams:
             enable_hnsw: Whether to enable HNSW index for this field.
             memory: Memory placement of the payload index. Overrides the deprecated
                     on_disk flag if both are set.
+            nested: Index every object of this array as a separate entry, e.g. "offers"
+                    for the field "offers[].price". The field must be inside the array's
+                    elements, and `is_empty` on it matches a point when one of its
+                    elements lacks the field.
         """
         ...
 
@@ -1427,6 +1482,11 @@ class BoolIndexParams:
     @property
     def memory(self) -> Optional["Memory"]:
         """Memory placement of the payload index, or None if not specified."""
+        ...
+
+    @property
+    def nested(self) -> Optional[str]:
+        """The array whose objects are indexed as separate entries, or None if the field is indexed per point."""
         ...
 
 class DatetimeIndexParams:
@@ -1438,6 +1498,7 @@ class DatetimeIndexParams:
         on_disk: Optional[bool] = None,
         enable_hnsw: Optional[bool] = None,
         memory: Optional["Memory"] = None,
+        nested: Optional[str] = None,
     ) -> None:
         """
         Create DatetimeIndexParams.
@@ -1448,6 +1509,10 @@ class DatetimeIndexParams:
             enable_hnsw: Whether to enable HNSW index for this field.
             memory: Memory placement of the payload index. Overrides the deprecated
                     on_disk flag if both are set.
+            nested: Index every object of this array as a separate entry, e.g. "offers"
+                    for the field "offers[].price". The field must be inside the array's
+                    elements, and `is_empty` on it matches a point when one of its
+                    elements lacks the field.
         """
         ...
 
@@ -1471,6 +1536,11 @@ class DatetimeIndexParams:
         """Memory placement of the payload index, or None if not specified."""
         ...
 
+    @property
+    def nested(self) -> Optional[str]:
+        """The array whose objects are indexed as separate entries, or None if the field is indexed per point."""
+        ...
+
 class UuidIndexParams:
     """Index parameters for UUID fields."""
 
@@ -1480,6 +1550,7 @@ class UuidIndexParams:
         on_disk: Optional[bool] = None,
         enable_hnsw: Optional[bool] = None,
         memory: Optional["Memory"] = None,
+        nested: Optional[str] = None,
     ) -> None:
         """
         Create UuidIndexParams.
@@ -1490,6 +1561,10 @@ class UuidIndexParams:
             enable_hnsw: Whether to enable HNSW index for this field.
             memory: Memory placement of the payload index. Overrides the deprecated
                     on_disk flag if both are set.
+            nested: Index every object of this array as a separate entry, e.g. "offers"
+                    for the field "offers[].price". The field must be inside the array's
+                    elements, and `is_empty` on it matches a point when one of its
+                    elements lacks the field.
         """
         ...
 
@@ -1513,6 +1588,11 @@ class UuidIndexParams:
         """Memory placement of the payload index, or None if not specified."""
         ...
 
+    @property
+    def nested(self) -> Optional[str]:
+        """The array whose objects are indexed as separate entries, or None if the field is indexed per point."""
+        ...
+
 class TextIndexParams:
     """Index parameters for text fields."""
 
@@ -1529,6 +1609,8 @@ class TextIndexParams:
         stemmer: Optional["StemmingAlgorithm"] = None,
         enable_hnsw: Optional[bool] = None,
         memory: Optional["Memory"] = None,
+        scoring: Optional[Union[bool, "TextScoringParams"]] = None,
+        nested: Optional[str] = None,
     ) -> None:
         """
         Create TextIndexParams.
@@ -1546,6 +1628,14 @@ class TextIndexParams:
             enable_hnsw: Whether to enable HNSW index for this field.
             memory: Memory placement of the payload index. Overrides the deprecated
                     on_disk flag if both are set.
+            scoring: Record document lengths and term frequencies, so a
+                     TextQuery can rank points over this field. `True` for
+                     BM25, or the TextScoringParams. Default: disabled.
+            nested: Index every object of this array as a separate entry, e.g. "offers"
+                    for the field "offers[].title". The field must be inside the array's
+                    elements. Every query on the field treats each element as its own
+                    document: a condition matches a point when a single element matches
+                    it, and BM25 scores elements separately.
         """
         ...
 
@@ -1604,6 +1694,40 @@ class TextIndexParams:
         """Memory placement of the payload index, or None if not specified."""
         ...
 
+    @property
+    def scoring(self) -> Optional["TextScoringParams"]:
+        """How the index ranks documents, or None if it doesn't."""
+        ...
+
+    @property
+    def nested(self) -> Optional[str]:
+        """The array whose objects are indexed as separate entries, or None if the field is indexed per point."""
+        ...
+
+class TextScoringParams:
+    """Ranking over a text index. The index records the length of each
+    document, which ranking normalizes by. BM25's `k` and `b` are set per
+    query, with `Bm25Params`."""
+
+    def __init__(self, type: "TextScoringType" = ...) -> None:
+        """
+        Create TextScoringParams.
+
+        Args:
+            type: How documents are ranked. Default: TextScoringType.Bm25.
+        """
+        ...
+
+    @property
+    def type(self) -> "TextScoringType":
+        """How documents are ranked."""
+        ...
+
+class TextScoringType(Enum):
+    """How a text index ranks documents."""
+
+    Bm25 = ...
+
 class TokenizerType(Enum):
     """Text tokenizer types."""
 
@@ -1611,6 +1735,7 @@ class TokenizerType(Enum):
     Whitespace = ...
     Word = ...
     Multilingual = ...
+    Code = ...
 
 Stopwords = Union["Language", "StopwordsSet"]
 """Stopwords configuration - either a language or a custom set."""
@@ -2385,6 +2510,67 @@ class Mmr:
     @property
     def candidates_limit(self) -> int:
         """Candidates limit."""
+        ...
+
+class TextQuery:
+    """BM25 over the text index of a payload field.
+
+    The field's index must be created with `TextIndexParams(scoring=True)`.
+    """
+
+    def __init__(
+        self,
+        field: JsonPath,
+        query: str,
+        scoring: Optional["Bm25Params"] = None,
+    ) -> None:
+        """
+        Create a TextQuery.
+
+        Args:
+            field: Payload field whose text index scores the points.
+            query: Text to search for, tokenized by the field's text index.
+            scoring: Parameters of the scorer, which must match the scoring of
+                     the field's text index. If absent, the defaults.
+        """
+        ...
+
+    @property
+    def field(self) -> JsonPath:
+        """Payload field whose text index scores the points."""
+        ...
+
+    @property
+    def query(self) -> str:
+        """Text to search for."""
+        ...
+
+    @property
+    def scoring(self) -> "Bm25Params":
+        """Parameters of the scorer."""
+        ...
+
+class Bm25Params:
+    """BM25 parameters of a TextQuery."""
+
+    def __init__(self, k: Optional[float] = None, b: Optional[float] = None) -> None:
+        """
+        Create Bm25Params.
+
+        Args:
+            k: Term frequency saturation, non-negative. Default: 1.2.
+            b: Document length normalization, within [0, 1]. Default: 0.75.
+        """
+        ...
+
+    @property
+    def k(self) -> float:
+        """Term frequency saturation."""
+        ...
+
+    @property
+    def b(self) -> float:
+        """Document length normalization."""
         ...
 
 class RecommendQuery:

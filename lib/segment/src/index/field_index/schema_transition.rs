@@ -60,9 +60,9 @@ pub fn classify(old: &PayloadFieldSchema, new: &PayloadFieldSchema) -> SchemaTra
     }
 
     if let Some(mut diff) = compatible_diff(old, new) {
-        // Resolve through `is_on_disk()` so `memory` placement is respected.
+        // Resolve through `is_cold()` so `memory` placement is respected.
         if diff.on_disk.is_some() {
-            diff.on_disk = Some(new.is_on_disk());
+            diff.on_disk = Some(new.is_cold());
         }
         return SchemaTransition::Compatible(diff);
     }
@@ -94,7 +94,7 @@ fn compatible_diff(old: &PayloadSchemaParams, new: &PayloadSchemaParams) -> Opti
     }
 
     Some(CompatibleDiff {
-        // Placeholder; `classify` overwrites with `new.is_on_disk()`.
+        // Placeholder; `classify` overwrites with `new.is_cold()`.
         on_disk: on_disk_changed.then_some(false),
         metadata: metadata_changed,
     })
@@ -122,8 +122,8 @@ mod tests {
     use crate::data_types::index::{
         BoolIndexParams, BoolIndexType, DatetimeIndexParams, DatetimeIndexType, FloatIndexParams,
         FloatIndexType, GeoIndexParams, GeoIndexType, IntegerIndexParams, IntegerIndexType,
-        KeywordIndexParams, KeywordIndexType, TextIndexParams, TextIndexType, TokenizerType,
-        UuidIndexParams, UuidIndexType,
+        KeywordIndexParams, KeywordIndexType, TextIndexParams, TextIndexType, TextScoringParams,
+        TokenizerType, UuidIndexParams, UuidIndexType,
     };
     use crate::types::PayloadSchemaType;
 
@@ -143,6 +143,7 @@ mod tests {
             on_disk,
             enable_hnsw,
             prefix: None,
+            nested: None,
         })
     }
 
@@ -159,6 +160,7 @@ mod tests {
             is_principal: None,
             on_disk,
             enable_hnsw,
+            nested: None,
         })
     }
 
@@ -169,6 +171,7 @@ mod tests {
             is_principal: None,
             on_disk,
             enable_hnsw,
+            nested: None,
         })
     }
 
@@ -178,6 +181,7 @@ mod tests {
             r#type: GeoIndexType::Geo,
             on_disk,
             enable_hnsw,
+            nested: None,
         })
     }
 
@@ -199,6 +203,8 @@ mod tests {
             on_disk,
             stemmer: None,
             enable_hnsw,
+            scoring: None,
+            nested: None,
         })
     }
 
@@ -208,6 +214,7 @@ mod tests {
             r#type: BoolIndexType::Bool,
             on_disk,
             enable_hnsw,
+            nested: None,
         })
     }
 
@@ -222,6 +229,7 @@ mod tests {
             is_principal,
             on_disk,
             enable_hnsw,
+            nested: None,
         })
     }
 
@@ -236,6 +244,7 @@ mod tests {
             is_tenant,
             on_disk,
             enable_hnsw,
+            nested: None,
         })
     }
 
@@ -309,6 +318,7 @@ mod tests {
             on_disk: Some(false),
             enable_hnsw: None,
             prefix: Some(true),
+            nested: None,
         }));
         assert_eq!(
             classify(&plain, &with_prefix),
@@ -317,6 +327,40 @@ mod tests {
         assert_eq!(
             classify(&with_prefix, &plain),
             SchemaTransition::Incompatible
+        );
+    }
+
+    /// Turning scoring on or off records or drops the document lengths, and
+    /// may add positions: a full rebuild either way, never `Identical`, which
+    /// would skip persisting the new params. Also when only `on_disk` differs
+    /// besides.
+    #[test]
+    fn text_scoring_change_is_incompatible() {
+        let with_scoring = |on_disk| {
+            let PayloadSchemaParams::Text(params) = text(on_disk, TokenizerType::Word, None) else {
+                unreachable!()
+            };
+            wrap(PayloadSchemaParams::Text(TextIndexParams {
+                scoring: Some(TextScoringParams::default()),
+                ..params
+            }))
+        };
+        let plain = wrap(text(Some(false), TokenizerType::Word, None));
+        assert_eq!(
+            classify(&plain, &with_scoring(Some(false))),
+            SchemaTransition::Incompatible
+        );
+        assert_eq!(
+            classify(&with_scoring(Some(false)), &plain),
+            SchemaTransition::Incompatible
+        );
+        assert_eq!(
+            classify(&plain, &with_scoring(Some(true))),
+            SchemaTransition::Incompatible
+        );
+        assert_eq!(
+            classify(&with_scoring(Some(false)), &with_scoring(Some(false))),
+            SchemaTransition::Identical,
         );
     }
 
@@ -459,7 +503,7 @@ mod tests {
 
         // None vs Some(false) — both mean "false", so they are Identical.
         // The field-level comparison (`Option<bool>`) sees them as different,
-        // but `is_on_disk()` reads `unwrap_or_default()` so they're semantically equal.
+        // but `is_cold()` reads `unwrap_or_default()` so they're semantically equal.
         //
         // We choose to surface this as `Compatible { on_disk: Some(false) }` rather than
         // Identical, because the persisted on_disk value differs (None vs Some(false)) and the
@@ -500,6 +544,27 @@ mod tests {
                 metadata: false,
             }
             .metadata_only()
+        );
+    }
+
+    #[test]
+    fn nested_change_is_incompatible() {
+        let flat = PayloadFieldSchema::FieldType(PayloadSchemaType::Keyword);
+        let nested = |path: &str| flat.clone().nested_in(path);
+
+        // Both spellings of the array are the same normalized schema
+        assert_eq!(
+            classify(&nested("offers"), &nested("offers[]")),
+            SchemaTransition::Identical,
+        );
+        // Per-element and flattened indexes have different data
+        assert_eq!(
+            classify(&flat, &nested("offers")),
+            SchemaTransition::Incompatible
+        );
+        assert_eq!(
+            classify(&nested("offers"), &flat),
+            SchemaTransition::Incompatible
         );
     }
 }

@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use common::fs::read_json;
 use common::storage_version::StorageVersion as _;
@@ -18,7 +19,7 @@ use crate::collection::CollectionVersion;
 use crate::common::snapshot_stream::SnapshotStream;
 use crate::common::snapshots_manager::SnapshotStorageManager;
 use crate::config::{COLLECTION_CONFIG_FILE, CollectionConfigInternal, ShardingMethod};
-use crate::operations::snapshot_ops::SnapshotDescription;
+use crate::operations::snapshot_ops::{SnapshotDescription, unique_snapshot_timestamp};
 use crate::operations::types::{CollectionError, CollectionResult, NodeType};
 use crate::shards::local_shard::LocalShard;
 use crate::shards::remote_shard::RemoteShard;
@@ -61,7 +62,7 @@ impl Collection {
         let snapshot_name = format!(
             "{}-{this_peer_id}-{}.snapshot",
             self.name(),
-            chrono::Utc::now().format("%Y-%m-%d-%H-%M-%S"),
+            unique_snapshot_timestamp(),
         );
 
         // Final location of snapshot
@@ -340,34 +341,56 @@ impl Collection {
         recovery_progress: Option<RecoveryProgressHandle>,
         cancel: cancel::CancellationToken,
     ) -> CollectionResult<impl Future<Output = CollectionResult<()>> + 'static> {
-        // `ShardHolder::validate_shard_snapshot` is cancel safe, so we explicitly cancel it
-        // when token is triggered
+        let replica_set = self
+            .shards_holder
+            .read()
+            .await
+            .get_shard(shard_id)
+            .cloned()
+            .ok_or_else(|| shard_not_found_error(shard_id))?;
+
+        let snapshot_temp_dir = ShardHolder::prepare_shard_snapshot(
+            snapshot_data,
+            self.name(),
+            shard_id,
+            this_peer_id,
+            is_distributed,
+            temp_dir,
+            recovery_progress.as_ref(),
+            cancel.clone(),
+        )
+        .await?;
+
+        // Acquire the shard holder lock, check that the replica set was not removed or
+        // replaced during snapshot preparation, and hold the lock until the snapshot is
+        // recovered so the shard cannot be replaced or removed
         let shard_holder = self.shards_holder.clone().read_owned().await;
 
+        // Check that the replica set is unchanged
+        let current_replica_set = shard_holder
+            .get_shard(shard_id)
+            .ok_or_else(|| shard_not_found_error(shard_id))?;
+
+        if !Arc::ptr_eq(&replica_set, current_replica_set) {
+            return Err(CollectionError::bad_request(format!(
+                "Shard {shard_id} was replaced during snapshot preparation"
+            )));
+        }
+
+        // `ShardHolder::restore_shard_snapshot` is *not* cancel-safe,
+        // it must be spawned onto runtime
         let collection_path = self.path.clone();
-        let collection_name = self.name().to_string();
-
-        let temp_dir = temp_dir.to_path_buf();
-
-        // `ShardHolder::restore_shard_snapshot` is *not* cancel safe, so we spawn it onto runtime,
-        // so that it won't be cancelled if current future is dropped
         let restore = self.update_runtime.spawn(async move {
             shard_holder
                 .restore_shard_snapshot(
-                    snapshot_data,
+                    snapshot_temp_dir.path(),
                     recovery_type,
                     &collection_path,
-                    &collection_name,
                     shard_id,
-                    this_peer_id,
-                    is_distributed,
-                    &temp_dir,
                     recovery_progress,
                     cancel,
                 )
-                .await?;
-
-            CollectionResult::Ok(())
+                .await
         });
 
         // Flatten nested `Result<Result<()>>` into `Result<()>`

@@ -710,6 +710,9 @@ pub struct CollectionWarning {
 pub struct HnswConfigDiff {
     /// Number of edges per node in the index graph.
     /// Larger the value - more accurate the search, more space required.
+    /// Set to 0 to disable the main HNSW graph. Additional payload-aware links
+    /// may still be built when the effective payload M is positive (see payload_m).
+    /// This setting alone does not guarantee exact search.
     #[prost(uint64, optional, tag = "1")]
     pub m: ::core::option::Option<u64>,
     /// Number of neighbours to consider during the index building.
@@ -736,8 +739,9 @@ pub struct HnswConfigDiff {
     #[deprecated]
     #[prost(bool, optional, tag = "5")]
     pub on_disk: ::core::option::Option<bool>,
-    /// Number of additional payload-aware links per node in the index graph.
-    /// If not set - regular M parameter will be used.
+    /// Number of additional payload-aware links per node. If unset, the value of m is used.
+    /// An effective value of 0 disables these additional links. A positive value allows
+    /// them for indexed payload fields with HNSW enabled, even when m is 0.
     #[prost(uint64, optional, tag = "6")]
     pub payload_m: ::core::option::Option<u64>,
     /// Store copies of original and quantized vectors within the HNSW index file. Default: false.
@@ -1217,8 +1221,8 @@ pub struct CreateCollection {
     #[prost(message, optional, tag = "6")]
     #[validate(nested)]
     pub optimizers_config: ::core::option::Option<OptimizersConfigDiff>,
-    /// Number of shards in the collection, default is 1 for standalone, otherwise
-    /// equal to the number of nodes. Minimum is 1
+    /// Number of shards in the collection. If not specified, selected
+    /// automatically. Minimum is 1
     #[prost(uint32, optional, tag = "7")]
     #[validate(range(min = 1))]
     pub shard_number: ::core::option::Option<u32>,
@@ -1441,7 +1445,7 @@ pub struct CollectionConfig {
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, Value>,
 }
 #[derive(serde::Serialize)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct KeywordIndexParams {
     /// If true - used for tenant optimization.
     #[prost(bool, optional, tag = "1")]
@@ -1463,6 +1467,11 @@ pub struct KeywordIndexParams {
     /// Overrides the deprecated `on_disk` flag if both are set.
     #[prost(enumeration = "Memory", optional, tag = "5")]
     pub memory: ::core::option::Option<i32>,
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field `offers\[\].price`.
+    /// The field must be inside the array's elements. `is_empty` on the field matches a point when one of
+    /// its elements lacks the field, and never a point without elements. Default: disabled.
+    #[prost(string, optional, tag = "6")]
+    pub nested: ::core::option::Option<::prost::alloc::string::String>,
 }
 /// Prefix matching options for the keyword index. Has no options yet:
 /// presence of this message enables prefix matching.
@@ -1470,7 +1479,7 @@ pub struct KeywordIndexParams {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct KeywordPrefixParams {}
 #[derive(serde::Serialize)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct IntegerIndexParams {
     /// If true - support direct lookups. Default is true.
     #[prost(bool, optional, tag = "1")]
@@ -1497,9 +1506,14 @@ pub struct IntegerIndexParams {
     /// Overrides the deprecated `on_disk` flag if both are set.
     #[prost(enumeration = "Memory", optional, tag = "6")]
     pub memory: ::core::option::Option<i32>,
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field `offers\[\].price`.
+    /// The field must be inside the array's elements. `is_empty` on the field matches a point when one of
+    /// its elements lacks the field, and never a point without elements. Default: disabled.
+    #[prost(string, optional, tag = "7")]
+    pub nested: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(serde::Serialize)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct FloatIndexParams {
     /// Deprecated: use `memory` instead.
     /// If true - store index on disk.
@@ -1519,9 +1533,14 @@ pub struct FloatIndexParams {
     /// Overrides the deprecated `on_disk` flag if both are set.
     #[prost(enumeration = "Memory", optional, tag = "4")]
     pub memory: ::core::option::Option<i32>,
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field `offers\[\].price`.
+    /// The field must be inside the array's elements. `is_empty` on the field matches a point when one of
+    /// its elements lacks the field, and never a point without elements. Default: disabled.
+    #[prost(string, optional, tag = "5")]
+    pub nested: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(serde::Serialize)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GeoIndexParams {
     /// Deprecated: use `memory` instead.
     /// If true - store index on disk.
@@ -1537,6 +1556,11 @@ pub struct GeoIndexParams {
     /// Overrides the deprecated `on_disk` flag if both are set.
     #[prost(enumeration = "Memory", optional, tag = "3")]
     pub memory: ::core::option::Option<i32>,
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field `offers\[\].price`.
+    /// The field must be inside the array's elements. `is_empty` on the field matches a point when one of
+    /// its elements lacks the field, and never a point without elements. Default: disabled.
+    #[prost(string, optional, tag = "4")]
+    pub nested: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(serde::Serialize)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -1590,6 +1614,25 @@ pub struct TextIndexParams {
     /// Overrides the deprecated `on_disk` flag if both are set.
     #[prost(enumeration = "Memory", optional, tag = "11")]
     pub memory: ::core::option::Option<i32>,
+    /// Enable ranking points by BM25 over this field.
+    /// Changing it rebuilds the index.
+    /// Default: disabled.
+    #[prost(message, optional, tag = "12")]
+    pub scoring: ::core::option::Option<TextScoringParams>,
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field `offers\[\].title`.
+    /// The field must be inside the array's elements. Every query on the field, not only nested filters,
+    /// treats each element as its own document: a condition matches a point when a single element
+    /// matches it, and BM25 scores elements separately. `is_empty` on the field matches a point when
+    /// one of its elements lacks the field, and never a point without elements. Default: disabled.
+    #[prost(string, optional, tag = "13")]
+    pub nested: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(serde::Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TextScoringParams {
+    /// How documents are ranked
+    #[prost(enumeration = "TextScoringType", tag = "1")]
+    pub r#type: i32,
 }
 #[derive(serde::Serialize)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -1622,7 +1665,7 @@ pub struct SnowballParams {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DisabledStemmer {}
 #[derive(serde::Serialize)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct BoolIndexParams {
     /// Deprecated: use `memory` instead.
     /// If true - store index on disk.
@@ -1638,9 +1681,14 @@ pub struct BoolIndexParams {
     /// Overrides the deprecated `on_disk` flag if both are set.
     #[prost(enumeration = "Memory", optional, tag = "3")]
     pub memory: ::core::option::Option<i32>,
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field `offers\[\].price`.
+    /// The field must be inside the array's elements. `is_empty` on the field matches a point when one of
+    /// its elements lacks the field, and never a point without elements. Default: disabled.
+    #[prost(string, optional, tag = "4")]
+    pub nested: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(serde::Serialize)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DatetimeIndexParams {
     /// Deprecated: use `memory` instead.
     /// If true - store index on disk.
@@ -1660,9 +1708,14 @@ pub struct DatetimeIndexParams {
     /// Overrides the deprecated `on_disk` flag if both are set.
     #[prost(enumeration = "Memory", optional, tag = "4")]
     pub memory: ::core::option::Option<i32>,
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field `offers\[\].price`.
+    /// The field must be inside the array's elements. `is_empty` on the field matches a point when one of
+    /// its elements lacks the field, and never a point without elements. Default: disabled.
+    #[prost(string, optional, tag = "5")]
+    pub nested: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(serde::Serialize)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UuidIndexParams {
     /// If true - used for tenant optimization.
     #[prost(bool, optional, tag = "1")]
@@ -1681,6 +1734,11 @@ pub struct UuidIndexParams {
     /// Overrides the deprecated `on_disk` flag if both are set.
     #[prost(enumeration = "Memory", optional, tag = "4")]
     pub memory: ::core::option::Option<i32>,
+    /// Index every object of this array as a separate entry, e.g. `offers` for the field `offers\[\].price`.
+    /// The field must be inside the array's elements. `is_empty` on the field matches a point when one of
+    /// its elements lacks the field, and never a point without elements. Default: disabled.
+    #[prost(string, optional, tag = "5")]
+    pub nested: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(validator::Validate)]
 #[derive(serde::Serialize)]
@@ -1780,6 +1838,9 @@ pub struct CollectionInfo {
     /// Update queue info
     #[prost(message, optional, tag = "12")]
     pub update_queue: ::core::option::Option<UpdateQueueInfo>,
+    /// Time of the collection creation, absent for collections created before it was recorded
+    #[prost(message, optional, tag = "13")]
+    pub created_at: ::core::option::Option<::prost_wkt_types::Timestamp>,
 }
 #[derive(validator::Validate)]
 #[derive(serde::Serialize)]
@@ -2225,6 +2286,8 @@ pub enum Datatype {
     Uint8 = 2,
     Float16 = 3,
     Turbo4 = 4,
+    Turbo8 = 5,
+    Turbo16 = 6,
 }
 impl Datatype {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -2238,6 +2301,8 @@ impl Datatype {
             Self::Uint8 => "Uint8",
             Self::Float16 => "Float16",
             Self::Turbo4 => "Turbo4",
+            Self::Turbo8 => "Turbo8",
+            Self::Turbo16 => "Turbo16",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -2248,6 +2313,8 @@ impl Datatype {
             "Uint8" => Some(Self::Uint8),
             "Float16" => Some(Self::Float16),
             "Turbo4" => Some(Self::Turbo4),
+            "Turbo8" => Some(Self::Turbo8),
+            "Turbo16" => Some(Self::Turbo16),
             _ => None,
         }
     }
@@ -2568,6 +2635,7 @@ pub enum TurboQuantBitSize {
     Bits15 = 1,
     Bits2 = 2,
     Bits4 = 3,
+    Bits8 = 4,
 }
 impl TurboQuantBitSize {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -2580,6 +2648,7 @@ impl TurboQuantBitSize {
             Self::Bits15 => "Bits1_5",
             Self::Bits2 => "Bits2",
             Self::Bits4 => "Bits4",
+            Self::Bits8 => "Bits8",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -2589,6 +2658,7 @@ impl TurboQuantBitSize {
             "Bits1_5" => Some(Self::Bits15),
             "Bits2" => Some(Self::Bits2),
             "Bits4" => Some(Self::Bits4),
+            "Bits8" => Some(Self::Bits8),
             _ => None,
         }
     }
@@ -2631,6 +2701,7 @@ pub enum TokenizerType {
     Whitespace = 2,
     Word = 3,
     Multilingual = 4,
+    Code = 5,
 }
 impl TokenizerType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -2644,6 +2715,7 @@ impl TokenizerType {
             Self::Whitespace => "Whitespace",
             Self::Word => "Word",
             Self::Multilingual => "Multilingual",
+            Self::Code => "Code",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -2654,6 +2726,31 @@ impl TokenizerType {
             "Whitespace" => Some(Self::Whitespace),
             "Word" => Some(Self::Word),
             "Multilingual" => Some(Self::Multilingual),
+            "Code" => Some(Self::Code),
+            _ => None,
+        }
+    }
+}
+#[derive(serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum TextScoringType {
+    Bm25 = 0,
+}
+impl TextScoringType {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Bm25 => "Bm25",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "Bm25" => Some(Self::Bm25),
             _ => None,
         }
     }
@@ -5635,7 +5732,7 @@ pub struct DenseVectorCreationConfig {
     /// Configuration for multi-vector search (e.g., ColBERT)
     #[prost(message, optional, tag = "3")]
     pub multivector_config: ::core::option::Option<MultiVectorConfig>,
-    /// Data type of the vectors (Float32, Float16, Uint8, Turbo4)
+    /// Data type of the vectors (Float32, Float16, Uint8, Turbo4, Turbo8, Turbo16)
     #[prost(enumeration = "Datatype", optional, tag = "4")]
     pub datatype: ::core::option::Option<i32>,
 }
@@ -5877,8 +5974,8 @@ pub struct AcornSearchParams {
     #[validate(range(min = 0.0, max = 1.0))]
     pub max_selectivity: ::core::option::Option<f64>,
 }
-/// Population over which sparse vector IDF statistics are computed for scoring - the IDF corpus.
-/// Only applicable to sparse vectors with the IDF modifier enabled.
+/// Population over which IDF statistics are computed for scoring - the IDF corpus.
+/// Only applicable to sparse vectors with the IDF modifier enabled, and to BM25 over a text index.
 #[derive(validator::Validate)]
 #[derive(serde::Serialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -5914,7 +6011,7 @@ pub struct SearchParams {
     #[prost(message, optional, tag = "5")]
     #[validate(nested)]
     pub acorn: ::core::option::Option<AcornSearchParams>,
-    /// Which population sparse vector IDF statistics are computed over.
+    /// Which population IDF statistics are computed over.
     /// If unset, statistics are collection-wide (global).
     #[prost(message, optional, tag = "6")]
     #[validate(nested)]
@@ -6819,7 +6916,7 @@ pub struct Rrf {
 #[derive(serde::Serialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Query {
-    #[prost(oneof = "query::Variant", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11")]
+    #[prost(oneof = "query::Variant", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12")]
     #[validate(nested)]
     pub variant: ::core::option::Option<query::Variant>,
 }
@@ -6861,7 +6958,53 @@ pub mod query {
         /// Search with feedback from some oracle.
         #[prost(message, tag = "11")]
         RelevanceFeedback(super::RelevanceFeedbackInput),
+        /// Rank by BM25 over the text index of the payload field named by `using`.
+        #[prost(message, tag = "12")]
+        Text(super::TextQuery),
     }
+}
+/// Rank by BM25 over the text index of the payload field named by `using`,
+/// which must have `scoring` set. A point scores when it holds any of the
+/// query's terms: required or excluded terms belong in the request's filter.
+#[derive(validator::Validate)]
+#[derive(serde::Serialize)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TextQuery {
+    /// Text to search for, tokenized by the field's text index.
+    #[prost(string, tag = "1")]
+    pub query: ::prost::alloc::string::String,
+    /// Parameters of the scorer, keyed by its name. They must match the
+    /// `scoring` type of the field's text index. If absent, the scorer runs
+    /// with its defaults.
+    #[prost(oneof = "text_query::Scoring", tags = "2")]
+    #[validate(nested)]
+    pub scoring: ::core::option::Option<text_query::Scoring>,
+}
+/// Nested message and enum types in `TextQuery`.
+pub mod text_query {
+    /// Parameters of the scorer, keyed by its name. They must match the
+    /// `scoring` type of the field's text index. If absent, the scorer runs
+    /// with its defaults.
+    #[derive(serde::Serialize)]
+    #[derive(Clone, Copy, PartialEq, ::prost::Oneof)]
+    pub enum Scoring {
+        /// BM25 parameters, for a field scored with BM25.
+        #[prost(message, tag = "2")]
+        Bm25(super::Bm25Params),
+    }
+}
+#[derive(validator::Validate)]
+#[derive(serde::Serialize)]
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Bm25Params {
+    /// Term frequency saturation. Default is 1.2.
+    #[prost(float, optional, tag = "1")]
+    #[validate(range(min = 0.0))]
+    pub k: ::core::option::Option<f32>,
+    /// Document length normalization, from 0 (none) to 1 (full). Default is 0.75.
+    #[prost(float, optional, tag = "2")]
+    #[validate(range(min = 0.0, max = 1.0))]
+    pub b: ::core::option::Option<f32>,
 }
 #[derive(validator::Validate)]
 #[derive(serde::Serialize)]
@@ -6879,6 +7022,7 @@ pub struct PrefetchQuery {
     pub query: ::core::option::Option<Query>,
     /// Define which vector to use for querying.
     /// If missing, the default vector is used.
+    /// For a `text` query, the payload field whose text index to search.
     #[prost(string, optional, tag = "3")]
     pub using: ::core::option::Option<::prost::alloc::string::String>,
     /// Filter conditions - return only those points that satisfy the specified conditions.
@@ -6923,6 +7067,7 @@ pub struct QueryPoints {
     pub query: ::core::option::Option<Query>,
     /// Define which vector to use for querying.
     /// If missing, the default vector is used.
+    /// For a `text` query, the payload field whose text index to search.
     #[prost(string, optional, tag = "4")]
     pub using: ::core::option::Option<::prost::alloc::string::String>,
     /// Filter conditions - return only those points that satisfy the specified conditions.
@@ -7008,6 +7153,7 @@ pub struct QueryPointGroups {
     pub query: ::core::option::Option<Query>,
     /// Define which vector to use for querying.
     /// If missing, the default vector is used.
+    /// For a `text` query, the payload field whose text index to search.
     #[prost(string, optional, tag = "4")]
     pub using: ::core::option::Option<::prost::alloc::string::String>,
     /// Filter conditions - return only those points that satisfy the specified conditions.
@@ -11314,6 +11460,22 @@ pub struct MmrInternal {
 }
 #[derive(serde::Serialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TextScoringInternal {
+    /// Payload field with a text index
+    #[prost(string, tag = "1")]
+    pub field: ::prost::alloc::string::String,
+    /// Query text, tokenized on each shard by the field's tokenizer
+    #[prost(string, tag = "2")]
+    pub text: ::prost::alloc::string::String,
+    /// BM25 term frequency saturation
+    #[prost(float, tag = "3")]
+    pub k1: f32,
+    /// BM25 length normalization
+    #[prost(float, tag = "4")]
+    pub b: f32,
+}
+#[derive(serde::Serialize)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct QueryShardPoints {
     #[prost(message, repeated, tag = "1")]
     pub prefetch: ::prost::alloc::vec::Vec<query_shard_points::Prefetch>,
@@ -11342,7 +11504,7 @@ pub mod query_shard_points {
     #[derive(serde::Serialize)]
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct Query {
-        #[prost(oneof = "query::Score", tags = "1, 2, 3, 4, 5, 6, 7")]
+        #[prost(oneof = "query::Score", tags = "1, 2, 3, 4, 5, 6, 7, 8")]
         pub score: ::core::option::Option<query::Score>,
     }
     /// Nested message and enum types in `Query`.
@@ -11371,6 +11533,9 @@ pub mod query_shard_points {
             /// Parameterized RRF fusion
             #[prost(message, tag = "7")]
             Rrf(super::super::Rrf),
+            /// BM25 over the text index of a payload field
+            #[prost(message, tag = "8")]
+            Text(super::super::TextScoringInternal),
         }
     }
     #[derive(serde::Serialize)]

@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
+use chrono::{DateTime, Utc};
 use collection::config::{
     CollectionConfigInternal, CollectionParams, IdTrackerParams, PayloadStorageParams,
     ShardingMethod,
@@ -40,6 +41,11 @@ use crate::content_manager::shard_distribution::ShardDistributionProposal;
 
 pub(crate) static CREATE_CUSTOM_SHARDS_IN_INITIALIZING_STATE: LazyLock<semver::Version> =
     LazyLock::new(|| semver::Version::parse("1.14.2-dev").unwrap());
+
+/// First version that builds per-element (`nested`) payload indexes. Older peers would
+/// ignore the parameter and silently build a flattened index instead.
+pub static NESTED_PAYLOAD_INDEX_FROM_VERSION: LazyLock<semver::Version> =
+    LazyLock::new(|| semver::Version::parse("1.19.3-dev").unwrap());
 
 // *Operation wrapper structure is only required for better OpenAPI generation
 
@@ -126,7 +132,7 @@ pub struct CreateCollection {
     pub vectors: VectorsConfig,
     /// For auto sharding:
     /// Number of shards in collection.
-    ///  - Default is 1 for standalone, otherwise equal to the number of nodes
+    ///  - If not specified, selected automatically
     ///  - Minimum is 1
     ///
     /// For custom sharding:
@@ -200,6 +206,9 @@ pub struct CreateCollection {
     /// such as creation time, migration data, inference model info, etc.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Payload>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(skip)]
+    pub created_at: Option<DateTime<Utc>>,
 }
 
 /// Fill exactly one placement level, by precedence: request `memory`, request legacy `on_disk`,
@@ -573,6 +582,7 @@ impl From<CollectionConfigInternal> for CreateCollection {
             strict_mode_config,
             uuid,
             metadata,
+            created_at,
         } = value;
 
         let CollectionParams {
@@ -606,6 +616,7 @@ impl From<CollectionConfigInternal> for CreateCollection {
             strict_mode_config,
             uuid,
             metadata,
+            created_at,
         }
     }
 }

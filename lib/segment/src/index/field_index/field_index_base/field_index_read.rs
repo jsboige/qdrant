@@ -1,15 +1,18 @@
 use std::sync::atomic::AtomicBool;
 
-use common::counter::hardware_counter::HardwareCounterCell;
-use common::types::PointOffsetType;
+use common::types::{PointOffsetType, ScoredPointOffset};
 
 use super::payload_field_index::PayloadFieldIndexRead;
 use crate::common::operation_error::OperationResult;
-use crate::data_types::query_context::TextFieldStats;
+use crate::data_types::query_context::{TextFieldStats, TextQueryContext};
 use crate::index::field_index::facet_index::FacetIndex;
+use crate::index::field_index::full_text_index::{Bm25Accept, Bm25Params};
+use crate::index::field_index::nested_index::ElementConditionChecker;
 use crate::index::field_index::numeric_index::NumericFieldIndexRead;
 use crate::index::query_optimization::rescore_formula::value_retriever::VariableRetrieverFn;
+use crate::json_path::JsonPath;
 use crate::telemetry::PayloadIndexTelemetry;
+use crate::types::FieldCondition;
 
 /// Read-only access surface of [`FieldIndex`](super::FieldIndex).
 ///
@@ -57,10 +60,7 @@ pub trait FieldIndexRead: PayloadFieldIndexRead {
     /// Used by rescore-formula value lookup; mirrors the shape of
     /// [`PayloadFieldIndexRead::condition_checker`] (build a closure
     /// once, invoke per point).
-    fn value_retriever<'a, 'q>(
-        &'a self,
-        hw_counter: &'q HardwareCounterCell,
-    ) -> OperationResult<Option<VariableRetrieverFn<'q>>>
+    fn value_retriever<'a, 'q>(&'a self) -> OperationResult<Option<VariableRetrieverFn<'q>>>
     where
         'a: 'q;
 
@@ -72,14 +72,27 @@ pub trait FieldIndexRead: PayloadFieldIndexRead {
     /// [`PayloadIndexRead::numeric_index_for`]: crate::index::PayloadIndexRead::numeric_index_for
     fn as_numeric(&self) -> Option<impl NumericFieldIndexRead + '_>;
 
-    /// Add this index's text statistics to `stats`, and report whether it is
-    /// a text index at all.
+    /// Add this index's text statistics to `stats`, counting only the
+    /// `corpus` points when given, and report whether it is a text index at
+    /// all.
     fn fill_text_statistics(
         &self,
         stats: &mut TextFieldStats,
+        corpus: Option<&[PointOffsetType]>,
         is_stopped: &AtomicBool,
-        hw_counter: &HardwareCounterCell,
     ) -> OperationResult<bool>;
+
+    /// Score `terms` by BM25 against this index and return the `limit` best
+    /// documents, or `None` when it is not a text index. See
+    /// [`score_bm25`](crate::index::field_index::full_text_index::full_text_index_read::score_bm25).
+    fn score_bm25(
+        &self,
+        terms: &[String],
+        context: &TextQueryContext<'_>,
+        params: Bm25Params,
+        accept: &Bm25Accept<'_>,
+        limit: usize,
+    ) -> OperationResult<Option<Vec<ScoredPointOffset>>>;
 
     /// Borrowed facet view, if this index supports faceting.
     ///
@@ -88,4 +101,14 @@ pub trait FieldIndexRead: PayloadFieldIndexRead {
     ///
     /// [`PayloadIndexRead::facet_index_for`]: crate::index::PayloadIndexRead::facet_index_for
     fn as_facet_index(&self) -> Option<impl FacetIndex + '_>;
+
+    /// Checker of `condition` over the elements of the `array_key` array, if this is a
+    /// per-element index of it that can serve the condition.
+    ///
+    /// The condition key is the full path of the field, e.g. `offers[].price`.
+    fn element_condition_checker<'a>(
+        &'a self,
+        array_key: &JsonPath,
+        condition: &FieldCondition,
+    ) -> OperationResult<Option<ElementConditionChecker<'a>>>;
 }

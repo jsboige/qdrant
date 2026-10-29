@@ -424,6 +424,121 @@ fn update_collection_replica_changes() {
 }
 
 #[test]
+fn update_collection_replica_change_aborts_transfer_before_removal() {
+    let mut operation = UpdateCollectionOperation::new_empty(COLLECTION.into());
+    operation.set_shard_replica_changes(vec![replica_set::Change::Remove(0, OTHER_PEER_ID)]);
+
+    let mut state = transfer_state();
+    let transfer = shard_transfer(
+        PEER_ID,
+        OTHER_PEER_ID,
+        false,
+        ShardTransferMethod::StreamRecords,
+    );
+    let collection = state.collections.get_mut(COLLECTION).expect("collection");
+    collection
+        .shards
+        .get_mut(&0)
+        .expect("shard")
+        .replicas
+        .insert(OTHER_PEER_ID, ReplicaState::Partial);
+    collection.transfers.insert(transfer);
+
+    let mut machine = state_machine(state);
+    let outcome = machine.apply(&collection_meta_op(
+        CollectionMetaOperations::UpdateCollection(operation),
+    ));
+
+    let ApplyOutcome::Accepted(actions) = outcome else {
+        panic!("removing a transfer destination should be accepted, got {outcome:?}");
+    };
+    assert!(matches!(
+        actions.as_slice(),
+        [
+            Action::StopTransferDriver { .. },
+            Action::RevertProxyShard { .. },
+            Action::UnregisterTransfer { .. },
+            Action::RemoveReplica {
+                shard_id: 0,
+                peer_id: OTHER_PEER_ID,
+                ..
+            },
+        ]
+    ));
+}
+
+#[test]
+fn update_collection_replica_change_guard_rejects_partial_replay() {
+    for sync in [false, true] {
+        for source_state in [ReplicaState::Initializing, ReplicaState::Active] {
+            update_collection_replica_change_guard_rejects_partial_replay_case(sync, source_state);
+        }
+    }
+}
+
+fn update_collection_replica_change_guard_rejects_partial_replay_case(
+    sync: bool,
+    source_state: ReplicaState,
+) {
+    let mut state = transfer_state();
+    let transfer = shard_transfer(PEER_ID, OTHER_PEER_ID, sync, ShardTransferMethod::Snapshot);
+    let collection = state.collections.get_mut(COLLECTION).expect("collection");
+    collection.shards.get_mut(&0).expect("shard").replicas = HashMap::from([
+        (PEER_ID, source_state),
+        (OTHER_PEER_ID, ReplicaState::Active),
+    ]);
+    collection.transfers.insert(transfer);
+
+    let mut operation = UpdateCollectionOperation::new_empty(COLLECTION.into());
+    operation.set_shard_replica_changes(vec![replica_set::Change::Remove(0, PEER_ID)]);
+    let operation = collection_meta_op(CollectionMetaOperations::UpdateCollection(operation));
+    let mut machine = state_machine(state.clone());
+    let ApplyOutcome::Accepted(actions) = machine.apply(&operation) else {
+        panic!("removing a replica with another active replica should be accepted");
+    };
+    let goal = machine.state().clone();
+
+    let mut partial_rejections = 0;
+    for crash_after in 0..=actions.len() {
+        let mut crashed = state.clone();
+        for action in &actions[..crash_after] {
+            crashed.apply_action(action);
+        }
+        let reached_goal = crashed == goal;
+        let mut replay = state_machine(crashed);
+        match replay.apply(&operation) {
+            ApplyOutcome::Accepted(_) => assert_eq!(replay.state(), &goal),
+            ApplyOutcome::Rejected(error) if !reached_goal => {
+                partial_rejections += 1;
+                assert!(super::replay::replica_removal_guard_may_reject(
+                    &state,
+                    &operation,
+                    &actions[..crash_after],
+                    &error,
+                ));
+                assert!(!super::replay::replica_removal_guard_may_reject(
+                    &state,
+                    &operation,
+                    &actions[..1],
+                    &error,
+                ));
+                let unrelated_error =
+                    StorageError::bad_request(format!("Peer {PEER_ID} has no replica of shard 0"));
+                assert!(!super::replay::replica_removal_guard_may_reject(
+                    &state,
+                    &operation,
+                    &actions[..crash_after],
+                    &unrelated_error,
+                ));
+            }
+            ApplyOutcome::Rejected(_) => {}
+            ApplyOutcome::NotCovered => panic!("replica removal should be covered"),
+        }
+    }
+    assert_eq!(partial_rejections, 3);
+}
+
+#[test]
 fn update_collection_replica_change_order() {
     let mut operation = UpdateCollectionOperation::new_empty(COLLECTION.into());
     operation.update_collection.hnsw_config = Some(hnsw_diff(8));
@@ -1008,6 +1123,70 @@ fn resharding_start_up_replay() {
 
     assert!(actions.is_empty());
     assert_eq!(machine.state(), &goal);
+}
+
+#[test]
+fn resharding_start_up_reject_missing_shard_key() {
+    let shard_key = ShardKey::from("north");
+    let mut state = custom_sharding_state();
+    add_shard_key(&mut state, shard_key.clone(), &[1]);
+    add_shard_key(&mut state, "south".into(), &[2]);
+
+    let mut key = resharding_key(ReshardingDirection::Up, 3);
+    key.shard_key = Some(shard_key.clone());
+
+    let mut machine = state_machine(state);
+    let outcome = machine.apply(&drop_shard_key_op(shard_key));
+    assert!(matches!(outcome, ApplyOutcome::Accepted(_)));
+    let state = machine.state().clone();
+
+    let outcome = machine.apply(&resharding_op(ReshardingOperation::Start(key)));
+
+    assert!(matches!(
+        outcome,
+        ApplyOutcome::Rejected(StorageError::BadRequest { ref description })
+            if description == "\"north\" hashring does not exist"
+    ));
+    assert_eq!(machine.state(), &state);
+}
+
+#[test]
+fn resharding_start_up_custom_shard_key_replay() {
+    let shard_key = ShardKey::from("north");
+    let mut state = custom_sharding_state();
+    add_shard_key(&mut state, shard_key.clone(), &[1]);
+
+    let mut key = resharding_key(ReshardingDirection::Up, 2);
+    key.shard_key = Some(shard_key);
+    let operation = resharding_op(ReshardingOperation::Start(key));
+
+    let mut machine = state_machine(state.clone());
+    let outcome = machine.apply(&operation);
+    let ApplyOutcome::Accepted(actions) = outcome else {
+        panic!("starting custom scale-up resharding should be accepted, got {outcome:?}");
+    };
+    let goal = machine.state().clone();
+
+    assert!(matches!(
+        actions.as_slice(),
+        [
+            Action::CreateAndRegisterShards { .. },
+            Action::SetReshardingState { .. },
+        ]
+    ));
+
+    for cut in 0..=actions.len() {
+        let mut partial = state.clone();
+        for action in &actions[..cut] {
+            partial.apply_action(action);
+        }
+
+        let mut replay = state_machine(partial);
+        let outcome = replay.apply(&operation);
+
+        assert!(matches!(outcome, ApplyOutcome::Accepted(_)), "{outcome:?}");
+        assert_eq!(replay.state(), &goal);
+    }
 }
 
 #[test]
@@ -2525,6 +2704,254 @@ fn drop_payload_index_missing() {
     ));
 
     assert_eq!(machine.state(), &state);
+}
+
+#[test]
+fn add_peer_operation() {
+    let mut machine = state_machine(ClusterState::default());
+    let outcome = machine.apply(&ConsensusOperations::AddPeer {
+        peer_id: PEER_ID,
+        uri: "http://peer-42".into(),
+    });
+
+    let ApplyOutcome::Accepted(actions) = outcome else {
+        panic!("adding a peer should be accepted, got {outcome:?}");
+    };
+    assert!(matches!(
+        actions.as_slice(),
+        [Action::AddPeer {
+            peer_id: PEER_ID,
+            ..
+        }]
+    ));
+    assert_eq!(
+        machine.state().peer_address_by_id[&PEER_ID].to_string(),
+        "http://peer-42/",
+    );
+}
+
+#[test]
+fn add_peer_replay() {
+    let mut state = ClusterState::default();
+    add_peer(&mut state, PEER_ID, None);
+
+    let mut machine = state_machine(state.clone());
+    let outcome = machine.apply(&ConsensusOperations::AddPeer {
+        peer_id: PEER_ID,
+        uri: "http://peer-42/".into(),
+    });
+
+    let ApplyOutcome::Accepted(actions) = outcome else {
+        panic!("re-adding a peer should be accepted, got {outcome:?}");
+    };
+    assert!(actions.is_empty());
+    assert_eq!(machine.state(), &state);
+}
+
+#[test]
+fn remove_peer_operation() {
+    let mut state = auto_resharding_state(1);
+    add_peer(&mut state, OTHER_PEER_ID, Some("1.18.0"));
+    state
+        .collections
+        .get_mut(COLLECTION)
+        .expect("collection")
+        .shards
+        .get_mut(&0)
+        .expect("shard")
+        .replicas = HashMap::from([(OTHER_PEER_ID, ReplicaState::Active)]);
+
+    let mut machine = state_machine(state);
+    let outcome = machine.apply(&ConsensusOperations::RemovePeer(OTHER_PEER_ID));
+
+    let ApplyOutcome::Accepted(actions) = outcome else {
+        panic!("removing a peer should be accepted, got {outcome:?}");
+    };
+    assert!(matches!(
+        actions.as_slice(),
+        [
+            Action::RemoveReplica {
+                peer_id: OTHER_PEER_ID,
+                ..
+            },
+            Action::RemovePeer {
+                peer_id: OTHER_PEER_ID,
+            },
+        ]
+    ));
+
+    let state = machine.state();
+    assert!(!state.peer_address_by_id.contains_key(&OTHER_PEER_ID));
+    assert!(!state.peer_metadata_by_id.contains_key(&OTHER_PEER_ID));
+    assert!(
+        !state.collection(COLLECTION).expect("collection").shards[&0]
+            .replicas
+            .contains_key(&OTHER_PEER_ID)
+    );
+}
+
+#[test]
+fn remove_peer_aborts_transfer_before_replica() {
+    let mut state = transfer_state();
+    let transfer = shard_transfer(
+        PEER_ID,
+        OTHER_PEER_ID,
+        true,
+        ShardTransferMethod::StreamRecords,
+    );
+    let collection = state.collections.get_mut(COLLECTION).expect("collection");
+    collection
+        .shards
+        .get_mut(&0)
+        .expect("shard")
+        .replicas
+        .insert(OTHER_PEER_ID, ReplicaState::Partial);
+    collection.transfers.insert(transfer);
+
+    let mut machine = state_machine(state);
+    let outcome = machine.apply(&ConsensusOperations::RemovePeer(OTHER_PEER_ID));
+
+    let ApplyOutcome::Accepted(actions) = outcome else {
+        panic!("removing a transferring peer should be accepted, got {outcome:?}");
+    };
+    let unregister = actions
+        .iter()
+        .position(|action| matches!(action, Action::UnregisterTransfer { .. }))
+        .expect("transfer unregistered");
+    let remove_replica = actions
+        .iter()
+        .position(|action| matches!(action, Action::RemoveReplica { .. }))
+        .expect("replica removed");
+    let remove_peer = actions
+        .iter()
+        .position(|action| matches!(action, Action::RemovePeer { .. }))
+        .expect("peer removed");
+    assert!(unregister < remove_replica);
+    assert!(remove_replica < remove_peer);
+}
+
+#[test]
+fn remove_peer_aborts_related_resharding_transfers() {
+    let mut state = auto_resharding_state(3);
+    add_peer(&mut state, OTHER_PEER_ID, Some("1.18.0"));
+    let resharding = ReshardState::new(Uuid::nil(), ReshardingDirection::Up, PEER_ID, 2, None);
+    let transfers: Vec<_> = (0..2)
+        .map(|shard_id| ShardTransfer {
+            shard_id,
+            to_shard_id: Some(2),
+            from: PEER_ID,
+            to: OTHER_PEER_ID,
+            sync: true,
+            method: Some(ShardTransferMethod::ReshardingStreamRecords),
+            filter: None,
+        })
+        .collect();
+    let collection = state.collections.get_mut(COLLECTION).expect("collection");
+    collection.resharding = Some(resharding);
+    collection.shards.get_mut(&2).expect("shard").replicas =
+        HashMap::from([(OTHER_PEER_ID, ReplicaState::Resharding)]);
+    collection.transfers.extend(transfers.iter().cloned());
+
+    let mut machine = state_machine(state);
+    let outcome = machine.apply(&ConsensusOperations::RemovePeer(OTHER_PEER_ID));
+
+    let ApplyOutcome::Accepted(actions) = outcome else {
+        panic!("removing a resharding transfer peer should be accepted, got {outcome:?}");
+    };
+
+    for transfer in transfers {
+        let unregister_count = actions
+            .iter()
+            .filter(|action| {
+                matches!(action, Action::UnregisterTransfer { key, .. } if *key == transfer.key())
+            })
+            .count();
+        assert_eq!(unregister_count, 1);
+    }
+    assert!(matches!(
+        actions.last(),
+        Some(Action::RemovePeer {
+            peer_id: OTHER_PEER_ID
+        })
+    ));
+
+    let state = machine.state();
+    let collection = state.collection(COLLECTION).expect("collection");
+    assert!(collection.resharding.is_none());
+    assert!(collection.transfers.is_empty());
+    assert_eq!(collection.config.params.shard_number.get(), 2);
+    assert_eq!(collection.shards.len(), 2);
+    assert!(
+        collection
+            .shards
+            .values()
+            .all(|shard| { shard.replicas == HashMap::from([(PEER_ID, ReplicaState::Active)]) })
+    );
+    assert!(!state.peer_address_by_id.contains_key(&OTHER_PEER_ID));
+    assert!(!state.peer_metadata_by_id.contains_key(&OTHER_PEER_ID));
+}
+
+#[test]
+fn remove_peer_force_aborts_resharding() {
+    let mut state = auto_resharding_state(2);
+    add_peer(&mut state, OTHER_PEER_ID, Some("1.18.0"));
+    let mut resharding =
+        ReshardState::new(Uuid::nil(), ReshardingDirection::Up, OTHER_PEER_ID, 1, None);
+    resharding.stage = ReshardingStage::ReadHashRingCommitted;
+    state
+        .collections
+        .get_mut(COLLECTION)
+        .expect("collection")
+        .resharding = Some(resharding);
+
+    let mut machine = state_machine(state);
+    let outcome = machine.apply(&ConsensusOperations::RemovePeer(OTHER_PEER_ID));
+
+    let ApplyOutcome::Accepted(actions) = outcome else {
+        panic!("removing a resharding peer should be accepted, got {outcome:?}");
+    };
+    assert!(
+        actions
+            .iter()
+            .any(|action| matches!(action, Action::SetReshardingState { state: None, .. }))
+    );
+    assert!(matches!(
+        actions.last(),
+        Some(Action::RemovePeer {
+            peer_id: OTHER_PEER_ID,
+        })
+    ));
+    assert!(
+        machine
+            .state()
+            .collection(COLLECTION)
+            .expect("collection")
+            .resharding
+            .is_none()
+    );
+}
+
+#[test]
+fn remove_peer_replay() {
+    let mut state = ClusterState::default();
+    add_peer(&mut state, OTHER_PEER_ID, Some("1.18.0"));
+    let operation = ConsensusOperations::RemovePeer(OTHER_PEER_ID);
+    let mut machine = state_machine(state);
+    machine.apply(&operation);
+    let goal = machine.state().clone();
+
+    let outcome = machine.apply(&operation);
+
+    let ApplyOutcome::Accepted(actions) = outcome else {
+        panic!("replaying peer removal should be accepted, got {outcome:?}");
+    };
+    assert!(matches!(
+        actions.as_slice(),
+        [Action::RemovePeer {
+            peer_id: OTHER_PEER_ID,
+        }]
+    ));
+    assert_eq!(machine.state(), &goal);
 }
 
 #[test]

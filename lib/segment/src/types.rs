@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use ahash::AHashSet;
 use bytemuck::{Pod, Zeroable};
+use chrono::SubsecRound as _;
 use common::raw_bytes_serde;
 use common::stable_hash::StableHash;
 use common::types::{PointOffsetType, ScoreType};
@@ -48,7 +49,7 @@ use crate::data_types::tiny_map::TinyMap;
 use crate::data_types::vectors::{DenseVector, VectorStructInternal};
 use crate::index::field_index::CardinalityEstimation;
 use crate::index::sparse_index::sparse_index_config::SparseIndexConfig;
-use crate::json_path::JsonPath;
+use crate::json_path::{JsonPath, JsonPathItem};
 use crate::spaces::metric::{Metric, MetricPostProcessing};
 use crate::spaces::simple::{CosineMetric, DotProductMetric, EuclidMetric, ManhattanMetric};
 use crate::types::utils::unordered_hash_unique;
@@ -74,6 +75,10 @@ pub type VectorName = str;
 pub type VectorNameBuf = String;
 
 /// Wraps `DateTime<Utc>` to allow more flexible deserialization
+///
+/// Qdrant supports datetimes with microsecond precision. Constructing through [`From`],
+/// [`FromStr`] or deserialization truncates anything below a microsecond, so that filtering
+/// gives the same result with and without a payload index.
 #[derive(Clone, Copy, Serialize, JsonSchema, Debug, PartialEq, Eq, PartialOrd, Hash)]
 #[serde(transparent)]
 pub struct DateTimeWrapper(pub chrono::DateTime<chrono::Utc>);
@@ -156,8 +161,9 @@ impl Display for DateTimePayloadType {
 }
 
 impl From<chrono::DateTime<chrono::Utc>> for DateTimePayloadType {
+    /// Truncates to microseconds, matching [`DateTimeWrapper::timestamp`]
     fn from(dt: chrono::DateTime<chrono::Utc>) -> Self {
-        DateTimeWrapper(dt)
+        DateTimeWrapper(dt.trunc_subsecs(6))
     }
 }
 
@@ -409,6 +415,25 @@ pub struct ScoredPoint {
     pub shard_key: Option<ShardKey>,
     /// Order-by value
     pub order_value: Option<OrderValue>,
+    /// Where the segment that scored this point holds it, if a search of
+    /// this process found it there.
+    pub location: Option<ScoredPointLocation>,
+}
+
+/// Where a segment holds a point its search returned: valid only in the
+/// process that searched it, for reading the point back by offset.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScoredPointLocation {
+    pub segment: Uuid,
+    pub offset: PointOffsetType,
+}
+
+/// A point to read from a segment by its offset, expected there at `version`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PointAtOffset {
+    pub id: PointIdType,
+    pub offset: PointOffsetType,
+    pub version: SeqNumberType,
 }
 
 impl Eq for ScoredPoint {}
@@ -682,22 +707,24 @@ pub struct SearchParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acorn: Option<AcornSearchParams>,
 
-    /// Which population sparse vector IDF statistics are computed over.
+    /// Which population IDF statistics are computed over.
     /// By default (or with explicit `"global"`) statistics are collection-wide.
-    /// Only applicable to sparse vectors with the IDF modifier enabled.
+    /// Only applicable to sparse vectors with the IDF modifier enabled, and to
+    /// BM25 over a text index.
     #[serde(default)]
     #[validate(nested)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idf: Option<IdfParams>,
 }
 
-/// Population over which sparse vector IDF statistics are computed for scoring —
-/// the *IDF corpus*.
+/// Population over which IDF statistics are computed for scoring — the *IDF
+/// corpus*.
 ///
 /// - `"global"` — collection-wide statistics, same as omitting the parameter.
 /// - `{ "corpus": <filter> }` — document count and per-term document frequencies
-///   are computed over the points matching the corpus filter only. The corpus is
-///   independent of the retrieval filter and is usually broader than it.
+///   (and, for BM25 over a text index, the average document length) are computed
+///   over the points matching the corpus filter only. The corpus is independent
+///   of the retrieval filter and is usually broader than it.
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Clone, PartialEq, Eq, Hash)]
 #[serde(untagged)]
 pub enum IdfParams {
@@ -799,10 +826,10 @@ impl Indexes {
         }
     }
 
-    pub fn is_on_disk(&self) -> bool {
+    pub fn is_cold(&self) -> bool {
         match self {
             Indexes::Plain {} => false,
-            Indexes::Hnsw(config) => config.memory_placement().is_on_disk(),
+            Indexes::Hnsw(config) => config.memory_placement().is_cold(),
         }
     }
 }
@@ -815,6 +842,9 @@ impl Indexes {
 #[anonymize(false)]
 pub struct HnswConfig {
     /// Number of edges per node in the index graph. Larger the value - more accurate the search, more space required.
+    /// Set to 0 to disable the main HNSW graph. Additional payload-aware links
+    /// may still be built when the effective payload M is positive (see payload_m).
+    /// This setting alone does not guarantee exact search.
     pub m: usize,
     /// Number of neighbours to consider during the index building. Larger the value - more accurate the search, more time required to build index.
     #[validate(range(min = 4))]
@@ -842,7 +872,9 @@ pub struct HnswConfig {
     /// set. Default: `cached` (`cold` if `on_disk` is set to true).
     #[serde(default, skip_serializing_if = "Option::is_none")] // Better backward compatibility
     pub memory: Option<Memory>,
-    /// Custom M param for hnsw graph built for payload index. If not set, default M will be used.
+    /// Number of additional payload-aware links per node. If unset, the value of m is used.
+    /// An effective value of 0 disables these additional links. A positive value allows
+    /// them for indexed payload fields with HNSW enabled, even when m is 0.
     #[serde(default, skip_serializing_if = "Option::is_none")] // Better backward compatibility
     pub payload_m: Option<usize>,
     /// Store copies of original and quantized vectors within the HNSW index file. Default: false.
@@ -1086,6 +1118,7 @@ pub enum TurboQuantBitSize {
     Bits2,
     #[default]
     Bits4,
+    Bits8,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize, JsonSchema, Validate)]
@@ -1709,7 +1742,7 @@ impl PayloadStorageType {
         }
     }
 
-    pub fn is_on_disk(&self) -> bool {
+    pub fn is_cold(&self) -> bool {
         match self {
             PayloadStorageType::Mmap => true,
             PayloadStorageType::InRamMmap => false,
@@ -1720,9 +1753,9 @@ impl PayloadStorageType {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema, Anonymize)]
 #[serde(rename_all = "snake_case")]
 pub struct SegmentConfig {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_vector_name_map")]
     pub vector_data: HashMap<VectorNameBuf, VectorDataConfig>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_vector_name_map")]
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub sparse_vector_data: HashMap<VectorNameBuf, SparseVectorDataConfig>,
     /// Defines payload storage type
@@ -1731,6 +1764,23 @@ pub struct SegmentConfig {
     /// default: `cold` in serverless-compatible mode, `pinned` otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id_tracker_memory: Option<Memory>,
+}
+
+/// Reject vector names that would escape the segment directory, see
+/// [`crate::segment_constructor::check_vector_name_path`]. Covers every reader of `segment.json`.
+fn deserialize_vector_name_map<'de, D, V>(
+    deserializer: D,
+) -> Result<HashMap<VectorNameBuf, V>, D::Error>
+where
+    D: Deserializer<'de>,
+    V: Deserialize<'de>,
+{
+    let map = HashMap::<VectorNameBuf, V>::deserialize(deserializer)?;
+    for name in map.keys() {
+        crate::segment_constructor::check_vector_name_path(name)
+            .map_err(serde::de::Error::custom)?;
+    }
+    Ok(map)
 }
 
 impl SegmentConfig {
@@ -1771,11 +1821,11 @@ impl SegmentConfig {
 
     /// Check if any vector storage is on-disk
     pub fn is_any_on_disk(&self) -> bool {
-        self.vector_data.values().any(|config| config.is_on_disk())
+        self.vector_data.values().any(|config| config.is_cold())
             || self
                 .sparse_vector_data
                 .values()
-                .any(|config| config.index.index_type.is_on_disk())
+                .any(|config| config.index.index_type.is_mmap())
     }
 
     pub fn is_appendable(&self) -> bool {
@@ -1902,14 +1952,6 @@ impl Memory {
     /// in-RAM data is fully materialized on heap and never evicted.
     pub fn from_on_disk_heap(on_disk: bool) -> Self {
         if on_disk { Self::Cold } else { Self::Pinned }
-    }
-
-    /// Whether this placement corresponds to `on_disk = true` in the legacy options.
-    pub fn is_on_disk(self) -> bool {
-        match self {
-            Self::Cold => true,
-            Self::Cached | Self::Pinned => false,
-        }
     }
 
     /// Whether data is left on disk and paged in on demand, rather than held in RAM. Reads of
@@ -2061,6 +2103,10 @@ pub enum VectorStorageDatatype {
     Uint8,
     // TurboQuant 4-bit compressed storage
     Turbo4,
+    // TurboQuant 8-bit compressed storage
+    Turbo8,
+    // TurboQuant 16-bit compressed storage
+    Turbo16,
 }
 
 #[derive(
@@ -2281,8 +2327,8 @@ impl VectorDataConfig {
         }
     }
 
-    pub fn is_on_disk(&self) -> bool {
-        self.storage_memory().is_on_disk()
+    pub fn is_cold(&self) -> bool {
+        self.storage_memory().is_cold()
     }
 }
 
@@ -2297,8 +2343,8 @@ pub enum SparseVectorStorageType {
 }
 
 impl SparseVectorStorageType {
-    /// Whether this storage type is a mmap on disk
-    pub fn is_on_disk(&self) -> bool {
+    /// Whether this storage type is left on disk, see [`Memory::is_cold`]
+    pub fn is_cold(&self) -> bool {
         match self {
             // On disk; kept explicit for the case if someone adds a new storage
             // type in the future.
@@ -2724,8 +2770,8 @@ impl PayloadSchemaParams {
         }
     }
 
-    pub fn is_on_disk(&self) -> bool {
-        self.memory_placement().is_on_disk()
+    pub fn is_cold(&self) -> bool {
+        self.memory_placement().is_cold()
     }
 
     /// Effective memory placement of the field index, resolving the new `memory` parameter
@@ -2744,6 +2790,35 @@ impl PayloadSchemaParams {
             PayloadSchemaParams::Bool(i) => (i.memory, i.on_disk),
         };
         Memory::resolve(memory, on_disk.map(Memory::from_on_disk_heap)).unwrap_or(Memory::Pinned)
+    }
+
+    /// Path to the array whose elements this index treats as separate entries, if any.
+    ///
+    /// Stored as the array key, e.g. `offers[]`, see [`PayloadFieldSchema::normalized`].
+    pub fn nested(&self) -> Option<&JsonPath> {
+        match self {
+            PayloadSchemaParams::Keyword(params) => params.nested.as_ref(),
+            PayloadSchemaParams::Integer(params) => params.nested.as_ref(),
+            PayloadSchemaParams::Float(params) => params.nested.as_ref(),
+            PayloadSchemaParams::Datetime(params) => params.nested.as_ref(),
+            PayloadSchemaParams::Uuid(params) => params.nested.as_ref(),
+            PayloadSchemaParams::Geo(params) => params.nested.as_ref(),
+            PayloadSchemaParams::Bool(params) => params.nested.as_ref(),
+            PayloadSchemaParams::Text(params) => params.nested.as_ref(),
+        }
+    }
+
+    pub(crate) fn nested_mut(&mut self) -> &mut Option<JsonPath> {
+        match self {
+            PayloadSchemaParams::Keyword(params) => &mut params.nested,
+            PayloadSchemaParams::Integer(params) => &mut params.nested,
+            PayloadSchemaParams::Float(params) => &mut params.nested,
+            PayloadSchemaParams::Datetime(params) => &mut params.nested,
+            PayloadSchemaParams::Uuid(params) => &mut params.nested,
+            PayloadSchemaParams::Geo(params) => &mut params.nested,
+            PayloadSchemaParams::Bool(params) => &mut params.nested,
+            PayloadSchemaParams::Text(params) => &mut params.nested,
+        }
     }
 
     pub fn enable_hnsw(&self) -> bool {
@@ -2870,6 +2945,56 @@ impl TryFrom<&PayloadFieldSchema> for TextIndexParams {
 }
 
 impl PayloadFieldSchema {
+    /// Store `nested` as its array key, so `offers` and `offers[]` give the same
+    /// schema. A schema is normalized once, as the collection stores it, so every node
+    /// and every segment sees the same params.
+    pub fn normalized(self) -> Self {
+        match self {
+            PayloadFieldSchema::FieldParams(mut params) => {
+                let nested = params.nested_mut();
+                *nested = nested.as_ref().map(JsonPath::array_key);
+                PayloadFieldSchema::FieldParams(params)
+            }
+            schema @ PayloadFieldSchema::FieldType(_) => schema,
+        }
+    }
+
+    /// Path to the array whose elements this index treats as separate entries, if any.
+    /// See [`PayloadSchemaParams::nested`].
+    pub fn nested(&self) -> Option<&JsonPath> {
+        match self {
+            PayloadFieldSchema::FieldType(_) => None,
+            PayloadFieldSchema::FieldParams(params) => params.nested(),
+        }
+    }
+
+    /// Check that `field` can be indexed with this schema: a per-element index needs
+    /// `field` inside the elements of its single-level `nested` array, and can't be a
+    /// tenant index.
+    pub fn validate_for_field(&self, field: &JsonPath) -> Result<(), String> {
+        let Some(nested) = self.nested() else {
+            return Ok(());
+        };
+        let array_key = nested.array_key();
+        if !is_single_array_level(&array_key.rest) {
+            return Err(format!(
+                "nested `{nested}` must point to a single array level, like `offers` or `offers[]`",
+            ));
+        }
+        if field.strip_prefix(&array_key).is_none() {
+            return Err(format!(
+                "field `{field}` must be inside the elements of nested `{nested}`, \
+                 like `{array_key}.price`",
+            ));
+        }
+        if self.expand().tenant_optimization() {
+            return Err(format!(
+                "nested `{nested}` can't be combined with `is_tenant` or `is_principal`",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn expand(&self) -> Cow<'_, PayloadSchemaParams> {
         match self {
             PayloadFieldSchema::FieldType(t) => Cow::Owned(t.expand()),
@@ -2892,10 +3017,10 @@ impl PayloadFieldSchema {
         }
     }
 
-    pub fn is_on_disk(&self) -> bool {
+    pub fn is_cold(&self) -> bool {
         match self {
             PayloadFieldSchema::FieldType(_) => false,
-            PayloadFieldSchema::FieldParams(params) => params.is_on_disk(),
+            PayloadFieldSchema::FieldParams(params) => params.is_cold(),
         }
     }
 
@@ -2955,6 +3080,25 @@ impl From<PayloadSchemaType> for PayloadFieldSchema {
     fn from(payload_schema_type: PayloadSchemaType) -> Self {
         PayloadFieldSchema::FieldType(payload_schema_type)
     }
+}
+
+#[cfg(test)]
+impl PayloadFieldSchema {
+    /// This schema, normalized, as a per-element index of the `nested` array.
+    pub(crate) fn nested_in(self, nested: &str) -> Self {
+        let mut params = self.expand().into_owned();
+        *params.nested_mut() = Some(nested.parse().unwrap());
+        PayloadFieldSchema::FieldParams(params).normalized()
+    }
+}
+
+/// Whether the path `items` go through exactly one array.
+fn is_single_array_level(items: &[JsonPathItem]) -> bool {
+    let arrays = items.iter().filter(|item| match item {
+        JsonPathItem::Key(_) => false,
+        JsonPathItem::Index(_) | JsonPathItem::WildcardIndex => true,
+    });
+    arrays.count() == 1
 }
 
 impl TryFrom<PayloadIndexInfo> for PayloadFieldSchema {
@@ -4885,9 +5029,9 @@ mod tests {
         assert_eq!(Memory::from_on_disk_heap(true), Memory::Cold);
         assert_eq!(Memory::from_on_disk_heap(false), Memory::Pinned);
 
-        assert!(Memory::Cold.is_on_disk());
-        assert!(!Memory::Cached.is_on_disk());
-        assert!(!Memory::Pinned.is_on_disk());
+        assert!(Memory::Cold.is_cold());
+        assert!(!Memory::Cached.is_cold());
+        assert!(!Memory::Pinned.is_cold());
 
         assert!(!Memory::Cold.is_heap());
         assert!(!Memory::Cached.is_heap());
@@ -5141,6 +5285,33 @@ mod tests {
         assert_eq!(datetime.timestamp(), datetime_no_z.timestamp());
     }
 
+    /// Sub-microsecond digits must be truncated on parse, so that range filters give the same
+    /// result with and without a payload index. See: <https://github.com/qdrant/qdrant/issues/11087>
+    #[rstest]
+    #[case::one_nano("2024-01-01T00:00:00.000000001Z", "2024-01-01T00:00:00Z")]
+    #[case::nanos("2024-01-01T00:00:00.123456789Z", "2024-01-01T00:00:00.123456Z")]
+    #[case::without_z("2024-01-01T00:00:00.123456789", "2024-01-01T00:00:00.123456")]
+    #[case::with_tz("2024-01-01T01:00:00.123456789+01:00", "2024-01-01T00:00:00.123456Z")]
+    #[case::before_epoch("1969-12-31T23:59:59.999999999Z", "1969-12-31T23:59:59.999999Z")]
+    fn test_datetime_truncates_to_micros(#[case] input: &str, #[case] expected: &str) {
+        let datetime = DateTimePayloadType::from_str(input).unwrap();
+        let expected = DateTimePayloadType::from_str(expected).unwrap();
+        assert_eq!(datetime, expected);
+
+        // Must match the microsecond timestamp the payload index stores
+        let from_timestamp = DateTimePayloadType::from_timestamp(datetime.timestamp()).unwrap();
+        assert_eq!(datetime, from_timestamp);
+
+        // Range checks must agree with the index on the truncated value
+        let range = Range {
+            lt: None,
+            gt: Some(expected),
+            gte: None,
+            lte: None,
+        };
+        assert!(!range.check_range(datetime));
+    }
+
     #[test]
     fn test_invalid_datetime_range_returns_clear_rfc3339_error() {
         let json = r#"{
@@ -5331,7 +5502,7 @@ mod tests {
 
     #[test]
     fn test_datetime_wrapper_transcoding() {
-        let expected = DateTimeWrapper(chrono::Utc::now());
+        let expected = DateTimeWrapper::from(chrono::Utc::now());
         let transcoded = DateTimeWrapper::from_str(&expected.to_string()).unwrap();
         assert_eq!(expected, transcoded);
     }
@@ -6438,6 +6609,18 @@ mod tests {
         let cbor_bytes = serde_cbor::to_vec(&filter).unwrap();
         let deserialized: Filter = serde_cbor::from_slice(&cbor_bytes).unwrap();
         assert_eq!(filter, deserialized);
+    }
+
+    #[rstest]
+    #[case::traversal("x/../../tmp/pwned", false)]
+    #[case::absolute("/tmp/pwned", false)]
+    #[case::default("", true)]
+    #[case::plain("image", true)]
+    #[case::legacy_nested("a/b", true)]
+    fn vector_name_map_rejects_escaping_names(#[case] name: &str, #[case] ok: bool) {
+        let result =
+            deserialize_vector_name_map::<_, serde_json::Value>(serde_json::json!({ name: {} }));
+        assert_eq!(result.is_ok(), ok, "{name:?}: {result:?}");
     }
 }
 

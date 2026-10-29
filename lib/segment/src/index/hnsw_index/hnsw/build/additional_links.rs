@@ -1,34 +1,37 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+mod block;
+mod old_blocks;
+mod seeds;
 
-use common::bitvec::{BitSliceExt as _, BitVec};
-use common::counter::hardware_counter::HardwareCounterCell;
+use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
+
+use common::ambient;
+use common::bitvec::BitSliceExt as _;
 use common::progress_tracker::ProgressTracker;
+use common::reason::reason;
 use common::types::{DeferredBehavior, PointOffsetType};
 use log::{debug, trace};
 use rand::Rng;
 use rayon::ThreadPool;
-use rayon::prelude::*;
 
-use crate::common::operation_error::{OperationError, OperationResult, check_process_stopped};
+use self::block::build_block;
+use self::old_blocks::old_range_blocks;
+use self::seeds::BlockSeeds;
+use crate::common::operation_error::{OperationResult, check_process_stopped};
 use crate::id_tracker::{IdTrackerEnum, IdTrackerRead};
 use crate::index::PayloadIndexRead;
-use crate::index::condition_checker::ConditionCheckerEnum;
 use crate::index::field_index::PayloadBlockCondition;
 use crate::index::hnsw_index::HnswM;
-use crate::index::hnsw_index::build_condition_checker::BuildConditionChecker;
 use crate::index::hnsw_index::config::HnswGraphConfig;
 use crate::index::hnsw_index::gpu::gpu_insert_context::GpuInsertContext;
 use crate::index::hnsw_index::graph_layers_builder::GraphLayersBuilder;
-use crate::index::hnsw_index::hnsw::{
-    HNSW_BUILD_MAX_PAR_LEN, HNSW_USE_HEURISTIC, SINGLE_THREADED_HNSW_BUILD_THRESHOLD,
-};
-use crate::index::hnsw_index::point_scorer::FilteredScorer;
-use crate::index::query_optimization::optimized_filter::OptimizedFilter;
+#[cfg(feature = "gpu")]
+use crate::index::hnsw_index::hnsw::HNSW_USE_HEURISTIC;
+use crate::index::hnsw_index::hnsw::old_index::OldIndex;
 use crate::index::struct_payload_index::StructPayloadIndex;
-use crate::index::visited_pool::{VisitedListHandle, VisitedPool};
 use crate::json_path::JsonPath;
 use crate::types::Condition::Field;
-use crate::types::{FieldCondition, Filter};
+use crate::types::{FieldCondition, Filter, PayloadFieldSchema, PayloadKeyType};
 use crate::vector_storage::quantized::quantized_vectors::QuantizedVectors;
 use crate::vector_storage::{VectorStorageEnum, VectorStorageRead};
 
@@ -47,7 +50,7 @@ pub(super) fn additional_links_fields(
         return None;
     }
     let progress_additional_links = progress.subtask("additional_links");
-    let fields = fields
+    let fields = in_build_order(fields)
         .into_iter()
         .filter_map(|(field, payload_schema)| {
             let subtask_name = format!("{}:{field}", payload_schema.name());
@@ -62,26 +65,45 @@ pub(super) fn additional_links_fields(
     Some((progress_additional_links, fields))
 }
 
+/// Indexed fields in the order their additional links are built.
+///
+/// The order matters: every field after the first skips blocks the graph built so far already
+/// connects well, so it decides which blocks get built. `indexed_fields` is a `HashMap`, whose
+/// iteration order changes from one map to the next, so sort to make builds reproducible.
+fn in_build_order(
+    fields: HashMap<PayloadKeyType, PayloadFieldSchema>,
+) -> Vec<(PayloadKeyType, PayloadFieldSchema)> {
+    let mut fields = fields.into_iter().collect::<Vec<_>>();
+    fields.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+    fields
+}
+
 /// Build per-payload-block subgraphs for every field in `indexed_fields` and merge them
 /// into `graph_layers_builder`.
 ///
-/// Returns the number of vectors that got indexed through these subgraphs.
+/// With an `old_index` (whose payload links have the same `m`), each block starts from the
+/// links its points had to each other in the old graph; see [`BlockSeeds`].
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(
+    not(feature = "gpu"),
+    allow(unused_variables, clippy::needless_pass_by_ref_mut)
+)]
 pub(super) fn build_additional_links<R: Rng + ?Sized>(
     id_tracker: &IdTrackerEnum,
     vector_storage: &VectorStorageEnum,
     quantized_vectors: &Option<QuantizedVectors>,
     payload_index: &StructPayloadIndex,
-    gpu_insert_context: &mut Option<GpuInsertContext<'_>>,
+    gpu_insert_context: &mut Option<GpuInsertContext>,
     graph_layers_builder: &mut GraphLayersBuilder,
     config: &HnswGraphConfig,
     payload_m: HnswM,
     indexed_fields: Vec<(ProgressTracker, JsonPath)>,
+    old_index: Option<&OldIndex<'_>>,
     progress_additional_links: ProgressTracker,
     pool: &ThreadPool,
     rng: &mut R,
     stopped: &AtomicBool,
-) -> OperationResult<usize> {
+) -> OperationResult<()> {
     let total_vector_count = vector_storage.total_vector_count();
     let deleted_bitslice = vector_storage.deleted_vector_bitslice();
 
@@ -127,15 +149,29 @@ pub(super) fn build_additional_links<R: Rng + ?Sized>(
         None
     };
 
-    let mut indexed_vectors_set = if config.m != 0 {
-        // Every vector is already indexed in the main graph, so skip counting.
-        BitVec::new()
-    } else {
-        BitVec::repeat(false, total_vector_count)
-    };
+    let mut seeds =
+        old_index.map(|old_index| BlockSeeds::new(old_index, payload_m, total_vector_count));
+    let mut seeded_points = 0;
+    let mut block_points = 0;
 
-    let visited_pool = VisitedPool::new();
-    let mut block_filter_list = visited_pool.get(total_vector_count);
+    // The GPU stores vectors and links by segment id, so it builds blocks in a segment-sized
+    // builder. This one only carries the block graph's settings: `payload_m`, `ef_construct`
+    // and level 0 for every point.
+    #[cfg(feature = "gpu")]
+    let gpu_block_reference = gpu_insert_context.is_some().then(|| {
+        GraphLayersBuilder::new_with_params(
+            total_vector_count,
+            payload_m,
+            config.ef_construct,
+            1,
+            HNSW_USE_HEURISTIC,
+            false,
+        )
+    });
+
+    let field_schemas = old_index
+        .map(|_| payload_index.with_view(|v| v.indexed_fields()))
+        .unwrap_or_default();
 
     for (index_pos, (field_progress, field)) in indexed_fields.into_iter().enumerate() {
         field_progress.start();
@@ -200,39 +236,74 @@ pub(super) fn build_additional_links<R: Rng + ?Sized>(
                 trace!("graph connectivity: {graph_connectivity} for {field}");
             }
 
-            // ToDo: reuse graph layer for same payload
-            let mut additional_graph = GraphLayersBuilder::new_with_params(
-                total_vector_count,
-                payload_m,
-                config.ef_construct,
-                1,
-                HNSW_USE_HEURISTIC,
-                false,
-            );
+            #[cfg(feature = "gpu")]
+            if let (Some(gpu_insert_context), Some(reference_graph)) =
+                (gpu_insert_context.as_mut(), &gpu_block_reference)
+                && let Some(gpu_graph) =
+                    crate::index::hnsw_index::hnsw::gpu_build::build_block_on_gpu(
+                        id_tracker,
+                        vector_storage,
+                        quantized_vectors,
+                        gpu_insert_context,
+                        reference_graph,
+                        &points_to_index,
+                        stopped,
+                    )?
+            {
+                graph_layers_builder.merge_from_other(gpu_graph);
+                return Ok(());
+            }
 
-            build_filtered_graph(
+            block_points += points_to_index.len();
+            seeded_points += build_block(
                 id_tracker,
                 vector_storage,
                 quantized_vectors,
-                gpu_insert_context,
-                payload_index,
                 pool,
                 stopped,
-                &mut additional_graph,
-                points_to_index,
-                &mut block_filter_list,
-                &mut indexed_vectors_set,
+                graph_layers_builder,
+                &points_to_index,
+                seeds.as_mut(),
+                payload_m,
+                config.ef_construct,
                 &counter,
             )?;
-            graph_layers_builder.merge_from_other(additional_graph);
             Ok(())
         };
 
-        payload_index.with_view(|v| {
-            v.for_each_payload_block(&field, config.full_scan_threshold, &mut process_block)
-        })?;
+        let old_blocks = match (old_index, field_schemas.get(&field)) {
+            (Some(old_index), Some(schema)) => {
+                old_range_blocks(old_index, &field, schema, payload_index, config)?
+            }
+            _ => None,
+        };
+        match old_blocks {
+            Some(blocks) => {
+                debug!(
+                    "healing {field} with the {} block ranges of the old index",
+                    blocks.len()
+                );
+                // Match blocks come from the new index, so a value that reached the threshold
+                // since the old build gets one too. The new index yields them before its ranges.
+                payload_index.with_view(|v| {
+                    v.for_each_payload_block(&field, config.full_scan_threshold, &mut |block| {
+                        if block.condition.range.is_some() {
+                            return Ok(());
+                        }
+                        process_block(block)
+                    })
+                })?;
+                blocks.into_iter().try_for_each(&mut process_block)?;
+            }
+            None => payload_index.with_view(|v| {
+                v.for_each_payload_block(&field, config.full_scan_threshold, &mut process_block)
+            })?,
+        }
     }
-    Ok(indexed_vectors_set.count_ones())
+    if seeds.is_some() {
+        debug!("seeded {seeded_points} of {block_points} payload block points from the old graph");
+    }
+    Ok(())
 }
 
 /// Get list of points for indexing, associated with payload block filtering condition
@@ -244,113 +315,19 @@ fn condition_points(
 ) -> OperationResult<Vec<PointOffsetType>> {
     let filter = Filter::new_must(Field(condition));
 
-    let disposed_hw_counter = HardwareCounterCell::disposable(); // Internal operation. No measurements needed
+    let _scope = ambient::unmeasured_guard(reason("Internal operation"));
 
     let deleted_bitslice = vector_storage.deleted_vector_bitslice();
 
     payload_index.with_view(|v| {
-        let cardinality_estimation = v.estimate_cardinality(&filter, &disposed_hw_counter)?;
+        let cardinality_estimation = v.estimate_cardinality(&filter)?;
         Ok(v.iter_filtered_points(
             &filter,
             &cardinality_estimation,
-            &disposed_hw_counter,
             stopped,
             DeferredBehavior::WithDeferred,
         )?
         .filter(|&point_id| !deleted_bitslice.get_bit(point_id as usize).unwrap_or(false))
         .collect())
     })
-}
-
-#[allow(clippy::too_many_arguments)]
-#[allow(unused_variables)]
-#[allow(clippy::needless_pass_by_ref_mut)]
-fn build_filtered_graph(
-    id_tracker: &IdTrackerEnum,
-    vector_storage: &VectorStorageEnum,
-    quantized_vectors: &Option<QuantizedVectors>,
-    #[allow(unused_variables)] gpu_insert_context: &mut Option<GpuInsertContext<'_>>,
-    payload_index: &StructPayloadIndex,
-    pool: &ThreadPool,
-    stopped: &AtomicBool,
-    graph_layers_builder: &mut GraphLayersBuilder,
-    points_to_index: Vec<PointOffsetType>,
-    block_filter_list: &mut VisitedListHandle,
-    indexed_vectors_set: &mut BitVec,
-    counter: &AtomicU64,
-) -> OperationResult<()> {
-    block_filter_list.next_iteration();
-
-    for block_point_id in points_to_index.iter().copied() {
-        block_filter_list.check_and_update_visited(block_point_id);
-        if !indexed_vectors_set.is_empty() {
-            indexed_vectors_set.set(block_point_id as usize, true);
-        }
-    }
-
-    #[cfg(feature = "gpu")]
-    if let Some(gpu_constructed_graph) =
-        crate::index::hnsw_index::hnsw::gpu_build::build_filtered_graph_on_gpu(
-            id_tracker,
-            vector_storage,
-            quantized_vectors,
-            gpu_insert_context.as_mut(),
-            graph_layers_builder,
-            block_filter_list,
-            &points_to_index,
-            stopped,
-        )?
-    {
-        *graph_layers_builder = gpu_constructed_graph;
-        return Ok(());
-    }
-
-    let insert_points = |block_point_id| {
-        check_process_stopped(stopped)?;
-
-        // This hardware counter can be discarded, since it is only used for internal operations
-        let internal_hardware_counter = HardwareCounterCell::disposable();
-
-        let block_condition_checker =
-            OptimizedFilter::from_checker(ConditionCheckerEnum::Build(BuildConditionChecker {
-                filter_list: block_filter_list,
-                current_point: block_point_id,
-            }));
-        let points_scorer = FilteredScorer::new_internal(
-            block_point_id,
-            vector_storage,
-            quantized_vectors.as_ref(),
-            Some(block_condition_checker),
-            id_tracker.deleted_point_bitslice(),
-            internal_hardware_counter,
-        )?;
-
-        graph_layers_builder.link_new_point(block_point_id, points_scorer);
-
-        counter.fetch_add(1, Ordering::Relaxed);
-
-        Ok::<_, OperationError>(())
-    };
-
-    let first_points = points_to_index
-        .len()
-        .min(SINGLE_THREADED_HNSW_BUILD_THRESHOLD);
-
-    // First index points in single thread so ensure warm start for parallel indexing process
-    for point_id in points_to_index[..first_points].iter().copied() {
-        insert_points(point_id)?;
-    }
-    // Once initial structure is built, index remaining points in parallel
-    // So that each thread will insert points in different parts of the graph,
-    // it is less likely that they will compete for the same locks
-    if points_to_index.len() > first_points {
-        pool.install(|| {
-            points_to_index
-                .into_par_iter()
-                .skip(first_points)
-                .with_max_len(HNSW_BUILD_MAX_PAR_LEN)
-                .try_for_each(insert_points)
-        })?;
-    }
-    Ok(())
 }

@@ -35,6 +35,7 @@ rstest = { workspace = true }
 segment = { path = ".", default-features = false, features = ["testing"] }
 proptest = { workspace = true }
 anyhow = { workspace = true }
+bm25 = { path = "../bm25" }
 object_store = { workspace = true }
 bytes = { workspace = true }
 tokio = { workspace = true }
@@ -47,6 +48,7 @@ pprof = { workspace = true }
 io_bridge_object_store = { path = "../common/io_bridge_object_store" }
 blink-alloc = { workspace = true }
 futures = { workspace = true }
+bitpacking = { workspace = true }
 bytemuck = { workspace = true }
 data-encoding = { workspace = true }
 fs-err = { workspace = true }
@@ -215,6 +217,10 @@ name = "range_filtering"
 harness = false
 
 [[bench]]
+name = "nested_filtering"
+harness = false
+
+[[bench]]
 name = "in_memory_id_tracker"
 harness = false
 
@@ -232,4 +238,8 @@ harness = false
 
 [[bench]]
 name = "facets"
+harness = false
+
+[[bench]]
+name = "tokenizers"
 harness = false
