@@ -50,8 +50,20 @@
       2   = mounted sur disque sans label qdrant-e (drift)     (REMEDIATE-ELIGIBLE)
       3   = container voit < MinCollections collections        (REMEDIATE-ELIGIBLE)
       4   = container's /qdrant/storage sur device different   (REMEDIATE-ELIGIBLE)
+      5   = sonde aveugle : wsl.exe n'a pas execute la commande Linux (no remediation,
+            sauf apres ProbeErrorEscalateAfter echecs consecutifs -> traite comme 1)
       9   = container down (pas un probleme de mount)          (no remediation)
       124 = self-timeout : un appel wsl/docker a hang > SelfTimeoutSeconds (force-exit)
+
+    Update 2026-10-31 (fausses derives) : sur 30 j, 14 des 15 "NOT mounted" etaient des
+    erreurs du CLI wsl.exe lui-meme (Wsl/Service/0x8007274c timeout, "installation ou
+    conversion en cours", warning .wslconfig "Touche inconnue") -- la commande Linux n'avait
+    jamais tourne, le montage etait sain. Classees DRIFT_UNMOUNTED, elles declenchaient
+    Mount-Qdrant-VHDX (restart production le 24/10 13:05 alors que Phase 5 validait le
+    montage) et armaient un cooldown de 15 min qui aurait masque une vraie derive.
+    Le marqueur PROBE_RAN distingue "Linux dit non monte" (derive, code 1) de "Linux n'a
+    pas repondu" (code 5). Un blocage WSL prolonge reste couvert : apres
+    ProbeErrorEscalateAfter echecs consecutifs (~6 min), retour au chemin de remediation.
 
     Update 2026-05-24 (post-GPU-crash : le watchdog avait HANG des heures) :
       - Self-timeout interne ($SelfTimeoutSeconds, defaut 90s) : thread .NET qui force-exit
@@ -71,7 +83,8 @@ param(
     [switch]$Remediate,
     [string]$RemediationTask    = "Mount-Qdrant-VHDX",
     [int]$CooldownMinutes       = 15,
-    [int]$SelfTimeoutSeconds    = 90
+    [int]$SelfTimeoutSeconds    = 90,
+    [int]$ProbeErrorEscalateAfter = 3
 )
 
 $logDir = "C:\ProgramData\maint-scripts\logs"
@@ -199,15 +212,44 @@ function NotifyEvent {
     }
 }
 
+# Echecs consecutifs de la sonde (wsl.exe n'a pas execute la commande Linux), portes par le
+# fichier d'etat : tout run dont la sonde repond reecrit l'etat sans ce champ -> remise a zero.
+$prevStreak = 0
+if (Test-Path $stateFile) {
+    try {
+        $prev = Get-Content $stateFile -Raw | ConvertFrom-Json
+        if ($prev.details.probe_error_streak) { $prevStreak = [int]$prev.details.probe_error_streak }
+    } catch { }
+}
+
+function ProbeBlind {
+    param([string]$Probe, [string]$Raw)
+    # Pas de marqueur PROBE_RAN : wsl.exe a echoue avant la commande Linux, l'etat du montage
+    # est INCONNU. Ce n'est pas une derive ; Mount-Qdrant-VHDX passerait par le meme wsl.exe.
+    $streak = $prevStreak + 1
+    if ($streak -lt $ProbeErrorEscalateAfter) {
+        Log "PROBE_ERROR $Probe ($streak/$ProbeErrorEscalateAfter): wsl.exe n'a pas execute la commande Linux -- etat inconnu, pas de remediation (raw=$Raw)" "WARN"
+        WriteState -ExitCode 5 -Status "PROBE_ERROR" -Data @{ probe = $Probe; raw = $Raw; probe_error_streak = $streak }
+        exit 5
+    }
+    Log "PROBE_ERROR $Probe persistant ($streak echecs consecutifs) -> traite comme derive" "ERROR"
+    return $streak
+}
+
 # --- Check 1: mountpoint inside Ubuntu ---
 # --cd / : evite "wsl: Failed to translate" si PowerShell CWD est un path UNC/GDrive
-$mountInfo = & wsl.exe --cd / -d $Distro -u root -- bash -c "mountpoint -q $MountPoint && findmnt -n -o SOURCE $MountPoint || echo UNMOUNTED" 2>&1
+$mountInfo = & wsl.exe --cd / -d $Distro -u root -- bash -c "echo PROBE_RAN; mountpoint -q $MountPoint && findmnt -n -o SOURCE $MountPoint || echo UNMOUNTED" 2>&1
+$mountText = $mountInfo | Out-String
+$streak = 0
+if ($mountText -notmatch '(?m)^PROBE_RAN\s*$') { $streak = ProbeBlind -Probe "mount" -Raw $mountText.Trim() }
 # Filtrer les warnings WSL stderr (e.g. "wsl: Failed to translate ...")
-$mountStr = (($mountInfo | Out-String) -split "`r?`n" | Where-Object { $_ -match "^/dev/sd|^UNMOUNTED" } | Select-Object -First 1)
+$mountStr = ($mountText -split "`r?`n" | Where-Object { $_ -match "^/dev/sd|^UNMOUNTED" } | Select-Object -First 1)
 if (-not $mountStr -or $mountStr -notmatch "^(/dev/sd[a-z]+)$") {
-    $rawState = ($mountInfo | Out-String).Trim()
+    $rawState = $mountText.Trim()
     Log "DRIFT: $MountPoint NOT mounted (state=$rawState)" "ERROR"
-    WriteState -ExitCode 1 -Status "DRIFT_UNMOUNTED" -Data @{ raw_mount_state = $rawState }
+    $driftData = @{ raw_mount_state = $rawState }
+    if ($streak) { $driftData.probe_error_streak = $streak }
+    WriteState -ExitCode 1 -Status "DRIFT_UNMOUNTED" -Data $driftData
     NotifyEvent -EventId 1001 -Type "ERROR" -Message "Qdrant mount $MountPoint absent (split-brain risk imminent). Run mount_qdrant_vhdx.ps1 admin pour recover. Voir C:\ProgramData\maint-scripts\logs\verify-qdrant-mount.log"
     TryRemediate -ExitCode 1 -Status "DRIFT_UNMOUNTED"
     exit 1
@@ -215,12 +257,16 @@ if (-not $mountStr -or $mountStr -notmatch "^(/dev/sd[a-z]+)$") {
 $ubuntuDev = $matches[1]
 
 # --- Check 2: label is qdrant-e ---
-$labelOut = & wsl.exe --cd / -d $Distro -u root -- bash -c "blkid -s LABEL -o value $ubuntuDev 2>/dev/null" 2>&1
-$labelStr = (($labelOut | Out-String) -split "`r?`n" | Where-Object { $_ -match "^[A-Za-z0-9_-]+$" } | Select-Object -First 1)
-if (-not $labelStr) { $labelStr = ($labelOut | Out-String).Trim() }
+$labelOut = & wsl.exe --cd / -d $Distro -u root -- bash -c "echo PROBE_RAN; blkid -s LABEL -o value $ubuntuDev 2>/dev/null" 2>&1
+$labelText = $labelOut | Out-String
+if ($labelText -notmatch '(?m)^PROBE_RAN\s*$') { $streak = ProbeBlind -Probe "label" -Raw $labelText.Trim() }
+$labelStr = ($labelText -split "`r?`n" | Where-Object { $_ -match "^[A-Za-z0-9_-]+$" -and $_ -ne "PROBE_RAN" } | Select-Object -First 1)
+if (-not $labelStr) { $labelStr = ($labelText -replace '(?m)^PROBE_RAN\s*$', '').Trim() }
 if ($labelStr -ne $ExpectedLabel) {
     Log "DRIFT: $MountPoint mounte sur $ubuntuDev mais label='$labelStr' (attendu '$ExpectedLabel') -- split-brain!" "ERROR"
-    WriteState -ExitCode 2 -Status "DRIFT_WRONG_LABEL" -Data @{ device = $ubuntuDev; label = $labelStr; expected_label = $ExpectedLabel }
+    $driftData = @{ device = $ubuntuDev; label = $labelStr; expected_label = $ExpectedLabel }
+    if ($streak) { $driftData.probe_error_streak = $streak }
+    WriteState -ExitCode 2 -Status "DRIFT_WRONG_LABEL" -Data $driftData
     NotifyEvent -EventId 1002 -Type "ERROR" -Message "Qdrant mounte sur disque inattendu : device=$ubuntuDev label='$labelStr' (attendu '$ExpectedLabel'). SPLIT-BRAIN imminent. Voir log."
     TryRemediate -ExitCode 2 -Status "DRIFT_WRONG_LABEL"
     exit 2
