@@ -125,7 +125,12 @@ grep docker-desktop-bind-mounts /proc/1/mountinfo 2>/dev/null | while read -r li
 done
 echo "shim-clear-done"
 '@
-    $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($shimScript))
+    # CR-proof (incident 31/10 17:45) : un checkout git avec autocrlf=true reecrit ce
+    # fichier en CRLF ; le here-string capture alors des \r qui cassent bash au decode
+    # ("syntax error near unexpected token `$'in\r'") et font avorter la passe en finally.
+    # On strip les \r AVANT l'encodage, quelles que soient les fins de ligne du fichier.
+    $shimScriptLf = $shimScript -replace "`r", ""
+    $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($shimScriptLf))
     $shimOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "echo $b64 | base64 -d | bash" 2>&1
     ($shimOut | Out-String).Trim() -split "`r?`n" | Where-Object { $_ } | ForEach-Object { Log "  shim: $_" }
 
