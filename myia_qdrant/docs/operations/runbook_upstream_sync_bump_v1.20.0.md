@@ -129,6 +129,14 @@ docker compose -f myia_qdrant/docker-compose.production.yml up -d
 
 **Phase C — production : EN ATTENTE.** Prérequis bloquants : compaction VHDX (**Q7 — clic UAC du user**), soak 24 h des students, backup du jour, débit d'ingest mesuré hors vague, bench vs **archive du 07/10**.
 
+**Phase C — EXÉCUTÉE le 2026-11-01 14:23 (sweep 13:47).** Prérequis tous levés : compaction Q7 faite le 31/10 18:04 (VHDX 740,9→297,8 Go, E: 613 Go libres > 400 visés) · soak students 48 h+ · backup du jour `Backup done` 02:47 · ingest calme ~220 pts/h (hors vague) · archive 07/10 chargée.
+- **Snapshot pré-upgrade LOCAL** : premier essai mort-né — `powershell.exe -File … -SharedPath -` (le `-` nu) rend rc=2 **sans rien exécuter ni logger** (piège de parsing -File) ; relancé depuis pwsh avec `-SharedPath '-'` → OK. `D:\qdrant-backups\myia-ai-01\...\2026-11-01\` (60,2 Go, points=4 009 084). Wart constaté : 10 min perdues dans la boucle « waiting for local destination root » — le dossier local n'existait pas, la copie l'a créé ; la boucle de wait est conçue pour G: monté, pas pour un dossier local absent.
+- **Bump** : compose épinglé v1.20.0 (commentaire mis à jour), `up -d` → recreate 14:23, **récupération à froid 93 s** (page cache chaud).
+- **Critères TOUS VERTS** : **points identiques 4 009 560 avant/après** · 118 collections · green/optimizer ok · int8 (quantile .99, always_ram) intact · **401 sans clé / 200 avec** · zéro ERROR/WARN/`enforce_internal_auth` au démarrage · gate sentinelle `[SENTINEL] OK` · montage inchangé (label, pas de recreate du bind).
+- **Vague d'optimisation : AUCUNE** — 0 `segment.json` touché post-démarrage. Confirme la mécanique du 07/10 : sans changement de `quantization_config`, pas de re-quant ; la géométrie HNSW `floor()` ne s'appliquera qu'aux graphs reconstruits (progressif).
+- **Bench vs archive 07/10 (rapport `reports/tq_recall_bench_20261101_v1200_production.md`)** : passe 1 (cache tiède) recall-vs-f32 0,905 / p99 382 ms → **passe réchauffée 0,963 (min 0,7) / p50 40 / p90 58 / p99 80 ms** — même classe que l'archive (34-38/45-56/64-99) malgré +62 % de points (2,48 M→4,01 M). Vs brute-force 0,960/0,920 (archive 0,940). **Verdict : aucune régression — v1.20.0 conservé.**
+- Rollback non utilisé ; chemins maintenus : re-pin v1.19.2 + `up -d` (1 ligne) ou restauration du snapshot local (RTO ~1m40 mesuré en classe).
+
 **Enquête « optimisations disponibles » en v1.20.0 (lu dans le tree mergé, pas dans les notes de release)**
 | Nouveauté | Où | Ce que ça change | Verdict pour nous |
 |---|---|---|---|
