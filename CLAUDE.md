@@ -79,8 +79,14 @@ curl http://localhost:6335/healthz   # Students
 # Poison-guard (abort if points < MinPoints), size-guard (skip retention if new < 50% of largest),
 # bounded retry on copy failure (3x300s, DriveFS degradation), orphan cleanup (>48h server-side),
 # retention = DailyKeep 3 + WeeklyKeep 0 PER destination (user ruling 2026-10-07, dossier Q4 "A+B";
-# historical 7+4). Deletions go to Drive TRASH — part B (permanent delete via Drive API, needs a
-# service-account key) pending; until then trash grows ~1 snapshot/night (manual emptying palliative).
+# historical 7+4). **SA GATE (01/11/2026):** before rotating cloud copies out, `gdrive_sa_verify.ps1`
+# confirms SERVER-SIDE (Drive API as service account `qdrant-backup-purger@myia-backups.iam.gserviceaccount.com`,
+# key `myia_qdrant/.gdrive_sa.json`, gitignored) that the newest pre-today kept snapshot is really on Drive —
+# on ABSENT/divergent/verifier-failure, offsite retention is SKIPPED (fail-safe). **Part B as specified is
+# IMPOSSIBLE (measured 01/11):** the SA holds writer on `Backups-Cloud/qdrant-snapshots` but a service account
+# gets canTrash/canDelete=false on a consumer My Drive → files.delete AND trashed=true both 403. Deletions stay
+# DriveFS→TRASH (30 d auto-purge); empty Drive trash when quota pinches (~56 GB/night tail). Full-B path if ever
+# wanted: make the SA the uploader (owner ⇒ canDelete true) — rework of the offsite copy leg.
 .\myia_qdrant\scripts\qdrant_snapshot_backup.ps1                  # all defaults (offsite + local)
 .\myia_qdrant\scripts\qdrant_snapshot_backup.ps1 -SharedPath -    # local-only (skip offsite)
 

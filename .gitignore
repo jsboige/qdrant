@@ -65,6 +65,14 @@ QdrantValidator/[Oo]bj/
 # Key rotation scratch area (never commit)
 .rotation/
 
+# Google service-account key for Drive permanent-delete (Q4-bis, 2026-11-01)
+# Reference only in docs/code ; the secret itself never enters git.
+myia_qdrant/.gdrive_sa.json
+myia-backups-*.json
+
+# Playwright MCP session artifacts (page snapshots, downloads)
+.playwright-mcp/
+
 # Ephemeral migration / task-run artifacts (completed one-off runs, kept on disk, out of git)
 myia_qdrant/reports/*.jsonl
 myia_qdrant/reports/*.err
