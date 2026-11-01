@@ -16,9 +16,14 @@
       5. Delete server-side snapshot.
       6. Retention: DailyKeep most recent + WeeklyKeep weekly Mondays (per destination).
          Defaults = 3 + 0 (user ruling 2026-10-07, dossier Q4 "A+B"). Historical: 7 + 4.
-         NOTE: deletions go through DriveFS -> Google Drive TRASH (30 d). Part B of the ruling
-         (permanent delete via Drive API) is pending a service-account key; until then trash
-         keeps filling ~1 snapshot/night and needs periodic manual emptying.
+         NOTE: deletions go through DriveFS -> Google Drive TRASH (30 d auto-purge).
+         Q4-bis STATUS (2026-11-01): the service account EXISTS and is wired for READ
+         (gdrive_sa_verify.ps1; SA sees the tree server-side, immune to DriveFS illusions, and
+         now gates offsite retention). Part B as originally specified (permanent delete by the
+         SA) is IMPOSSIBLE: measured 403 on files.delete AND trashed=true — a service account
+         holds writer but canTrash/canDelete=false on a consumer My Drive (Google rule).
+         Full-B path to arbitrate: make the SA the UPLOADER (it would own its files).
+         Until then: trash tail ~1 snapshot/night for 30 d; empty Drive trash when quota pinches.
 
 .PARAMETER MinPoints
     Poison-guard floor. Default 100000 (roo_tasks_semantic_index ~380k as of 2026-05-21).
@@ -310,6 +315,45 @@ foreach ($d in $destinations) {
             try { ([DateTime]::ParseExact($_.Name, 'yyyy-MM-dd', $null)).DayOfWeek -eq [DayOfWeek]::Monday } catch { $false }
         } | Sort-Object Name -Descending | Select-Object -First $WeeklyKeep
         foreach ($m in $mondays) { [void]$keep.Add($m.Name) }
+    }
+
+    # SA GATE (offsite only, 2026-11-01): before rotating cloud copies out, confirm SERVER-SIDE
+    # (Drive API as the service account) that the newest kept snapshot actually made it to the
+    # cloud. The G: copy completes locally at once; DriveFS uploads in the background (hours for
+    # ~60 GB). A silent upload failure (degraded-mount class, 2026-09-03) must not let retention
+    # delete the older cloud copies — the only confirmed-good offsite ones. Fail-safe direction:
+    # on ABSENT/divergent/unverifiable, skip offsite retention this run (extra copies kept).
+    if ($d.Name -eq 'offsite') {
+        $saVerify = Join-Path $PSScriptRoot 'utilities\gdrive_sa_verify.ps1'
+        $saKey = Join-Path $PSScriptRoot '..\.gdrive_sa.json'
+        if ((Test-Path $saVerify) -and (Test-Path $saKey)) {
+            # Target the newest kept dir STRICTLY OLDER than today: today's local copy is not
+            # uploaded yet (DriveFS background upload takes hours); yesterday's has had ~24 h.
+            # Verifying today's would fail every night and block retention forever.
+            $newestKept = $keep | Where-Object { $_ -lt $today } | Sort-Object -Descending | Select-Object -First 1
+            $newestFile = if ($newestKept) { Get-ChildItem -Path "$root/$newestKept" -Filter '*.snapshot' -File -ErrorAction SilentlyContinue | Select-Object -First 1 } else { $null }
+            if (-not $newestKept) {
+                Write-Log "SA gate: no kept dir older than today yet — retention proceeds (nothing prior to confirm)"
+            } elseif (-not $newestFile) {
+                Write-Log "SA GATE: kept dir $newestKept has no snapshot file (unexpected) — retention SKIPPED this run (fail-safe)" 'WARN'
+                continue
+            } else {
+                try {
+                    $out = & powershell.exe -NoProfile -File $saVerify -SnapshotName $newestFile.Name -ExpectedSizeBytes $newestFile.Length 2>&1
+                    $rc = $LASTEXITCODE
+                    foreach ($l in @($out)) { if ($l) { Write-Log "SA gate: $l" } }
+                    if ($rc -ne 0) {
+                        Write-Log "SA GATE ($($d.Name)): newest kept snapshot NOT confirmed server-side (rc=$rc) — retention SKIPPED this run (fail-safe: keeping extra copies)" 'WARN'
+                        continue
+                    }
+                } catch {
+                    Write-Log "SA GATE ($($d.Name)): verifier invocation failed: $($_.Exception.Message) — retention SKIPPED this run (fail-safe)" 'WARN'
+                    continue
+                }
+            }
+        } else {
+            Write-Log "SA gate: helper or key absent — offsite retention proceeds WITHOUT server-side confirmation" 'WARN'
+        }
     }
 
     $deleted = 0
