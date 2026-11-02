@@ -25,6 +25,20 @@ MSYS_NO_PATHCONV=1 wsl -u root -- nsenter -t 1 -m -- ls -la /mnt/qdrant-e/qdrant
 
 Attendu : 285 o. PAS une session `wsl` fraîche (elle ne voit pas le namespace PID-1). Le sentinel vit SOUS `qdrant_data/storage/`, pas à la racine du montage.
 
+**Alias `/srv/qdrant-e` (ajouté 02/11 — incident du jour : alias mort ~silencieux, tout `compose up` futur aurait trébuché sur la porte sentinel)** : vérifier AUSSI que le sentinel résout **à travers l'alias**, dans le ns PID-1 **et** dans le ns du proxy Docker Desktop (pid = `cat /proc/*/comm` → `docker-desktop-`) — le compose overlay pathfix bind via `\\wsl.localhost\Ubuntu\srv\qdrant-e\...` :
+
+```bash
+MSYS_NO_PATHCONV=1 wsl -u root -- nsenter -t 1 -m -- stat -c '%s' /srv/qdrant-e/qdrant_data/storage/.qdrant_vhdx_sentinel
+```
+
+Attendu : 285. Si absent : alias mort → le réparer (bind + make-shared, idempotent, cf. bloc Phase-4b de `mount_qdrant_vhdx.ps1`) :
+
+```bash
+MSYS_NO_PATHCONV=1 wsl -u root -- nsenter -t 1 -m -- bash -c 'mountpoint -q /srv/qdrant-e || mount --bind /mnt/qdrant-e /srv/qdrant-e; mount --make-shared /srv/qdrant-e'
+```
+
+…et vérifier que le script déployé (`C:\ProgramData\maint-scripts\`) contient toujours le bloc alias (dérive repo↔déployé = cause racine de l'incident 02/11, PR #13).
+
 ## 3. Chemin sémantique (mandat user 02/09 — la lane qdrant EST garante du chemin)
 
 a) **Preuve par inférence RÉELLE** — jamais `/health` seul (épisode #9 : /health restait 200 avec l'inférence morte). POST sur `{EMBEDDING_API_BASE_URL}/embeddings` avec Bearer `EMBEDDING_API_KEY` et `model` = `EMBEDDING_MODEL`, tous lus depuis `myia_qdrant/.env.production` sans jamais afficher la clé. Attendu : **dims=2560**.
