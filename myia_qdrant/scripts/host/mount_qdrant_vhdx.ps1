@@ -391,21 +391,29 @@ done
     $overlayPath = Join-Path (Split-Path $ComposePath -Parent) "docker-compose.production.pathfix.yml"
     $composeArgs = @("compose", "-f", $ComposePath)
     if (Test-Path $overlayPath) { $composeArgs += @("-f", $overlayPath) }
+    # Porte depuis la copie deployee (02/11/2026, edition live jamais commitee) :
+    # distinguer la cause dans le log final — un echec permanent a la 1re tentative
+    # et une race epuisee en 3 tentatives envoient l'operateur a des endroits OPPOSES.
+    $upAttempts = 0
+    $upCause = 'non determinee'
     for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $upAttempts = $attempt
         $upOutput = & docker.exe @composeArgs up -d 2>&1
         $upOutput | ForEach-Object { Log "  up[$attempt]: $_" }
         if ($LASTEXITCODE -eq 0) { $upOk = $true; break }
         $upJoined = ($upOutput | Out-String)
         if ($upJoined -match "distro-services/ubuntu\.sock|distro mount service|guest-services") {
+            $upCause = 'race bind-mount (signature connue) — retries epuises'
             Log "  up[$attempt] FAIL (bind-mount service race) — sleep 15s + retry" "WARN"
             Start-Sleep -Seconds 15
         } else {
             # Different failure — abort retries.
+            $upCause = 'echec PERMANENT (cause hors race) — retries abandonnes volontairement'
             break
         }
     }
     if (-not $upOk) {
-        Log "compose up echoue apres 3 tentatives — container va rester REMOVED" "ERROR"
+        Log ("compose up echoue : {0} tentative(s) effectuee(s), cause = {1} — container va rester REMOVED" -f $upAttempts, $upCause) "ERROR"
     }
 } finally {
     Pop-Location
