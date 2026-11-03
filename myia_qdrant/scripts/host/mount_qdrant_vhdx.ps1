@@ -277,7 +277,14 @@ for d in /proc/[0-9]*; do
 done
 echo "ns-scan-done"
 '@
-$nsB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($nsScript))
+# CR-proof (lecon 31/10, meme cause que compact_qdrant_vhdx.ps1) : un checkout git avec
+# autocrlf=true reecrit ce fichier en CRLF ; le here-string capture alors des \r qui
+# cassent le parseur bash au decode ("syntax error near unexpected token `$'do\r'").
+# Symptome observe 03/11/2026 : le scan de namespaces ne s'executait PLUS du tout
+# (aucun "ns-scan-done" dans les logs) et le pipeline bash mourait silencieusement.
+# On strip les \r AVANT l'encodage, quelles que soient les fins de ligne du fichier.
+$nsScriptLf = $nsScript -replace "`r", ""
+$nsB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($nsScriptLf))
 $nsOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "echo $nsB64 | base64 -d | bash" 2>&1
 foreach ($l in (($nsOut | Out-String).Trim() -split "`r?`n")) { if ($l) { Log "  $l" } }
 
@@ -326,6 +333,48 @@ if (-not $dockerReady) {
     FailExit -Code 7 -EventId 709 -Message "Docker engine + user-distro proxy + bind-mount service non prets apres ${DockerWaitSec}s (UNC probe: $uncProbe ; SOCK probe linux: $sockNew | $sockOld). Mount Ubuntu OK mais qdrant ne peut pas demarrer."
 }
 Log "Docker + user-distro proxy + bind-mount service ready (apres $($i*2)s)"
+
+# Le meme alias doit exister DANS le namespace de montage du proxy Docker Desktop.
+# Mesure 03/11/2026 : le bind /srv-qdrant-e existe dans PID-1 (sentinel 285) mais
+# PAS dans le ns du proxy (ou il retombait sur un vieux repertoire rootfs, sentinel
+# absente). Or le compose overlay pathfix bind via \\wsl.localhost\Ubuntu\srv\qdrant-e\...
+# -> c'est le proxy qui resout ce chemin, PAS PID-1. Sans alias dans son ns, le prochain
+# compose up binderait le mauvais store (et la porte sentinel le refuserait).
+# Le ns du proxy est une COPIE privee : la propagation de PID-1 ne le traverse pas,
+# il faut refaire le bind DEDANS. Idempotent : on ne touche que les ns dont la
+# sentinelle ne resout pas via l'alias.
+$proxyAliasScript = @'
+alias=/srv/qdrant-e
+mpt=/mnt/qdrant-e
+expected=285
+nfix=0
+nok=0
+for d in /proc/[0-9]*; do
+  pid=${d#/proc/}
+  comm=$(cat $d/comm 2>/dev/null) || continue
+  case "$comm" in
+    docker-desktop-*) ;;
+    *) continue ;;
+  esac
+  ns=$(readlink $d/ns/mnt 2>/dev/null) || continue
+  sz=$(nsenter -t $pid -m -- stat -c %s $alias/qdrant_data/storage/.qdrant_vhdx_sentinel 2>/dev/null)
+  if [ "$sz" = "$expected" ]; then
+    echo "proxy-alias-ok:pid=$pid ns=$ns"
+    nok=$((nok+1))
+    continue
+  fi
+  nsenter -t $pid -m -- bash -c "mkdir -p $alias && (mountpoint -q $alias || mount --bind $mpt $alias) && mount --make-shared $alias" 2>&1
+  sz2=$(nsenter -t $pid -m -- stat -c %s $alias/qdrant_data/storage/.qdrant_vhdx_sentinel 2>/dev/null)
+  echo "proxy-alias:pid=$pid ns=$ns avant='${sz}' apres='${sz2}'"
+  [ "$sz2" = "$expected" ] && nfix=$((nfix+1))
+done
+echo "proxy-alias-scan-done:ok=$nok fixed=$nfix"
+'@
+# CR-proof (lecon 31/10) : strip des \r AVANT encodage (checkout autocrlf).
+$proxyAliasLf = $proxyAliasScript -replace "`r", ""
+$proxyAliasB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($proxyAliasLf))
+$proxyAliasOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "echo $proxyAliasB64 | base64 -d | bash" 2>&1
+foreach ($l in (($proxyAliasOut | Out-String).Trim() -split "`r?`n")) { if ($l) { Log "  $l" } }
 
 if (-not (Test-Path $ComposePath)) {
     Log "Compose introuvable: $ComposePath" "WARN"
@@ -388,7 +437,11 @@ grep docker-desktop-bind-mounts /proc/1/mountinfo | while read -r line; do
 done
 '@
     $shimScript = $shimScript.Replace('__MOUNTPOINT__', $MountPoint)
-    $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($shimScript))
+    # CR-proof (lecon 31/10, meme cause que compact_qdrant_vhdx.ps1) : le here-string
+    # capture les \r d'un checkout autocrlf et le parseur bash refuse le payload
+    # ("$'\r'") -> le nettoyage des shims stale n'etait PLUS execute du tout.
+    $shimScriptLf = $shimScript -replace "`r", ""
+    $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($shimScriptLf))
     $shimClear = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "echo $b64 | base64 -d | bash" 2>&1
     $shimLines = @(($shimClear | Out-String).Trim() -split "`r?`n" | Where-Object { $_ })
     if ($shimLines.Count -gt 0) {
