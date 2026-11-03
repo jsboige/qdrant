@@ -60,7 +60,17 @@ param(
     [switch]$SkipDocker
 )
 
-$ErrorActionPreference = "Stop"
+# 'Continue' et NON 'Stop' : sous 'Stop', le stderr d'une commande native (wsl.exe,
+# nsenter, mount, eventcreate) devient une erreur TERMINANTE et le script ABORTE sur
+#-le-champ. Symptome mesure le 03/11/2026 : les 3 executions du script de montage sont
+# mortes AVANT la Phase 6 (compose down/up) — donc sans la recreation de qdrant, qui est
+# justement la reparation qu'on attend du script. Points de truncation observes :
+# Phase 2 (wsl --mount, stderr "deja joint"), Phase 5b (nsenter sur un pid qui disparait
+# pendant le scan des namespaces). Chaque phase verifie deja son code de sortie
+# explicitement et les cas bloquants sortent par FailExit : 'Continue' ne perd aucun
+# controle, il supprime seulement les aborts invisibles. Le bloc Phase 6 avait deja
+# ce meme correctif local (ligne ~277) : il est applique ici a tout le script.
+$ErrorActionPreference = "Continue"
 $logDir = "C:\ProgramData\maint-scripts\logs"
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $logFile = Join-Path $logDir "mount-qdrant-vhdx-$(Get-Date -f yyyyMMdd-HHmmss).log"
@@ -108,13 +118,20 @@ Log "Log: $logFile"
 Log "Phase 1: Verification etat Mount-VHD..."
 $vhd = Get-VHD -Path $VhdxPath -ErrorAction SilentlyContinue
 if (-not $vhd) {
-    FailExit -Code 3 -EventId 2003 -Message "VHDX introuvable: $VhdxPath"
+    FailExit -Code 3 -EventId 703 -Message "VHDX introuvable: $VhdxPath"
 }
 if (-not $vhd.Attached) {
     Log "VHDX non attache. Mount-VHD..."
-    Mount-VHD -Path $VhdxPath -PassThru | Out-Null
+    try {
+        Mount-VHD -Path $VhdxPath -PassThru | Out-Null
+    } catch {
+        FailExit -Code 3 -EventId 703 -Message "Mount-VHD a echoue sur $VhdxPath : $($_.Exception.Message)"
+    }
     Start-Sleep -Seconds 2
-    $vhd = Get-VHD -Path $VhdxPath
+    $vhd = Get-VHD -Path $VhdxPath -ErrorAction SilentlyContinue
+    if (-not $vhd) {
+        FailExit -Code 3 -EventId 703 -Message "VHDX introuvable apres Mount-VHD: $VhdxPath"
+    }
 } else {
     Log "VHDX deja attache (idempotent)"
 }
@@ -144,7 +161,7 @@ for ($i = 0; $i -lt $WaitSeconds; $i++) {
     Start-Sleep -Seconds 1
 }
 if (-not $deviceFound) {
-    FailExit -Code 4 -EventId 2004 -Message "Device label '$Label' non trouve apres ${WaitSeconds}s. wsl --mount --bare a echoue ou disque pas pret."
+    FailExit -Code 4 -EventId 704 -Message "Device label '$Label' non trouve apres ${WaitSeconds}s. wsl --mount --bare a echoue ou disque pas pret."
 }
 Log "Device: $deviceFound"
 
@@ -187,7 +204,7 @@ if ($needMount) {
         $mountFsStr = ($mountFsOut | Out-String).Trim()
         Log "fallback mount (rc=$mountFsRc): $mountFsStr"
         if ($mountFsRc -ne 0 -or $mountFsStr -notmatch "MOUNT_OK") {
-            FailExit -Code 5 -EventId 2006 -Message "mount $MountPoint echec total (fstab et fallback, PID-1 ns). Verifier /etc/fstab et que disque label '$Label' est attache."
+            FailExit -Code 5 -EventId 706 -Message "mount $MountPoint echec total (fstab et fallback, PID-1 ns). Verifier /etc/fstab et que disque label '$Label' est attache."
         }
     }
     Log "$MountPoint monte OK (fstab, PID-1 ns)"
@@ -217,12 +234,12 @@ Log "Phase 5: Verification device + collections..."
 $srcOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "findmnt -n -o SOURCE $MountPoint 2>/dev/null" 2>&1
 $srcDev = (($srcOut | Out-String) -split "`r?`n" | Where-Object { $_ -match "^/dev/sd[a-z]+$" } | Select-Object -First 1)
 if (-not $srcDev) {
-    FailExit -Code 6 -EventId 2007 -Message "Impossible de lire le device de $MountPoint (PID-1 ns). Raw=$(($srcOut | Out-String).Trim())"
+    FailExit -Code 6 -EventId 707 -Message "Impossible de lire le device de $MountPoint (PID-1 ns). Raw=$(($srcOut | Out-String).Trim())"
 }
 $srcLabelOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "blkid -s LABEL -o value $srcDev 2>/dev/null" 2>&1
 $srcLabel = (($srcLabelOut | Out-String) -split "`r?`n" | Where-Object { $_ -match "^[A-Za-z0-9_-]+$" } | Select-Object -First 1)
 if ($srcLabel -ne $Label) {
-    FailExit -Code 6 -EventId 2008 -Message "$MountPoint monte sur $srcDev label='$srcLabel' (attendu '$Label'). Mount sur rootfs/disque incorrect -- refus (anti-split-brain)."
+    FailExit -Code 6 -EventId 708 -Message "$MountPoint monte sur $srcDev label='$srcLabel' (attendu '$Label'). Mount sur rootfs/disque incorrect -- refus (anti-split-brain)."
 }
 Log "OK: $MountPoint sur $srcDev label=$srcLabel (VHDX confirme)" "OK"
 $collOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "ls $MountPoint/qdrant_data/storage/collections 2>/dev/null | wc -l" 2>&1
@@ -306,7 +323,7 @@ for ($i = 0; $i -lt $DockerWaitSec; $i++) {
     break
 }
 if (-not $dockerReady) {
-    FailExit -Code 7 -EventId 2009 -Message "Docker engine + user-distro proxy + bind-mount service non prets apres ${DockerWaitSec}s (UNC probe: $uncProbe ; SOCK probe linux: $sockNew | $sockOld). Mount Ubuntu OK mais qdrant ne peut pas demarrer."
+    FailExit -Code 7 -EventId 709 -Message "Docker engine + user-distro proxy + bind-mount service non prets apres ${DockerWaitSec}s (UNC probe: $uncProbe ; SOCK probe linux: $sockNew | $sockOld). Mount Ubuntu OK mais qdrant ne peut pas demarrer."
 }
 Log "Docker + user-distro proxy + bind-mount service ready (apres $($i*2)s)"
 
@@ -431,5 +448,5 @@ if ($healthy) {
     Log "qdrant_production healthy" "OK"
     exit 0
 } else {
-    FailExit -Code 8 -EventId 2010 -Message "qdrant_production pas healthy apres 120s post-restart. Compose down/up done mais container ne demarre pas correctement."
+    FailExit -Code 8 -EventId 710 -Message "qdrant_production pas healthy apres 120s post-restart. Compose down/up done mais container ne demarre pas correctement."
 }
