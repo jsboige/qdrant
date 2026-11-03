@@ -23,9 +23,12 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 Write-Output '=== 1. HEALTHZ ==='
 foreach ($u in @('http://localhost:6333/healthz','http://localhost:6335/healthz','https://qdrant.myia.io/healthz')) {
+    # curl.exe et non Invoke-WebRequest : -SkipHttpErrorCheck n'existe qu'en PS 7.
+    # Sous PS 5.1 l'appel levait une erreur de parametrage et la section healthz
+    # reportait 000 pour les TROIS sondes -> fausse alerte a chaque sweep.
     try {
-        $r = Invoke-WebRequest -Uri $u -Method GET -TimeoutSec 15 -SkipHttpErrorCheck -UseBasicParsing
-        Write-Output "$u -> $($r.StatusCode)"
+        $code = (& curl.exe -s -o NUL -w '%{http_code}' --max-time 15 $u 2>$null)
+        Write-Output "$u -> $code"
     } catch { Write-Output "$u -> 000 ($($_.Exception.Message))" }
 }
 
