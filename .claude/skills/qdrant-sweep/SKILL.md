@@ -39,6 +39,18 @@ MSYS_NO_PATHCONV=1 wsl -u root -- nsenter -t 1 -m -- bash -c 'mountpoint -q /srv
 
 …et vérifier que le script déployé (`C:\ProgramData\maint-scripts\`) contient toujours le bloc alias (dérive repo↔déployé = cause racine de l'incident 02/11, PR #13).
 
+**Contrôle DANS le ns du proxy (ajouté 03/11 — le piège mesuré ce jour-là) :** l'alias doit résoudre dans **les deux** namespaces. Le proxy vit dans une COPIE privée : la propagation de PID-1 ne le traverse pas, un bind fait dans PID-1 n'y arrive pas. Le 03/11 l'alias était vivant dans PID-1 (sentinel 285) et **mort dans le ns du proxy** (il retombait sur un vieux répertoire rootfs, sentinel absente) — or c'est le proxy qui résout le chemin `\\wsl.localhost\Ubuntu\srv\qdrant-e\...` du compose overlay pathfix. Le prochain `compose up` aurait donc bindé le mauvais store.
+
+```bash
+MSYS_NO_PATHCONV=1 wsl -u root -- bash /mnt/d/qdrant/myia_qdrant/scripts/monitoring/probe_srv_alias.sh
+```
+
+Attendu : `proxy-alias-ok:pid=<pid> sentinel=285`. Un `proxy-alias-DEAD` ou `NO-PROXY-NS-FOUND` = alias mort dans le ns du proxy → le réparer **dans ce ns** (même bind, mais `nsenter -t <pid proxy> -m -- mount --bind /mnt/qdrant-e /srv/qdrant-e; mount --make-shared /srv/qdrant-e`). Le script de montage le fait désormais tout seul (PR #16) — `Mount-Qdrant-VHDX` suffit — mais la réparation à la main reste possible.
+
+⚠ Ne PAS essayer la variante inline à base de `for f in /proc/[0-9]*/comm` dans l'argument de `wsl.exe` : mesuré, elle renvoie une sortie VIDE (le parseur d'argv de Windows dégrade le script passé en `-c`). Passer par le script fichier ci-dessus — c'est la forme vérifiée.
+
+**Sanité du script de montage (03/11) :** les payloads bash embarqués en base64 sont **empoisonnés CRLF** si le fichier est checké out avec `core.autocrlf=true` — le parseur bash rejette alors le payload (`syntax error near unexpected token `$'do\r''`) et la phase concernedé (scan de namespaces, nettoyage de shims) **ne s'exécute pas du tout**, silencieusement. Vérifier que le log de montage contient bien `ns-scan-done` (Phase 5b) : son absence = payload cassé. Le correctif est un `-replace "`r", ""` avant l'encodage base64 (idem `compact_qdrant_vhdx.ps1`).
+
 ## 3. Chemin sémantique (mandat user 02/09 — la lane qdrant EST garante du chemin)
 
 a) **Preuve par inférence RÉELLE** — jamais `/health` seul (épisode #9 : /health restait 200 avec l'inférence morte). POST sur `{EMBEDDING_API_BASE_URL}/embeddings` avec Bearer `EMBEDDING_API_KEY` et `model` = `EMBEDDING_MODEL`, tous lus depuis `myia_qdrant/.env.production` sans jamais afficher la clé. Attendu : **dims=2560**.
