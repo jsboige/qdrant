@@ -54,6 +54,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# 2026-11-07: Invoke-WebRequest progress rendering throttles large downloads 10-50x in an
+# INTERACTIVE console (measured 0.68 MB/s vs ~55 MB/s hidden; disk/CPU exonerated by dd/docker
+# stats). The schtask VBS launcher is hidden so it never paid this cost; manual console runs did.
+$ProgressPreference = 'SilentlyContinue'
 
 # ========== RESOLVE INPUTS ==========
 
