@@ -96,15 +96,23 @@ try {
 
     # --- 2. Stop autoheal ---
     Log "2/9 Stop $Autoheal..."
-    & docker.exe stop $Autoheal 2>&1 | ForEach-Object { Log "  $_" }
+    $ErrorActionPreference = 'Continue'; & docker.exe stop $Autoheal 2>&1 | ForEach-Object { Log "  $_" }; $ErrorActionPreference = 'Stop'
 
     # --- 3. Stop qdrant_production (cible, ne touche pas les autres services compose) ---
     Log "3/9 Stop $Container..."
-    & docker.exe stop $Container 2>&1 | ForEach-Object { Log "  $_" }
+    $ErrorActionPreference = 'Continue'; & docker.exe stop $Container 2>&1 | ForEach-Object { Log "  $_" }; $ErrorActionPreference = 'Stop'
 
     # --- 4. sync + fstrim (GO/NO-GO) ---
     Log "4/9 sync + fstrim -v $MountPoint (GO/NO-GO discard)..."
+    # Fix 11/11 02:30 (abort réel 01:48, 2e tentative OK) : en PS 5.1, une ligne stderr d'une
+    # commande native sous EAP=Stop est un NativeCommandError TERMINANT (même classe que PR #15
+    # sur le script de montage) -- wsl.exe écrit des avertissements sur stderr et tuait le script
+    # ici, AVANT le Log "fstrim:" et sans dérouler le finally (qdrant resté down 31 min).
+    # EAP=Continue le temps de l'appel natif, Stop restauré après. Même garde sur tous les
+    # appels wsl.exe/docker.exe natifs du script.
+    $ErrorActionPreference = 'Continue'
     $trimOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "sync; fstrim -v $MountPoint 2>&1" 2>&1
+    $ErrorActionPreference = 'Stop'
     $trimStr = ($trimOut | Out-String).Trim()
     Log "  fstrim: $trimStr"
     if ($trimStr -match "not supported|operation not permitted|failed") {
@@ -131,12 +139,16 @@ echo "shim-clear-done"
     # On strip les \r AVANT l'encodage, quelles que soient les fins de ligne du fichier.
     $shimScriptLf = $shimScript -replace "`r", ""
     $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($shimScriptLf))
+    $ErrorActionPreference = 'Continue'
     $shimOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "echo $b64 | base64 -d | bash" 2>&1
+    $ErrorActionPreference = 'Stop'
     ($shimOut | Out-String).Trim() -split "`r?`n" | Where-Object { $_ } | ForEach-Object { Log "  shim: $_" }
 
     # --- 6. umount /mnt/qdrant-e (namespace PID-1) ---
     Log "6/9 umount $MountPoint (PID-1 ns)..."
+    $ErrorActionPreference = 'Continue'
     $umOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "sync; umount $MountPoint && echo UMOUNT_OK || (umount -l $MountPoint && echo UMOUNT_LAZY)" 2>&1
+    $ErrorActionPreference = 'Stop'
     $umStr = ($umOut | Out-String).Trim()
     Log "  umount: $umStr"
     if ($umStr -notmatch "UMOUNT_OK|UMOUNT_LAZY") { throw "UMOUNT_FAILED: $umStr" }
@@ -145,7 +157,9 @@ echo "shim-clear-done"
     $vhd = Get-VHD -Path $VhdxPath
     $diskNum = $vhd.DiskNumber
     Log "7/9 wsl --unmount \\.\PHYSICALDRIVE$diskNum..."
+    $ErrorActionPreference = 'Continue'
     $wuOut = & wsl.exe --unmount "\\.\PHYSICALDRIVE$diskNum" 2>&1
+    $ErrorActionPreference = 'Stop'
     Log "  wsl --unmount (rc=$LASTEXITCODE): $(($wuOut | Out-String).Trim())"
     Start-Sleep 2
 
