@@ -223,8 +223,27 @@ Log "$MountPoint marque shared (propagation cross-distro)"
 # \\wsl.localhost\Ubuntu\srv\qdrant-e\... (overlay docker-compose.production.pathfix.yml).
 # Idempotent : bind deja present -> no-op.
 $aliasPoint = "/srv/qdrant-e"
-& wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "mkdir -p $aliasPoint && (mountpoint -q $aliasPoint || mount --bind $MountPoint $aliasPoint) && mount --make-shared $aliasPoint" 2>&1 | Out-Null
-Log "Alias $aliasPoint -> $MountPoint (bind, shared) verifie"
+# 13/11/2026 : l'echec du bind etait MASQUE (2>&1 | Out-Null + log inconditionnel) -- apres le
+# reboot du 13/11 l'alias est reste mort 65 min sans aucune trace dans le log. On capture le rc
+# et on VERIFIE le sentinel A TRAVERS l'alias ; 2eme tentative = purge d'un bind perime.
+$aliasCmd = "mkdir -p $aliasPoint && (mountpoint -q $aliasPoint || mount --bind $MountPoint $aliasPoint) && mount --make-shared $aliasPoint"
+$aliasSz = ""
+$aliasOut = ""
+for ($attempt = 1; $attempt -le 2; $attempt++) {
+    if ($attempt -eq 2) {
+        & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "umount $aliasPoint 2>/dev/null" 2>&1 | Out-Null
+        Start-Sleep -Seconds 1
+    }
+    $aliasOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c $aliasCmd 2>&1
+    $aliasRc = $LASTEXITCODE
+    $aliasSz = ((& wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "cat $aliasPoint/qdrant_data/storage/.qdrant_vhdx_sentinel 2>/dev/null | wc -c" 2>&1 | Out-String) -replace '\s','')
+    if ($aliasRc -eq 0 -and $aliasSz -eq "285") { break }
+}
+if ($aliasSz -eq "285") {
+    Log "Alias $aliasPoint -> $MountPoint (bind, shared) verifie (sentinel=$aliasSz, tentative $attempt)" "OK"
+} else {
+    Log "Alias $aliasPoint -> $MountPoint ECHEC apres $attempt tentative(s) (rc=$aliasRc sentinel='$aliasSz') : $(($aliasOut | Out-String).Trim())" "ERR"
+}
 
 # --- Phase 5: Verification PAR DEVICE (label), pas seulement compte collections ---
 # Lecon 24/05: le rootfs leftover contient ~14 collection dirs stale -> un simple
