@@ -17,16 +17,24 @@ DriveFS (inchangé). Il faut un **refresh token OAuth** du titulaire du Drive : 
 
 ## Gestes user (une seule fois)
 
-### 1. Créer un client OAuth « Application de bureau » (~3 min)
+### 1. Créer un client OAuth « Application de bureau » (~4 min)
 
-1. Ouvrir https://console.cloud.google.com/apis/credentials — projet **`myia-backups`**
+1. Ouvrir <https://console.cloud.google.com/apis/credentials> — projet **`myia-backups`**
    (celui du SA `qdrant-backup-purger@myia-backups.iam.gserviceaccount.com`).
 2. Si l'écran demande de configurer l'« Écran de consentement OAuth » d'abord :
    choisir **Externe**, renseigner un nom d'appli (ex. `qdrant-backup-retention`), ajouter
    votre email comme utilisateur test. Pas d'autres champs utiles.
-3. **Créer des identifiants → ID client OAuth → Application de bureau → Créer**.
-4. Copier l'**ID client** et le **Secret client** affichés.
-5. Les coller dans `myia_qdrant/.gdrive_oauth_client.json` (gitignoré) :
+3. **IMPORTANT — publier l'application** : écran de consentement → **Audience** (ou
+   « Statut de publication ») → **Publier l'application → En production**. Sans cette
+   publication, l'appli reste « En test » et **Google fait expirer l'autorisation 7 jours
+   après le consentement** (« Authorizations by a test user will expire seven days from
+   the time of consent », aide Google Cloud) — le jeton mourrait vers le 24/11 et la
+   rétention retomberait sur la corbeille. La publication ne déclenche **aucune**
+   vérification Google : c'est instantané, pour un usage personnel.
+4. **Créer des identifiants → ID client OAuth → Application de bureau → Créer**.
+5. Copier l'**ID client** et le **Secret client** affichés.
+6. Les coller dans `myia_qdrant/.gdrive_oauth_client.json` (gitignoré) :
+
    ```json
    { "client_id": "xxxx.apps.googleusercontent.com", "client_secret": "GOCSPX-xxxx" }
    ```
@@ -35,7 +43,14 @@ DriveFS (inchangé). Il faut un **refresh token OAuth** du titulaire du Drive : 
 
 Demander à la lane qdrant de lancer `myia_qdrant/scripts/utilities/gdrive_oauth_consent.ps1`
 (ou le lancer soi-même) : le navigateur s'ouvre sur Google, compte
-**jsboige@gmail.com** → **Autoriser**. L'écran dira :
+**jsboige@gmail.com** → **Autoriser**. Deux écrans sont normaux :
+
+- Éventuellement **« Google n'a pas validé cette application »** : cliquer
+  **Paramètres avancés → Accéder à [nom de l'appli]**. C'est l'avertissement standard des
+  applis personnelles non vérifiées (aucune vérification Google n'a été demandée — elle
+  est inutile pour un usage privé, et le fait que VOUS êtes le créateur de l'appli rend
+  l'écran purement informatif).
+- Puis la demande de permission :
 
 > « Voir, modifier, créer et supprimer définitivement l'intégralité de vos fichiers
 > Google Drive »
