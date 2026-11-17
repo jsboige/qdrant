@@ -380,16 +380,26 @@ foreach ($d in $destinations) {
         if (-not $keep.Contains($x.Name)) {
             if ($PSCmdlet.ShouldProcess($x.FullName, 'Remove old snapshot dir')) {
                 if ($permDelete) {
+                    # Fail-safe STRICT (relect. coord. 17/11) : si l'API echoue (token expire/revogue,
+                    # reseau), on ne supprime NI definitivement NI via DriveFS — rien ne part en
+                    # corbeille, les copies supplementaires restent. Un retour silencieux a la
+                    # corbeille serait RX162 revu ; le sweep releve "perm-delete rc=" dans le log
+                    # du jour et escalade ([ASK]) tant que le token n'est pas repare.
+                    $rcPerm = -1
                     try {
                         $out = & powershell.exe -NoProfile -File $permDelete -DeleteDay $x.Name -Machine $MachineId -Collection $Collection 2>&1
-                        $rc = $LASTEXITCODE
+                        $rcPerm = $LASTEXITCODE
                         foreach ($l in @($out)) { if ($l) { Write-Log "perm-delete: $l" } }
-                        if ($rc -eq 0) { $deleted++; Write-Log "Retention ($($d.Name)) deleted PERMANENTLY: $($x.Name)" }
-                        else { Write-Log "WARN: perm-delete rc=$rc pour $($x.Name) - NON supprime ce run (garde fail-safe)" 'WARN' }
                     } catch { Write-Log "WARN: perm-delete invocation echouee $($x.Name): $($_.Exception.Message)" 'WARN' }
-                    # DriveFS peut lister le dossier encore quelques minutes (cache) : le repousser
-                    # cote DriveFS pour que l'enumeration locale du prochain run retombe dessus au pire idempotent.
-                    try { Remove-Item -Path $x.FullName -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+                    if ($rcPerm -eq 0) {
+                        $deleted++
+                        Write-Log "Retention ($($d.Name)) deleted PERMANENTLY: $($x.Name)"
+                        # Cache eviction DriveFS uniquement apres succes server-side (le dossier est
+                        # deja supprime cote Drive ; ceci ne peut pas le ressusciter en corbeille).
+                        try { Remove-Item -Path $x.FullName -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+                    } else {
+                        Write-Log "WARN: perm-delete rc=$rcPerm pour $($x.Name) - RIEN supprime (fail-safe : ni definitif ni corbeille ; ESCALADE si recursif, token a re-consentir ?)" 'WARN'
+                    }
                 } else {
                     try { Remove-Item -Path $x.FullName -Recurse -Force; $deleted++; Write-Log "Retention ($($d.Name)) deleted: $($x.Name)" }
                     catch { Write-Log "WARN: delete failed $($x.Name): $($_.Exception.Message)" 'WARN' }

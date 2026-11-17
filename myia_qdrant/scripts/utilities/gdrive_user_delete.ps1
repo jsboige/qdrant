@@ -13,9 +13,9 @@
 #   gdrive_user_delete.ps1 -DeleteDay 2026-11-14 [-Machine myia-ai-01] [-Collection ...]
 #       -> supprime DEFINITIVEMENT <root>/<machine>/<collection>/<jour>/* + le dossier jour.
 #          Idempotent : jour deja absent -> ALREADY_ABSENT exit 0. Garde : >10 items -> refus (exit 5).
-#   gdrive_user_delete.ps1 -PurgeTrashSnapshots          -> LISTE les .snapshot en corbeille (dry-run)
+#   gdrive_user_delete.ps1 -PurgeTrashSnapshots          -> LISTE les '*snapshot*' en corbeille (dry-run)
 #   gdrive_user_delete.ps1 -PurgeTrashSnapshots -Execute -> les supprime DEFINITIVEMENT par ID
-#      (chirurgical : uniquement les noms contenant '.snapshot' ; jamais d'emptyTrash global)
+#      (chirurgical : uniquement les noms contenant 'snapshot' ; jamais d'emptyTrash global)
 #
 # GARDE EN AMONT (inchangee) : l'appelant (qdrant_snapshot_backup.ps1) ne lance la retention
 # qu'APRES le SA gate (copies conservees confirmees server-side). Ce script ne supprime JAMAIS
@@ -78,7 +78,11 @@ function Remove-ApiFile([string]$FileId, [string]$Label) {
 
 # --- mode 1 : purge chirurgicale de la corbeille (uniquement nos snapshots) -------
 if ($PurgeTrashSnapshots) {
-    $q = [uri]::EscapeDataString("trashed=true and name contains '.snapshot'")
+    # Relect. coord. 17/11 : 'name contains' de l'API Drive a une semantique de PREFIXE par
+    # terme — '.snapshot' (avec point) peut rater des noms reels. On cherche 'snapshot' (plus
+    # large), la chirurgicalite vient du dry-run : la liste est montree AVANT -Execute, et
+    # 'screenshot' ne contient pas 'snapshot' (pas de faux positif de captures d'ecran).
+    $q = [uri]::EscapeDataString("trashed=true and name contains 'snapshot'")
     $items = @()
     try {
         $page = Invoke-RestMethod -Uri "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size)&pageSize=100" -Headers $script:H -TimeoutSec 60
@@ -88,7 +92,7 @@ if ($PurgeTrashSnapshots) {
             $items += @($page.files)
         }
     } catch { Write-Output "ERROR: listage corbeille echoue : $($_.Exception.Message)"; exit 3 }
-    Write-Output "TRASH_SNAPSHOTS: $($items.Count) item(s) '.snapshot' en corbeille"
+    Write-Output "TRASH_SNAPSHOTS: $($items.Count) item(s) 'snapshot' en corbeille"
     $total = 0L
     foreach ($i in $items) { Write-Output ("  {0} | {1} o" -f $i.name, $i.size); $total += [long]$i.size }
     Write-Output ("TOTAL: {0} octets ({1} Go)" -f $total, [Math]::Round($total/1GB, 2))

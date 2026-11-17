@@ -91,7 +91,7 @@ curl http://localhost:6335/healthz   # Students
 # exists (one-time consent, `docs/gdrive-permanent-delete-setup.md`), the retention leg calls
 # `utilities/gdrive_user_delete.ps1` — Drive API `files.delete` with user credentials = permanent, NO trash;
 # `qdrant_snapshot_backup.ps1` logs `deleted PERMANENTLY`. Without the token: legacy DriveFS→TRASH + WARN
-# (empty Drive trash when quota pinches). Trash purge of existing `*.snapshot*` items: surgical
+# (empty Drive trash when quota pinches). Trash purge of existing `*snapshot*` items: surgical
 # `-PurgeTrashSnapshots [-Execute]` (lists first; NEVER global emptyTrash — the trash isn't ours alone).
 .\myia_qdrant\scripts\qdrant_snapshot_backup.ps1                  # all defaults (offsite + local)
 .\myia_qdrant\scripts\qdrant_snapshot_backup.ps1 -SharedPath -    # local-only (skip offsite)
