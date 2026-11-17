@@ -69,6 +69,9 @@ QdrantValidator/[Oo]bj/
 # Reference only in docs/code ; the secret itself never enters git.
 myia_qdrant/.gdrive_sa.json
 myia-backups-*.json
+# OAuth user refresh token + client creds for Drive permanent-delete (Q8-b pivot, 2026-11-17)
+myia_qdrant/.gdrive_oauth.json
+myia_qdrant/.gdrive_oauth_client.json
 
 # Playwright MCP session artifacts (page snapshots, downloads)
 .playwright-mcp/
