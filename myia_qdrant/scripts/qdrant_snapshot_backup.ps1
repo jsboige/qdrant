@@ -46,6 +46,10 @@ param(
     [string]$MachineId   = '',
     [string]$SharedPath  = '',
     [string]$LocalCopyDir = 'D:\qdrant-backups',
+    # Transit temp (download ~190 Go/nuit) : param > H:\qdrant-tmp (si H: existe) > $env:TEMP.
+    # Maintenance 17/11 : chaque nuit paie ~2x187 Go sur C: (temp + cache DriveFS) - le temp
+    # quitte C: par defaut desormais ; H: absent => repli automatique sur %TEMP%.
+    [string]$TempDir = '',
     [int]$MinPoints      = 100000,
     # Retention: user ruling 2026-10-07 (Q4, "A+B") = keep 3 total. Historical default was 7 daily + 4 weekly Mondays.
     [int]$DailyKeep      = 3,
@@ -204,7 +208,12 @@ if ($missing.Count -eq 0) {
         $snapName = $createResp.result.name
         if ([string]::IsNullOrWhiteSpace($snapName)) { Write-Log 'FATAL: snapshot response missing name' 'ERROR'; exit 1 }
         Write-Log "Snapshot created: name=$snapName serverSize=$($createResp.result.size)"
-        $tmp = Join-Path $env:TEMP $snapName
+        if ([string]::IsNullOrWhiteSpace($TempDir)) {
+            if (Test-Path 'H:\') { $TempDir = 'H:\qdrant-tmp' } else { $TempDir = $env:TEMP }
+        }
+        if (-not (Test-Path $TempDir)) { New-Item -ItemType Directory -Path $TempDir -Force | Out-Null }
+        Write-Log "Temp dir: $TempDir (C: preserve)"
+        $tmp = Join-Path $TempDir $snapName
         try {
             Invoke-WebRequest -Uri "$QdrantUrl/collections/$Collection/snapshots/$snapName" -Headers $dlHeaders -OutFile $tmp -TimeoutSec 3600
         } catch { Write-Log "FATAL: download failed: $($_.Exception.Message)" 'ERROR'; exit 1 }
