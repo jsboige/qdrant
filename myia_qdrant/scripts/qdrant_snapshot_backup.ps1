@@ -51,9 +51,17 @@ param(
     # quitte C: par defaut desormais ; H: absent => repli automatique sur %TEMP%.
     [string]$TempDir = '',
     [int]$MinPoints      = 100000,
-    # Retention: user ruling 2026-10-07 (Q4, "A+B") = keep 3 total. Historical default was 7 daily + 4 weekly Mondays.
-    [int]$DailyKeep      = 3,
+    # Retention: user ruling 2026-11-17 (GO via Maintenance) = keep 1 offsite copy, with Q29
+    # doctrine: the predecessor is deleted ONLY after the new copy is verified server-side.
+    # At 03:17 today's copy is still uploading (DriveFS lags hours) -> offsite deletion is
+    # DEFERRED to the evening pass (-RetentionOnly, run by the 19:45 sweep). Historical: 3
+    # (2026-10-07, Q4 "A+B"), 7 daily + 4 weekly Mondays (original).
+    [int]$DailyKeep      = 1,
     [int]$WeeklyKeep     = 0,
+    # Evening pass: skip snapshot creation, run retention only (verify today's copy
+    # server-side, then permanently delete the predecessors). Exits 0 with a marker if
+    # today's backup is absent anywhere (fail-safe: nothing deleted).
+    [switch]$RetentionOnly,
     [string]$LogDir      = ''
 )
 
@@ -188,6 +196,12 @@ foreach ($d in $destinations) {
 $newSnapshotSize = 0L
 $sourceFile = $null
 $tmp = $null
+
+if ($RetentionOnly -and $missing.Count -gt 0) {
+    Write-Log "EVENING-PASS SKIPPED: today's snapshot absent from: $(($missing | ForEach-Object { $_.Name }) -join ', ') — nothing deleted (fail-safe)."
+    Write-Log 'Backup done'
+    exit 0
+}
 
 if ($missing.Count -eq 0) {
     Write-Log "Idempotent: all destinations have today's snapshot."
@@ -340,12 +354,24 @@ foreach ($d in $destinations) {
         $saVerify = Join-Path $PSScriptRoot 'utilities\gdrive_sa_verify.ps1'
         $saKey = Join-Path $PSScriptRoot '..\.gdrive_sa.json'
         if ((Test-Path $saVerify) -and (Test-Path $saKey)) {
-            # Target the newest kept dir STRICTLY OLDER than today: today's local copy is not
-            # uploaded yet (DriveFS background upload takes hours); yesterday's has had ~24 h.
-            # Verifying today's would fail every night and block retention forever.
-            $newestKept = $keep | Where-Object { $_ -lt $today } | Sort-Object -Descending | Select-Object -First 1
+            # Target: evening pass (-RetentionOnly) verifies TODAY's copy (uploaded during the
+            # day, ~16h by 19:45) — that is the Q29 "verify the new before deleting the old"
+            # for keep=1. Nightly pass targets the newest kept dir STRICTLY OLDER than today:
+            # today's local copy is not uploaded yet at 03:17 (DriveFS lags hours).
+            if ($RetentionOnly) {
+                $newestKept = $keep | Sort-Object -Descending | Select-Object -First 1
+            } else {
+                $newestKept = $keep | Where-Object { $_ -lt $today } | Sort-Object -Descending | Select-Object -First 1
+            }
             $newestFile = if ($newestKept) { Get-ChildItem -Path "$root/$newestKept" -Filter '*.snapshot' -File -ErrorAction SilentlyContinue | Select-Object -First 1 } else { $null }
             if (-not $newestKept) {
+                # keep=1 nightly: nothing verifiable yet (today still uploading) but older
+                # copies exist -> DEFER the whole offsite deletion to the evening pass (Q29).
+                $pendingDel = @($dayDirs | Where-Object { -not $keep.Contains($_.Name) })
+                if ($pendingDel.Count -gt 0) {
+                    Write-Log "SA gate: keep=$DailyKeep, today's copy not verifiable yet, $($pendingDel.Count) predecessor(s) pending — offsite retention DEFERRED to the evening pass (-RetentionOnly, Q29)" 'WARN'
+                    continue
+                }
                 Write-Log "SA gate: no kept dir older than today yet — retention proceeds (nothing prior to confirm)"
             } elseif (-not $newestFile) {
                 Write-Log "SA GATE: kept dir $newestKept has no snapshot file (unexpected) — retention SKIPPED this run (fail-safe)" 'WARN'
