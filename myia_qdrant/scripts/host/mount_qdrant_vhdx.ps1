@@ -133,7 +133,40 @@ if (-not $vhd.Attached) {
         FailExit -Code 3 -EventId 703 -Message "VHDX introuvable apres Mount-VHD: $VhdxPath"
     }
 } else {
-    Log "VHDX deja attache (idempotent)"
+    # Garde 17/11 (compaction interrompue) : un VHDX attache en LECTURE SEULE (reste de la
+    # phase 9 de compact_qdrant_vhdx.ps1 quand son processus meurt avant le finally) n'est
+    # PAS "deja attache" au sens idempotent -- continuer l'exposerait en non-inscriptible
+    # a WSL. On detache, puis on remonte en lecture-ecriture.
+    $diskRo = $null
+    try { $diskRo = (Get-Disk -Number $vhd.DiskNumber).IsReadOnly } catch {}
+    if ($diskRo) {
+        Log "VHDX attache en LECTURE SEULE (reste de compaction) -> Dismount-VHD puis Mount-VHD RW" "WARN"
+        try {
+            Dismount-VHD -Path $VhdxPath
+        } catch {
+            FailExit -Code 3 -EventId 703 -Message "Dismount-VHD (garde lecture seule) a echoue : $($_.Exception.Message)"
+        }
+        Start-Sleep -Seconds 2
+        $vhd = Get-VHD -Path $VhdxPath -ErrorAction SilentlyContinue
+        if (-not $vhd) {
+            FailExit -Code 3 -EventId 703 -Message "VHDX introuvable apres Dismount-VHD: $VhdxPath"
+        }
+        if ($vhd.Attached) {
+            FailExit -Code 3 -EventId 703 -Message "VHDX toujours attache apres Dismount-VHD (garde lecture seule)"
+        }
+        try {
+            Mount-VHD -Path $VhdxPath -PassThru | Out-Null
+        } catch {
+            FailExit -Code 3 -EventId 703 -Message "Mount-VHD RW a echoue apres detachement RO : $($_.Exception.Message)"
+        }
+        Start-Sleep -Seconds 2
+        $vhd = Get-VHD -Path $VhdxPath -ErrorAction SilentlyContinue
+        if (-not $vhd) {
+            FailExit -Code 3 -EventId 703 -Message "VHDX introuvable apres Mount-VHD RW: $VhdxPath"
+        }
+    } else {
+        Log "VHDX deja attache (idempotent)"
+    }
 }
 $diskNum = $vhd.DiskNumber
 Log "VHDX attache: DiskNumber=$diskNum"
@@ -382,7 +415,14 @@ for d in /proc/[0-9]*; do
     nok=$((nok+1))
     continue
   fi
-  nsenter -t $pid -m -- bash -c "mkdir -p $alias && (mountpoint -q $alias || mount --bind $mpt $alias) && mount --make-shared $alias" 2>&1
+  # 17/11 : le bind peut etre PRESENT mais PERIME (source device disparu apres
+  # detach/re-attach du VHDX -> stat via l'alias rend I/O error, donc sz vide).
+  # L'ancien "mountpoint -q || bind" ne reparait JAMAIS ce cas : mountpoint reussit
+  # sur un montage mort, le bind etait saute, sz2 restait vide (mesure 17/11 13:07 :
+  # "avant='' apres='' ok=0 fixed=0" alors que /srv pointait vers /dev/sdd disparu,
+  # et le compose up echouait sur "input/output error"). umount -l systematique
+  # avant de re-binder -- meme remede que la repair manuelle du 17/11 13:12.
+  nsenter -t $pid -m -- bash -c "mkdir -p $alias; umount -l $alias 2>/dev/null; mount --bind $mpt $alias && mount --make-shared $alias" 2>&1
   sz2=$(nsenter -t $pid -m -- stat -c %s $alias/qdrant_data/storage/.qdrant_vhdx_sentinel 2>/dev/null)
   echo "proxy-alias:pid=$pid ns=$ns avant='${sz}' apres='${sz2}'"
   [ "$sz2" = "$expected" ] && nfix=$((nfix+1))
