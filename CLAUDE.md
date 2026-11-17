@@ -84,9 +84,15 @@ curl http://localhost:6335/healthz   # Students
 # key `myia_qdrant/.gdrive_sa.json`, gitignored) that the newest pre-today kept snapshot is really on Drive —
 # on ABSENT/divergent/verifier-failure, offsite retention is SKIPPED (fail-safe). **Part B as specified is
 # IMPOSSIBLE (measured 01/11):** the SA holds writer on `Backups-Cloud/qdrant-snapshots` but a service account
-# gets canTrash/canDelete=false on a consumer My Drive → files.delete AND trashed=true both 403. Deletions stay
-# DriveFS→TRASH (30 d auto-purge); empty Drive trash when quota pinches (~56 GB/night tail). Full-B path if ever
-# wanted: make the SA the uploader (owner ⇒ canDelete true) — rework of the offsite copy leg.
+# gets canTrash/canDelete=false on a consumer My Drive → files.delete AND trashed=true both 403. **The SA-uploader
+# rework is ALSO impossible (measured 17/11):** a service account has zero storage quota on a consumer My Drive —
+# resumable upload as SA → `403 Storage Quota Exceeded` (only escape = Shared Drives = Workspace, absent).
+# **PIVOT landed 17/11 (RX162, PR #23): permanent delete AS THE USER.** When `myia_qdrant/.gdrive_oauth.json`
+# exists (one-time consent, `docs/gdrive-permanent-delete-setup.md`), the retention leg calls
+# `utilities/gdrive_user_delete.ps1` — Drive API `files.delete` with user credentials = permanent, NO trash;
+# `qdrant_snapshot_backup.ps1` logs `deleted PERMANENTLY`. Without the token: legacy DriveFS→TRASH + WARN
+# (empty Drive trash when quota pinches). Trash purge of existing `*.snapshot*` items: surgical
+# `-PurgeTrashSnapshots [-Execute]` (lists first; NEVER global emptyTrash — the trash isn't ours alone).
 .\myia_qdrant\scripts\qdrant_snapshot_backup.ps1                  # all defaults (offsite + local)
 .\myia_qdrant\scripts\qdrant_snapshot_backup.ps1 -SharedPath -    # local-only (skip offsite)
 

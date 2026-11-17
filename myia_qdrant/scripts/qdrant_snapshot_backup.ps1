@@ -360,16 +360,44 @@ foreach ($d in $destinations) {
         }
     }
 
+    # PERMANENT DELETE (offsite, Q8-b pivot 2026-11-17) : DriveFS Remove-Item envoie chaque
+    # rotation en CORBEILLE (~30-190 Go/nuit -> forfait 5 To sature, RX162). Avec un token
+    # OAuth user present (.gdrive_oauth.json, consenti via gdrive_oauth_consent.ps1), la
+    # suppression se fait via l'API Drive EN TANT QUE USER : files.delete = DEFINITIF, sans
+    # corbeille (SA-uploader mesure IMPOSSIBLE le 17/11 : 403 Storage Quota Exceeded, un SA
+    # ne peut pas posseder de fichiers sur un My Drive consommateur). Sans token : legacy
+    # corbeille + WARN (le user vide la corbeille a la main).
+    $permDelete = $null
+    if ($d.Name -eq 'offsite') {
+        $userDelete = Join-Path $PSScriptRoot 'utilities\gdrive_user_delete.ps1'
+        $oauthToken = Join-Path $PSScriptRoot '..\.gdrive_oauth.json'
+        if ((Test-Path $userDelete) -and (Test-Path $oauthToken)) { $permDelete = $userDelete }
+        else { Write-Log "PERM-DELETE: helper ou token OAuth absent - rotations offsite partiront EN CORBEILLE (legacy)" 'WARN' }
+    }
+
     $deleted = 0
     foreach ($x in $dayDirs) {
         if (-not $keep.Contains($x.Name)) {
             if ($PSCmdlet.ShouldProcess($x.FullName, 'Remove old snapshot dir')) {
-                try { Remove-Item -Path $x.FullName -Recurse -Force; $deleted++; Write-Log "Retention ($($d.Name)) deleted: $($x.Name)" }
-                catch { Write-Log "WARN: delete failed $($x.Name): $($_.Exception.Message)" 'WARN' }
+                if ($permDelete) {
+                    try {
+                        $out = & powershell.exe -NoProfile -File $permDelete -DeleteDay $x.Name -Machine $MachineId -Collection $Collection 2>&1
+                        $rc = $LASTEXITCODE
+                        foreach ($l in @($out)) { if ($l) { Write-Log "perm-delete: $l" } }
+                        if ($rc -eq 0) { $deleted++; Write-Log "Retention ($($d.Name)) deleted PERMANENTLY: $($x.Name)" }
+                        else { Write-Log "WARN: perm-delete rc=$rc pour $($x.Name) - NON supprime ce run (garde fail-safe)" 'WARN' }
+                    } catch { Write-Log "WARN: perm-delete invocation echouee $($x.Name): $($_.Exception.Message)" 'WARN' }
+                    # DriveFS peut lister le dossier encore quelques minutes (cache) : le repousser
+                    # cote DriveFS pour que l'enumeration locale du prochain run retombe dessus au pire idempotent.
+                    try { Remove-Item -Path $x.FullName -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+                } else {
+                    try { Remove-Item -Path $x.FullName -Recurse -Force; $deleted++; Write-Log "Retention ($($d.Name)) deleted: $($x.Name)" }
+                    catch { Write-Log "WARN: delete failed $($x.Name): $($_.Exception.Message)" 'WARN' }
+                }
             } else { Write-Log "WhatIf ($($d.Name)): would delete $($x.Name)" }
         }
     }
-    Write-Log "Retention ($($d.Name)) complete: kept=$($keep.Count) deleted=$deleted"
+    Write-Log "Retention ($($d.Name)) complete: kept=$($keep.Count) deleted=$deleted$(if ($permDelete) { ' (permanent)' })"
 }
 
 Write-Log 'Backup done'
