@@ -174,15 +174,35 @@ echo "shim-clear-done"
     } else {
         Log "9/9 Mount-VHD -ReadOnly + Optimize-VHD -Mode $OptimizeMode (peut durer 10-40 min)..."
     }
-    Mount-VHD -Path $VhdxPath -ReadOnly -NoDriveLetter
+    # Garde 17/11 09:21Z : Optimize-VHD a termine le shrink PUIS le processus est mort
+    # (TaskScheduler event 201, wscript exit 0x80070001 = ERROR_INVALID_FUNCTION) SANS
+    # derouler le finally -- VHDX reste attache en lecture seule, service down 3h50.
+    # Chaque etape de la phase 9 est desormais isolee : une erreur NE DOIT PAS
+    # court-circuiter le Dismount-VHD suivant ni le finally de remontage. (Une mort
+    # DURE du processus reste possible -- le filet ultime reste la tache de clôture
+    # externe, pas le finally : lecon 12/11.)
+    try {
+        Mount-VHD -Path $VhdxPath -ReadOnly -NoDriveLetter
+    } catch {
+        Log "Mount-VHD (RO) a rendu : $($_.Exception.Message) — poursuite" "WARN"
+    }
     Start-Sleep 2
     if (-not $SkipOptimize) {
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        Optimize-VHD -Path $VhdxPath -Mode $OptimizeMode
-        $sw.Stop()
-        Log "Optimize-VHD ($OptimizeMode) termine en $([math]::Round($sw.Elapsed.TotalMinutes,1)) min" "OK"
+        try {
+            Optimize-VHD -Path $VhdxPath -Mode $OptimizeMode
+            $sw.Stop()
+            Log "Optimize-VHD ($OptimizeMode) termine en $([math]::Round($sw.Elapsed.TotalMinutes,1)) min" "OK"
+        } catch {
+            $sw.Stop()
+            Log "Optimize-VHD ($OptimizeMode) a rendu une erreur apres $([math]::Round($sw.Elapsed.TotalMinutes,1)) min : $($_.Exception.Message) — le shrink a pu partiellement s'appliquer, poursuite vers Dismount + finally" "WARN"
+        }
     }
-    Dismount-VHD -Path $VhdxPath
+    try {
+        Dismount-VHD -Path $VhdxPath
+    } catch {
+        Log "Dismount-VHD (post-Optimize) a rendu : $($_.Exception.Message) — le mount script repare via sa garde lecture-seule" "WARN"
+    }
     Start-Sleep 2
     Log "vhdx on-disk apres Optimize : $(VhdxGB) GB (etait $vhdxBefore GB)" "OK"
 }
