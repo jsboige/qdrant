@@ -84,13 +84,26 @@ if (-not $sessionUri) { Write-Output 'ERROR: pas de session URI (Location absent
 Write-Output "SESSION_OK: resumable, chunk=$ChunkMiB MiB, total=$localSize o"
 
 # --- PUT par tranches, statut VERIFIE, reprise 308 ------------------------------------
-# (lecons du 17/11 matinee : toujours verifier le statut — un 4xx silencieux bouclerait
-#  "avec succes" sans rien envoyer ; en 5.1 comme en 7, un statut d'echec leve, on le lit)
+# Lecons du 17/11 : (1) toujours verifier le statut — un 4xx silencieux bouclerait "avec
+# succes" ; (2) Invoke-WebRequest -Body byte[] CORROMPT les gros corps (mesure : Drive recoit
+# +0,4-0,8 % d'octets vs Content-Range, taille-dependant, erreur 400 explicite de Google ;
+# un probe 1 MiB passe, 8/64 MiB echouent) -> HttpClient + ByteArrayContent (octets exacts,
+# aucune couche PowerShell sur le corps). PS 7 requis (HttpClient charge par defaut).
 $chunkBytes = $ChunkMiB * 1MB
+$hc = [System.Net.Http.HttpClient]::new()
+$hc.Timeout = [TimeSpan]::FromMinutes(30)
 $fs = [IO.File]::OpenRead((Resolve-Path $Upload).Path)
 $buf = New-Object byte[] $chunkBytes
 $offset = 0L; $chunkIdx = 0; $failStreak = 0
 $sw = [Diagnostics.Stopwatch]::StartNew()
+function Send-Chunk([byte[]]$Bytes, [int]$Count, [string]$RangeHdr) {
+    $req = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Put, $script:sessionUri)
+    $req.Content = [System.Net.Http.ByteArrayContent]::new($Bytes, 0, $Count)
+    $req.Content.Headers.TryAddWithoutValidation('Content-Range', $RangeHdr) | Out-Null
+    $null = $req.Content.Headers.TryAddWithoutValidation('Content-Type', 'application/octet-stream')
+    $respMsg = $script:hc.SendAsync($req).GetAwaiter().GetResult()
+    return $respMsg
+}
 try {
     while ($offset -lt $localSize) {
         # Min en long PUIS cast : $localSize (187 Go) depasse Int32.Max — le cast direct
@@ -98,17 +111,12 @@ try {
         $toRead = [Math]::Min([long]$chunkBytes, $localSize - $offset)
         $read = $fs.Read($buf, 0, [int]$toRead)
         if ($read -le 0) { Write-Output "ERROR: lecture a 0 octet a offset $offset"; exit 5 }
-        $data = if ($read -eq $buf.Length) { $buf } else { $d2 = New-Object byte[] $read; [Array]::Copy($buf, $d2, $read); $d2 }
         $last = $offset + $read - 1
-        $status = 0
-        try {
-            $resp = Invoke-WebRequest -Method Put -Uri $sessionUri -Headers @{ 'Content-Range' = "bytes $offset-$last/$localSize" } -ContentType 'application/octet-stream' -Body $data -TimeoutSec 900
-            $status = [int]$resp.StatusCode
-        } catch {
-            if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode } else { $status = -1 }
-        }
+        $respMsg = Send-Chunk $buf $read "bytes $offset-$last/$localSize"
+        $status = [int]$respMsg.StatusCode
         if ($status -eq 308 -or ($status -ge 200 -and $status -lt 300)) {
             $failStreak = 0
+            $respMsg.Dispose()
             $offset += $read; $chunkIdx++
             if ($chunkIdx % 32 -eq 0) {
                 $pct = [Math]::Round(100 * $offset / $localSize, 1)
@@ -119,18 +127,20 @@ try {
         }
         # echec HTTP : streak borne, reprise par interrogation de session
         $failStreak++
+        $errBody = ''
+        try { $errBody = $respMsg.Content.ReadAsStringAsync().GetAwaiter().GetResult() } catch {}
+        Write-Output "chunk echoue (statut $status) a offset ${offset}: $($errBody.Substring(0, [Math]::Min(200, $errBody.Length)))"
         if ($failStreak -ge 5) { Write-Output "ERROR: 5 echecs consecutifs a offset $offset (dernier statut $status)"; exit 5 }
         Start-Sleep -Seconds (10 * $failStreak)
-        try {
-            $st = Invoke-WebRequest -Method Put -Uri $sessionUri -Headers @{ 'Content-Range' = "bytes */$localSize" } -TimeoutSec 120
-            if ([int]$st.StatusCode -eq 308) {
-                $rng = @($st.Headers['Range'])[0]
-                if ($rng -match 'bytes=0-(\d+)') { $rcv = [long]$Matches[1] + 1; if ($rcv -ne $offset) { $offset = $rcv; $fs.Position = $rcv; continue } }
-            }
-        } catch {}
+        $probe = Send-Chunk @() 0 "bytes */$localSize"
+        if ([int]$probe.StatusCode -eq 308) {
+            $rng = @($probe.Headers.Range) | Select-Object -First 1
+            $rngTxt = "$rng"
+            if ($rngTxt -match 'bytes=0-(\d+)') { $rcv = [long]$Matches[1] + 1; if ($rcv -ne $offset) { $offset = $rcv; $fs.Position = $rcv; continue } }
+        }
         $fs.Position = $offset
     }
-} finally { $fs.Close() }
+} finally { $fs.Close(); $hc.Dispose() }
 
 # --- verification finale server-side ---------------------------------------------------
 $fin = Find-ChildByName $leaf $dayFolderId $false
