@@ -63,11 +63,16 @@ Write-Output "  Permission demandee : voir/modifier/supprimer DEFINITIVEMENT les
 Start-Process $authUrl
 
 # --- capture du code ------------------------------------------------------------
+# Bug 17/11 (relect. coord.) : GetContextAsync() appele a CHAQUE tour sans reutiliser la
+# tache en attente — les appels abandonnes restent en file chez HttpListener et la requete
+# du navigateur part au plus ancien, jamais lu -> navigateur pendu sur localhost et timeout
+# (exit 2). Correctif : la tache est creee UNE fois avant la boucle ; on ne la recree jamais
+# (on sort de la boucle des qu'une requete arrive).
 $code = $null
+$ctxTask = $listener.GetContextAsync()
 $sw = [Diagnostics.Stopwatch]::StartNew()
 while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
     if (-not $listener.IsListening) { break }
-    $ctxTask = $listener.GetContextAsync()
     $done = $ctxTask.AsyncWaitHandle.WaitOne(1000)
     if (-not $done) { continue }
     $ctx = $ctxTask.Result

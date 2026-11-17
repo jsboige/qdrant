@@ -24,13 +24,18 @@ DriveFS (inchangé). Il faut un **refresh token OAuth** du titulaire du Drive : 
 2. Si l'écran demande de configurer l'« Écran de consentement OAuth » d'abord :
    choisir **Externe**, renseigner un nom d'appli (ex. `qdrant-backup-retention`), ajouter
    votre email comme utilisateur test. Pas d'autres champs utiles.
-3. **IMPORTANT — publier l'application** : écran de consentement → **Audience** (ou
-   « Statut de publication ») → **Publier l'application → En production**. Sans cette
-   publication, l'appli reste « En test » et **Google fait expirer l'autorisation 7 jours
-   après le consentement** (« Authorizations by a test user will expire seven days from
-   the time of consent », aide Google Cloud) — le jeton mourrait vers le 24/11 et la
-   rétention retomberait sur la corbeille. La publication ne déclenche **aucune**
-   vérification Google : c'est instantané, pour un usage personnel.
+3. **IMPORTANT — publier l'application** : la publication exige d'abord une **page
+   d'accueil** et un **lien de confidentialité** sur un **domaine autorisé** — le dépôt
+   public sur `github.com` convient (domaine autorisé par défaut ; mesuré 17/11 : page
+   d'accueil = <https://github.com/jsboige/roo-extensions>, confidentialité =
+   <https://github.com/jsboige/roo-extensions#privacy> — toute URL github.com stable passe).
+   Puis écran de consentement → **Audience** (ou « Statut de publication ») → **Publier
+   l'application → En production**. Sans cette publication, l'appli reste « En test » et
+   **Google fait expirer l'autorisation 7 jours après le consentement** (« Authorizations
+   by a test user will expire seven days from the time of consent », aide Google Cloud) —
+   le jeton mourrait vers le 24/11 et la rétention retomberait sur la corbeille. La
+   publication ne déclenche **aucune** vérification Google : c'est instantané, pour un
+   usage personnel.
 4. **Créer des identifiants → ID client OAuth → Application de bureau → Créer**.
 5. Copier l'**ID client** et le **Secret client** affichés.
 6. Les coller dans `myia_qdrant/.gdrive_oauth_client.json` (gitignoré) :
