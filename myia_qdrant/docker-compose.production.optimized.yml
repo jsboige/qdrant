@@ -1,6 +1,8 @@
+# DORMANT legacy variant — canonical = docker-compose.production.yml (+ pathfix overlay).
+# Binds the PRE-VHDX path (/home/jesse/qdrant_data) and lacks the sentinel gate: do NOT deploy.
 services:
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.20.2  # repinned from 'latest' 2026-11-18 (never float)
     container_name: qdrant_production
     restart: always
     
