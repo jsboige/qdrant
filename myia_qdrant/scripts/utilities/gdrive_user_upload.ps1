@@ -45,7 +45,9 @@ Write-Output "AUTH_OK: access token longueur $($acc.access_token.Length)"
 function Find-ChildByName([string]$Name, [string]$ParentId, [bool]$Folder) {
     $mi = if ($Folder) { " and mimeType='application/vnd.google-apps.folder'" } else { '' }
     $q = [uri]::EscapeDataString("name='$Name' and '$ParentId' in parents and trashed=false$mi")
-    try { return (Invoke-RestMethod -Uri "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size)&pageSize=10" -Headers $script:H -TimeoutSec 60).files }
+    # @() : Count/[0] corrects sur les deux moteurs (voir gdrive_user_delete.ps1 - PS 5.1
+    # n'a pas de Count intrinseque sur un PSCustomObject unique).
+    try { return @((Invoke-RestMethod -Uri "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size)&pageSize=10" -Headers $script:H -TimeoutSec 60).files) }
     catch { Write-Output "ERROR: requete Drive echouee (name=$Name) : $($_.Exception.Message)"; exit 3 }
 }
 

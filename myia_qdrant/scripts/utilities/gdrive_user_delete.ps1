@@ -58,7 +58,12 @@ function Find-Children([string]$Name, [string]$ParentId, [bool]$Folder) {
     $mi = if ($Folder) { " and mimeType='application/vnd.google-apps.folder'" } else { '' }
     $q = [uri]::EscapeDataString("name='$Name' and '$ParentId' in parents and trashed=false$mi")
     try {
-        return (Invoke-RestMethod -Uri "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size)&pageSize=10" -Headers $script:H -TimeoutSec 60).files
+        # NB 18/11 : sous PS 5.1 (l'appelant = powershell.exe), un PSCustomObject unique
+        # n'a PAS de Count intrinseque (.Count = $null -> garde "-not .Count" vraie alors
+        # que l'API avait tout renvoye, mesure passe 19:46 rc=7 x3). Le @() ICI ne suffit
+        # PAS (le pipeline deroule les tableaux au retour) : c'est le @() AUX SITES
+        # D'APPEL ci-dessous qui garantit Count=0/1/N et [0] corrects sur les 2 moteurs.
+        return @((Invoke-RestMethod -Uri "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size)&pageSize=10" -Headers $script:H -TimeoutSec 60).files)
     } catch { Write-Output "ERROR: requete Drive echouee (name=$Name) : $($_.Exception.Message)"; exit 3 }
 }
 function Remove-ApiFile([string]$FileId, [string]$Label) {
@@ -105,11 +110,11 @@ if ($PurgeTrashSnapshots) {
 }
 
 # --- mode 2 : suppression definitive d'un dossier jour ------------------------------
-$mDir = Find-Children $Machine $RootFolderId $true
+$mDir = @(Find-Children $Machine $RootFolderId $true)
 if (-not $mDir -or -not $mDir.Count) { Write-Output "ERROR: dossier machine '$Machine' introuvable sous $RootFolderId"; exit 7 }
-$cDir = Find-Children $Collection $mDir[0].id $true
+$cDir = @(Find-Children $Collection $mDir[0].id $true)
 if (-not $cDir -or -not $cDir.Count) { Write-Output "ERROR: dossier collection '$Collection' introuvable"; exit 7 }
-$dDir = Find-Children $DeleteDay $cDir[0].id $true
+$dDir = @(Find-Children $DeleteDay $cDir[0].id $true)
 if (-not $dDir -or -not $dDir.Count) { Write-Output "ALREADY_ABSENT: dossier jour $DeleteDay introuvable (rien a faire)"; exit 0 }
 $dayId = $dDir[0].id
 Write-Output "TARGET: $Machine/$Collection/$DeleteDay -> $dayId"
@@ -132,7 +137,7 @@ foreach ($k in $kids) { if (-not (Remove-ApiFile $k.id $k.name)) { $fail++ } }
 if (-not (Remove-ApiFile $dayId "$DeleteDay (dossier)")) { $fail++ }
 
 # Verification d'absence (preuve de preservation = keep-3 intact en amont, absence mesuree ici)
-$chk = Find-Children $DeleteDay $cDir[0].id $true
+$chk = @(Find-Children $DeleteDay $cDir[0].id $true)
 if ($chk -and $chk.Count) { Write-Output "ERROR: dossier jour $DeleteDay ENCORE present apres suppression"; exit 5 }
 if ($fail) { Write-Output "PARTIAL: $fail echec(s) - relancer (idempotent)"; exit 5 }
 Write-Output "DELETE_DONE: $Machine/$Collection/$DeleteDay supprime DEFINITIVEMENT (sans corbeille)"
