@@ -1,9 +1,9 @@
 services:
   qdrant_students:
-    # Pinned to v1.20.0 (2026-10-29, first tenant bumped — 24h soak before production).
-    # Was v1.19.2 (2026-10-06). Students data = regenerable per-workspace `ws-*` code
-    # indexes — recall-baseline drift is a non-issue here.
-    image: qdrant/qdrant:v1.20.0
+    # Pinned to v1.20.2 (2026-11-18, patch bump after v1.20.0 soak 20d).
+    # Students data = regenerable per-workspace `ws-*` code indexes — recall-baseline
+    # drift is a non-issue here.
+    image: qdrant/qdrant:v1.20.2
     container_name: qdrant_students
     restart: always
     

@@ -4,13 +4,14 @@
 
 services:
   qdrant:
-    # Pinned to v1.20.0 (2026-11-01, runbook Phase C; students soaked 48h+ on v1.20.0 since 29/10).
-    # From v1.19.2 (2026-10-06): HNSW floor() level assignment (rebuilds produce a different graph —
-    # bench vs ARCHIVED 07/10 bench, never vs unarchived numbers), enforce_internal_auth default-on
-    # (no-op mono-node, verified at startup), turbo8/turbo16 + VNNI + inline_storage available (NOT
-    # enabled — one change at a time). Previous v1.19.2 note: no recall regression vs v1.18.2; the
-    # apparent 1.0 -> 0.96 drop was a stale baseline. Full forensics: CLAUDE.md engine note (2026-10-06).
-    image: qdrant/qdrant:v1.20.0
+    # Pinned to v1.20.2 (2026-11-18, patch bump; v1.20.0 soaked 17d prod / 20d students).
+    # From v1.20.0 (2026-11-01): fixes HNSW build 3x-slower regression on many-core hosts (#11343 —
+    # i9 24 threads here), restores classic HNSW algorithm by default for NEW graphs (#11553 —
+    # graph-quality lever on our recall ceiling), halves cold on-disk HNSW reads (#10743 — our p99),
+    # 2x faster turbo8/16 quantization. Same 1.20 storage family, no format change, no re-quant
+    # expected (trigger = quantization_config change). Bench vs ARCHIVED 01/11
+    # (tq_recall_bench_20261101_v1200_production.md) — never vs unarchived numbers.
+    image: qdrant/qdrant:v1.20.2
     container_name: qdrant_production
     restart: always
     
