@@ -11,19 +11,22 @@
       1. POISON-GUARD: GET /collections/<c>; abort (exit 2) if points_count < -MinPoints.
          => never snapshots a wiped/empty collection, never lets retention rotate out good backups.
       2. Create snapshot via REST (idempotent per day).
-      3. Download to GDrive offsite (-SharedPath) and, unless skipped, to a local dir (-LocalCopyDir).
+      3. Download once to temp (H: preferred, C: preserved), then distribute:
+         offsite = DIRECT Drive API upload (gdrive_user_upload.ps1, NO G: transit — the DriveFS
+         copy failed silently twice: 2026-09-03 and 2026-11-17, local copy complete but never
+         delivered server-side; legacy DriveFS copy remains as fallback only),
+         plus local copy to -LocalCopyDir unless skipped.
       4. SIZE-GUARD: if the new snapshot is < 50% of the largest existing one, SKIP retention and warn.
       5. Delete server-side snapshot.
       6. Retention: DailyKeep most recent + WeeklyKeep weekly Mondays (per destination).
-         Defaults = 3 + 0 (user ruling 2026-10-07, dossier Q4 "A+B"). Historical: 7 + 4.
-         NOTE: deletions go through DriveFS -> Google Drive TRASH (30 d auto-purge).
-         Q4-bis STATUS (2026-11-01): the service account EXISTS and is wired for READ
-         (gdrive_sa_verify.ps1; SA sees the tree server-side, immune to DriveFS illusions, and
-         now gates offsite retention). Part B as originally specified (permanent delete by the
-         SA) is IMPOSSIBLE: measured 403 on files.delete AND trashed=true — a service account
-         holds writer but canTrash/canDelete=false on a consumer My Drive (Google rule).
-         Full-B path to arbitrate: make the SA the UPLOADER (it would own its files).
-         Until then: trash tail ~1 snapshot/night for 30 d; empty Drive trash when quota pinches.
+         Defaults = 1 + 0 (user ruling 2026-11-17, keep=1 + Q29 doctrine). Historical: 3+0
+         (2026-10-07, Q4 "A+B"), 7 daily + 4 weekly Mondays (original).
+         OFFSITE DELETE = PERMANENT via Drive API AS THE USER (gdrive_user_delete.ps1 +
+         .gdrive_oauth.json; files.delete has no trash). The service account stays READ-ONLY
+         (gdrive_sa_verify.ps1 gates retention server-side): an SA can neither delete user
+         files (canDelete=false, 403 — measured 2026-11-01) nor own uploads (zero storage
+         quota on a consumer My Drive, 403 Storage Quota Exceeded — measured 2026-11-17).
+         Without the OAuth token: legacy DriveFS trash + WARN (empty Drive trash manually).
 
 .PARAMETER MinPoints
     Poison-guard floor. Default 100000 (roo_tasks_semantic_index ~380k as of 2026-05-21).
@@ -271,6 +274,47 @@ try {
         $snapLeaf = Split-Path $sourceFile -Leaf
         foreach ($d in $missing) {
             $dayDir = "$($d.Root)/$today"
+
+            # ---- OFFSITE = UPLOAD DIRECT Drive API (2026-11-18, direction user 17/11) ----
+            # Le transit DriveFS (copie vers G:) a echoue SILENCIEUSEMENT le 17/11 : copie
+            # locale complete, JAMAIS livree cote serveur, cache purge (classe 2026-09-03) ;
+            # le sauvetage API est mort a 89 % sur une LECTURE G: ("ressources systeme
+            # insuffisantes"). L'offsite ne transite plus par G: : gdrive_user_upload.ps1 en
+            # processus pwsh enfant (HttpClient + ByteArrayContent = octets exacts ; enfant
+            # car ses exit quitteraient le parent). Idempotent par taille (ALREADY_THERE),
+            # reprise 308/Range intra-session, verification finale server-side. Repli legacy
+            # DriveFS si token/pwsh absents OU echec apres retries : au pire le statu quo.
+            $directDone = $false
+            if ($d.Name -eq 'offsite') {
+                $uploader = Join-Path $PSScriptRoot 'utilities\gdrive_user_upload.ps1'
+                $oauthTok = Join-Path $PSScriptRoot '..\.gdrive_oauth.json'
+                $pwshExe  = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+                if (-not $pwshExe -and (Test-Path "$env:ProgramFiles\PowerShell\7\pwsh.exe")) { $pwshExe = "$env:ProgramFiles\PowerShell\7\pwsh.exe" }
+                if ((Test-Path $uploader) -and (Test-Path $oauthTok) -and $pwshExe) {
+                    if ($PSCmdlet.ShouldProcess("Drive API $dayDir/$snapLeaf", 'direct upload snapshot (offsite, no G: transit)')) {
+                        $maxUpload = 2
+                        for ($attempt = 1; $attempt -le $maxUpload; $attempt++) {
+                            # Chaque tentative repart de l'offset 0 (l'URI de session resumable
+                            # n'est pas persistee entre processus) : ~188 Go a ~9 MiB/s ~ 6 h,
+                            # 2 tentatives bornees puis repli DriveFS.
+                            Write-Log "offsite direct upload attempt $attempt/$maxUpload : $sourceFile -> Drive API ($($d.Root)/$today)"
+                            $out = & $pwshExe -NoProfile -File $uploader -Upload $sourceFile -Day $today -Machine $MachineId -Collection $Collection 2>&1
+                            $rcUp = $LASTEXITCODE
+                            $lastProg = ''
+                            foreach ($l in @($out)) { $t = "$l"; if ($t -match '^PROGRESS:') { $lastProg = $t } elseif ($t) { Write-Log "upload: $t" } }
+                            if ($rcUp -eq 0) { Write-Log "OFFSITE UPLOAD DONE (direct Drive API, no G: transit): $snapLeaf"; $directDone = $true; break }
+                            if ($lastProg) { Write-Log "upload died after: $lastProg" 'WARN' }
+                            Write-Log "offsite direct upload rc=$rcUp (attempt $attempt/$maxUpload)" 'WARN'
+                            if ($attempt -lt $maxUpload) { Start-Sleep -Seconds 60 }
+                        }
+                        if (-not $directDone) { Write-Log "offsite direct upload FAILED after $maxUpload attempt(s) — legacy DriveFS copy follows (status quo)" 'WARN' }
+                    } else { Write-Log 'WhatIf: would direct-upload snapshot to offsite via Drive API' }
+                } else {
+                    Write-Log 'offsite direct upload unavailable (uploader/token/pwsh absent) — legacy DriveFS copy' 'WARN'
+                }
+            }
+            if ($directDone) { continue }
+
             if ($PSCmdlet.ShouldProcess("$dayDir/$snapLeaf", "copy snapshot to $($d.Name)")) {
                 # Bounded retry: the root pre-wait above only covers "root absent at start".
                 # On 2026-09-03 G: was MOUNTED but DriveFS degraded deeper (small reads OK,
