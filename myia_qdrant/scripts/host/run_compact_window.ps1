@@ -55,6 +55,10 @@
     schtasks /run /tn "Compact-Qdrant-VHDX").
 .PARAMETER TimeLimitHours
     Limite d'execution de la tache (defaut 4).
+.PARAMETER AllowBlindPreState
+    (Deconseille) Autorise la fenetre meme si le point-count AVANT fenetre est illisible
+    via localhost ET 127.0.0.1 : la cloture n'aura alors que son plancher 1,5 M pts comme
+    filet de non-perte (incident 19/11 : pointsBefore=0 silencieux).
 .REQUIRES
     Admin (Register-ScheduledTask RunLevel Highest). Self-elevation incluse (1 UAC).
 .MACHINES
@@ -77,7 +81,8 @@ param(
     [string]$OptimizeMode = "Full",
     [switch]$RegisterOnly,
     [int]$TimeLimitHours = 4,
-    [switch]$SelfTest
+    [switch]$SelfTest,
+    [switch]$AllowBlindPreState
 )
 
 # --- Mode -SelfTest : validation SANS admin et SANS AUCUN effet de bord ---
@@ -184,18 +189,34 @@ foreach ($n in @('Verify-Qdrant-Mount','Mount-Qdrant-VHDX')) {
     $t = Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue
     $guardsState += [pscustomobject]@{ name = $n; wasEnabled = [bool]($t -and $t.State -ne 'Disabled') }
 }
+# Point-count AVANT fenetre -- capture OBLIGATOIRE par defaut (incident 19/11 14:21 :
+# lecture localhost echouee silencieusement depuis le contexte eleve -> pointsBefore=0 ->
+# critere de non-regression de la cloture aveugle pendant les 8 h de repetition).
+# Retry localhost PUIS 127.0.0.1 (lecon wslrelay : ::1 et 127.0.0.1 ne sont PAS
+# interchangeables). Abort si illisible, sauf -AllowBlindPreState explicite.
 $pointsBefore = 0
+$envKey = $null
 try {
     $envFile = 'D:\qdrant\myia_qdrant\.env.production'
     if (Test-Path $envFile) {
         $m = [regex]::Match((Get-Content $envFile -Raw), '(?m)^QDRANT__SERVICE__API_KEY=(.+)$')
-        if ($m.Success) {
-            $r = Invoke-RestMethod -Uri 'http://localhost:6333/collections/roo_tasks_semantic_index' `
-                                   -Headers @{ 'api-key' = $m.Groups[1].Value.Trim() } -TimeoutSec 30
-            $pointsBefore = [long]$r.result.points_count
-        }
+        if ($m.Success) { $envKey = $m.Groups[1].Value.Trim() }
     }
-} catch { Write-Host "  (point-count avant fenetre non lu : $($_.Exception.Message))" -ForegroundColor Yellow }
+} catch { Write-Host "  (fichier env non lu : $($_.Exception.Message))" -ForegroundColor Yellow }
+if ($envKey) {
+    foreach ($probeHost in @('localhost','127.0.0.1')) {
+        try {
+            $r = Invoke-RestMethod -Uri ("http://{0}:6333/collections/roo_tasks_semantic_index" -f $probeHost) `
+                                   -Headers @{ 'api-key' = $envKey } -TimeoutSec 30
+            if ($r.result -and $r.result.points_count) { $pointsBefore = [long]$r.result.points_count; break }
+        } catch { Write-Host "  (point-count via $probeHost non lu : $($_.Exception.Message))" -ForegroundColor Yellow }
+    }
+} else {
+    Write-Host "  (cle API introuvable dans l'env : point-count avant fenetre illisible)" -ForegroundColor Yellow
+}
+if ($pointsBefore -le 0 -and -not $AllowBlindPreState) {
+    throw "ABORT avant suspension des gardes : etat avant fenetre illisible (point-count=0 via localhost ET 127.0.0.1) -- la cloture perdrait son critere de non-regression (incident 19/11). Reesayer, ou passer -AllowBlindPreState en connaissance de cause (le plancher 1,5 M pts de la cloture reste alors le seul filet)."
+}
 $vhdxBeforeGB = 0
 if (Test-Path 'E:\wsl-data\qdrant.vhdx') { $vhdxBeforeGB = [math]::Round((Get-Item 'E:\wsl-data\qdrant.vhdx').Length / 1GB, 1) }
 
