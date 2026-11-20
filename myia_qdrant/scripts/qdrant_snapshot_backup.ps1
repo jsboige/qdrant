@@ -11,7 +11,8 @@
       1. POISON-GUARD: GET /collections/<c>; abort (exit 2) if points_count < -MinPoints.
          => never snapshots a wiped/empty collection, never lets retention rotate out good backups.
       2. Create snapshot via REST (idempotent per day).
-      3. Download once to temp (H: preferred, C: preserved), then distribute:
+      3. Download once to temp (-TempDir, else %TEMP%; TEMP-GUARD refuses the download when the
+         temp volume lacks snapshot size + -TempMarginGB), then distribute:
          offsite = DIRECT Drive API upload (gdrive_user_upload.ps1, NO G: transit — the DriveFS
          copy failed silently twice: 2026-09-03 and 2026-11-17, local copy complete but never
          delivered server-side; legacy DriveFS copy remains as fallback only),
@@ -49,10 +50,15 @@ param(
     [string]$MachineId   = '',
     [string]$SharedPath  = '',
     [string]$LocalCopyDir = 'D:\qdrant-backups',
-    # Transit temp (download ~190 Go/nuit) : param > H:\qdrant-tmp (si H: existe) > $env:TEMP.
-    # Maintenance 17/11 : chaque nuit paie ~2x187 Go sur C: (temp + cache DriveFS) - le temp
-    # quitte C: par defaut desormais ; H: absent => repli automatique sur %TEMP%.
+    # Transit temp (download ~210 Go/nuit) : param > $env:TEMP.
+    # H:\qdrant-tmp n'est PLUS prefere automatiquement (2026-11-20) : le Seagate USB est
+    # DEFAILLANT (51 blocs defectueux, 2 197 resets USB, journal NTFS en echec — Maintenance#354)
+    # et a tue l'upload du 20/11 a 14 % sur une erreur CRC de lecture. Il peut se re-enumerer par
+    # intermittence : un Test-Path 'H:\' vrai a 02:41 renverrait le transit sur un disque mourant.
+    # D: = transit des autres lanes (consigne Maintenance 20/11) ; E: porte la VHDX.
     [string]$TempDir = '',
+    # TEMP-GUARD : marge exigee au-dela de la taille du snapshot sur le volume temp.
+    [int]$TempMarginGB = 30,
     [int]$MinPoints      = 100000,
     # Retention: user ruling 2026-11-17 (GO via Maintenance) = keep 1 offsite copy, with Q29
     # doctrine: the predecessor is deleted ONLY after the new copy is verified server-side.
@@ -225,11 +231,24 @@ if ($missing.Count -eq 0) {
         $snapName = $createResp.result.name
         if ([string]::IsNullOrWhiteSpace($snapName)) { Write-Log 'FATAL: snapshot response missing name' 'ERROR'; exit 1 }
         Write-Log "Snapshot created: name=$snapName serverSize=$($createResp.result.size)"
-        if ([string]::IsNullOrWhiteSpace($TempDir)) {
-            if (Test-Path 'H:\') { $TempDir = 'H:\qdrant-tmp' } else { $TempDir = $env:TEMP }
-        }
+        if ([string]::IsNullOrWhiteSpace($TempDir)) { $TempDir = $env:TEMP }
         if (-not (Test-Path $TempDir)) { New-Item -ItemType Directory -Path $TempDir -Force | Out-Null }
-        Write-Log "Temp dir: $TempDir (C: preserve)"
+        # TEMP-GUARD (2026-11-20): a ~210 GB download must never fill the temp volume (C: by
+        # default = the whole machine). Refuse cleanly: drop the server-side snapshot (else it
+        # lingers 48h inside the VHDX until orphan cleanup) and exit 1 — nothing rotated.
+        $snapSize = [int64]$createResp.result.size
+        $tempRoot = [System.IO.Path]::GetPathRoot((Resolve-Path -LiteralPath $TempDir).ProviderPath)
+        $tempFree = [int64](New-Object System.IO.DriveInfo($tempRoot)).AvailableFreeSpace
+        $tempNeed = $snapSize + ([int64]$TempMarginGB * 1GB)
+        Write-Log "Temp dir: $TempDir (free=$([math]::Round($tempFree/1GB,1)) GiB, need=$([math]::Round($tempNeed/1GB,1)) GiB incl. margin $TempMarginGB GiB)"
+        if ($snapSize -gt 0 -and $tempFree -lt $tempNeed) {
+            Write-Log "FATAL: TEMP-GUARD: $TempDir has $tempFree bytes free < snapshot $snapSize + margin $TempMarginGB GiB — download REFUSED (pass -TempDir on a larger volume)" 'ERROR'
+            try {
+                $null = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots/$snapName" -Headers $headers -Method Delete -TimeoutSec 120
+                Write-Log "Server-side snapshot cleaned after TEMP-GUARD refusal: $snapName"
+            } catch { Write-Log "WARN: server-side cleanup after TEMP-GUARD failed (orphan cleanup will catch it at 48h): $($_.Exception.Message)" 'WARN' }
+            exit 1
+        }
         $tmp = Join-Path $TempDir $snapName
         try {
             Invoke-WebRequest -Uri "$QdrantUrl/collections/$Collection/snapshots/$snapName" -Headers $dlHeaders -OutFile $tmp -TimeoutSec 3600
