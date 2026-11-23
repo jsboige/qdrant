@@ -32,6 +32,12 @@ log_level: INFO
 storage:
   storage_path: /qdrant/storage
   snapshots_path: /qdrant/snapshots
+  # Q68 (2026-11-23) : la zone temp des snapshots de COLLECTION est `temp_path`
+  # (defaut = storage/tmp, DANS le VHDX — lib/storage/src/content_manager/toc/
+  # snapshots.rs:66-70). Sans cette ligne, le round-trip continuerait de gonfler
+  # le VHDX meme avec snapshots_path sur F:. Pointe sous le bind F: pour que
+  # temp et archive finale partagent le meme filesystem (rename, pas copie).
+  temp_path: /qdrant/snapshots/tmp
   on_disk_payload: true
   
   wal:

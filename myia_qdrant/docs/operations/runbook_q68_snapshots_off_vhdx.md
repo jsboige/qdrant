@@ -6,16 +6,26 @@ puis taille VHDX fixée ; **aucune compaction quotidienne** en régime nominal.
 
 ## Objectif
 
-Le round-trip nocturne (~220 Go : `snapshots_path/tmp` PUIS l'archive finale —
-`lib/storage/src/content_manager/toc/temp_directories.rs`, `snapshots_temp_path()`)
-ne doit plus grossir le VHDX `E:\wsl-data\qdrant.vhdx` (plafond 880 Gio, E: au
-plancher ~45-55 Go). Le bind conteneur `/qdrant/snapshots` passe sur
-`F:\Backups\qdrant\myia-ai-01\server-snapshots` (USB sain, doctrine machine
-« D: = transit, archives sur `F:\Backups\<lane>` »).
+Le round-trip nocturne (~220 Go : zone temporaire PUIS archive finale) ne doit
+plus grossir le VHDX `E:\wsl-data\qdrant.vhdx` (plafond 880 Gio, E: au plancher
+~45-55 Go). **Deux changements sont requis, l'un ne suffit pas :**
+1. le bind conteneur `/qdrant/snapshots` passe sur
+   `F:\Backups\qdrant\myia-ai-01\server-snapshots` (USB sain, doctrine machine
+   « D: = transit, archives sur `F:\Backups\<lane>` ») — archive finale ;
+2. `storage.temp_path: /qdrant/snapshots/tmp` dans
+   `config/production.optimized.yaml` — **la zone temporaire d'un snapshot de
+   COLLECTION est `temp_path`, pas `snapshots_path/tmp`**
+   (`lib/storage/src/content_manager/toc/snapshots.rs:66-70` :
+   `optional_temp_or_storage_temp_path()`, défaut = `storage/tmp` DANS le VHDX).
+   Sans (2), le tar de 220 Go s'écrit quand même dans le VHDX puis est copié
+   vers F: — Q68 échoue silencieusement. Avec (2), temp et finale sont sur le
+   même filesystem F: → `move_file` = rename, pas copie.
 
-Le changement vit dans `docker-compose.production.pathfix.yml` (déjà requis pour
-tout `compose up` production) : **aucun script à modifier**, `mount_qdrant_vhdx.ps1`
-charge déjà cet overlay automatiquement.
+Le bind vit dans `docker-compose.production.pathfix.yml` (déjà requis pour tout
+`compose up` production) : **aucun script à modifier**, `mount_qdrant_vhdx.ps1`
+charge déjà cet overlay automatiquement. La zone temp vit dans
+`config/production.optimized.yaml` (`storage.temp_path`) — les DEUX fichiers sont
+montés par le même compose.
 
 ## Préconditions (toutes obligatoires)
 
@@ -60,7 +70,10 @@ docker start qdrant_autoheal
   points ±0 vs avant recreate.
 - **Snapshot complet mesuré hors VHDX** : déclencher le run (naturellement à
   02:17, ou manuel `qdrant_snapshot_backup.ps1`) puis vérifier :
-  - fichier sous `F:\Backups\qdrant\myia-ai-01\server-snapshots\roo_tasks_semantic_index\`,
+  - fichier final sous `F:\Backups\qdrant\myia-ai-01\server-snapshots\roo_tasks_semantic_index\`,
+  - **fichier temporaire sous `F:\...\server-snapshots\tmp\` pendant la création**
+    (preuve que `temp_path` est bien pris en compte — si le temp pousse dans
+    `<VHDX>/storage/tmp`, la config n'est pas active : ABORT et vérifier),
   - taille `serverSize` cohérente (~220 Go, +9 Go/j),
   - `E:\wsl-data\qdrant.vhdx` **inchangé** hors croissance ingest (± quelques Go),
   - E: libre stable pendant le round-trip (plus de plongée −360 Go),
@@ -79,7 +92,9 @@ Rétablir dans `docker-compose.production.pathfix.yml` la ligne :
 - \\wsl.localhost\Ubuntu\srv\qdrant-e\qdrant_data\snapshots:/qdrant/snapshots
 ```
 
-puis `docker compose -f docker-compose.production.yml -f docker-compose.production.pathfix.yml up -d`.
+**et retirer `storage.temp_path`** de `config/production.optimized.yaml` (sinon la
+zone temp pointe sur un chemin qui n'existe plus), puis
+`docker compose -f docker-compose.production.yml -f docker-compose.production.pathfix.yml up -d`.
 Les anciens snapshots restent dans le VHDX (non migrés, non supprimés) ; ceux écrits
 sur F: restent lisibles en y pointant le bind.
 
