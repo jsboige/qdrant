@@ -4,9 +4,18 @@
 # comme drvfs automount inexistant). Alias du montage VHDX sous /srv/qdrant-e
 # (bind cree par mount_qdrant_vhdx / fstab) -> chemin hors /mnt, traite comme
 # chemin ordinaire. Overlay : utiliser AVEC docker-compose.production.yml.
+#
+# Q68 2026-11-22 (arbitrage user, execute par la lane qdrant) : snapshots HORS VHDX.
+# /qdrant/snapshots pointe sur F: (USB sain, doctrine "D: = transit, archives sur
+# F:\Backups\<lane>") au lieu de srv\qdrant-e\qdrant_data\snapshots. Le round-trip
+# nocturne (~220 Go : snapshots_path/tmp PUIS archive finale, cf.
+# lib/storage/src/content_manager/toc/temp_directories.rs) ne grossit plus le VHDX ;
+# E: reste au plafond ~45-55 Go libres sans compaction quotidienne. Bind Windows
+# valide par sonde conteneur (probe write/read 23/11). Rollback : revenir la ligne
+# sur le chemin \\wsl...srv... et recreer.
 services:
   qdrant:
     volumes:
       - \\wsl.localhost\Ubuntu\srv\qdrant-e\qdrant_data\storage:/qdrant/storage
-      - \\wsl.localhost\Ubuntu\srv\qdrant-e\qdrant_data\snapshots:/qdrant/snapshots
+      - 'F:\Backups\qdrant\myia-ai-01\server-snapshots:/qdrant/snapshots'
       - ./config/production.optimized.yaml:/qdrant/config/production.yaml
