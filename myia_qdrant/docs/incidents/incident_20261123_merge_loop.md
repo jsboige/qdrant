@@ -60,7 +60,14 @@ Le compose recreate = un restart : il re-déclenchera le merge-backlog au boot (
 - Autoheal : `unless-stopped` depuis le 23/11 (SIGSEGV + `always` = résurrection pendant récupération)
 - Mémoire : fiche `project_semantic_degradation_two_layers_20261115.md` (occurrences 3-5 + discriminateurs), `feedback_qdrant_autoheal_recovery.md`, `project_vhdx_cap_snapshot_temp_20261120.md`
 
-## 6. État au moment de l'écriture (05:17 local / 04:17Z)
+## 6. État au moment de l'écriture (05:17 local / 04:17Z) — SUPERSÉDÉ par §7
+
+## 7. Suite (matin 23/11) — convergence partielle, puis cycle write-vs-merge prouvé
+
+- **~05:40Z** : convergence partielle — info 2,18 s, green/ok, warm 0,39 s, WARN 0, segments 300. **Erreur d'instrument commise et corrigée** : le « warm » était un A/B requête IDENTIQUE (chaud pour ces pages seules) ; 5 vecteurs divers à 06:05Z = 11,8-51,1 s = PAS service-grade. La sonde peer de 05:58Z (fallback texte) était juste. Leçon : preuve service = vecteurs divers, jauge = RAM (cache int8 ~48,8/60).
+- **06:05-06:35Z** : vague de digestion ingest-driven (PAS post-restart — container up depuis 3 h) : RAM évincée 39→28 Gio, I/O 13 Mo/s, segments 300-303, WARN 0, erreur « fill query context timed out ~11-13 s ». La vague bloque la lecture et évince le cache.
+- **~07:00Z** : **sonde décisive 500 à 60 s = chemin BLOQUÉ**, avec le tableau complet du **cycle write-vs-merge** : écritures OK (points montent), lecture bloquée derrière le merge, WARN 0, segments figés, I/O modéré — l'état que l'option (c) (gel d'ingest) est conçue pour casser. **Registre Q17 : (c) exige le GO user ; défaut (b).** Sonnette d'escalade ~11:48Z (mécanisme degraded-escalation, 2 cycles), points de mesure : sonde peer 11:53Z, sweep 12:49.
+- **Prochains jalons** : nightly 24/11 02:17 = acceptation Q68 (premier snapshot hors VHDX ; risque d'interaction avec la vague si le blocage persiste à 02:00Z — cf. §4.3 la proposition de désarmer le schtask une nuit).
 
 - `qdrant_production` healthy, container up depuis 03:18:44Z.
 - GET info roo_tasks : **bloqué** (000/12 s aux derniers cycles de vigie).
