@@ -69,9 +69,12 @@ Le compose recreate = un restart : il re-déclenchera le merge-backlog au boot (
 - **~07:00Z** : **sonde décisive 500 à 60 s = chemin BLOQUÉ**, avec le tableau complet du **cycle write-vs-merge** : écritures OK (points montent), lecture bloquée derrière le merge, WARN 0, segments figés, I/O modéré — l'état que l'option (c) (gel d'ingest) est conçue pour casser. **Registre Q17 : (c) exige le GO user ; défaut (b).** Sonnette d'escalade ~11:48Z (mécanisme degraded-escalation, 2 cycles), points de mesure : sonde peer 11:53Z, sweep 12:49.
 - **Prochains jalons** : nightly 24/11 02:17 = acceptation Q68 (premier snapshot hors VHDX ; risque d'interaction avec la vague si le blocage persiste à 02:00Z — cf. §4.3 la proposition de désarmer le schtask une nuit).
 
-- `qdrant_production` healthy, container up depuis 03:18:44Z.
-- GET info roo_tasks : **bloqué** (000/12 s aux derniers cycles de vigie).
-- Merge : actif (I/O en progression), segments 303-310, 8 WARN/4 min en réapparition au cycle 7.
-- Écritures/ingest : OK. Petites collections : OK.
-- Chemin sémantique RSM : fallback texte (breaker côté RSM), escalade pair ouverte « jusqu'au matin ».
-- Prochains événements : vigie 3 (verdict ~04:45Z), cron sweep 06:49 local.
+## 8. Verdict sweep 12:49 — convergence PARTIELLE, cycle toujours actif sur le search
+
+- **Hiérarchie de déblocage mesurée : le count converge AVANT la recherche vectorielle.** Count exact 2 chemins (LAN = public) redevenu lisible à **09:47Z** (baseline po-2023 c166 = 15 247 820, +52 k en 2,9 h ≈ 18 k/h diurne). Recherche à **11:54Z : 5 vecteurs divers min 17,5 / max 60,0 s, dont 1× HTTP 500 à 60 s** — PAS service-grade (requis max < 5 s). Le search paie le cache HNSW/int8 froid (RAM 38/60 Gio en re-remplissage après l'évection à 28) + la digestion restante.
+- **Zéro restart depuis 03:18:44Z** — la doctrine « laisser converger » (option d) est tenue ; écritures OK toute la matinée (15 267 996 pts, +112 k).
+- **Erreur de mécanisme commise et corrigée : l'escalade 03:48Z a été fermée à TORT** par le [REPAIRED] prématuré de 05:55Z sans ligne `scope:` (piège #4746 : un [REPAIRED] sans portée ferme TOUTES les escalades antérieures de la lane). Re-post `qdrant-degraded-readpath-20261123T1155Z` (crossPost global+machine).
+- **Organe degraded-escalation exit 1 sur ai-01** (sweep 12:49) : `MCP_PROXY_BEARER` absent de tous les fichiers vérifiables (`.env` roo-extensions, `~/.claude.json`, settings) → store PG non lu, codes non fiables, **la sonnerie ~11:48Z n'est pas partie**. DM `qdrant-organ-exit1-20261123T1200Z` à ai-01:roo-extensions (leur siège). Per #4729 : pas de contournement (pas de lecture sur miroir périmé).
+- **Régime watchdog sous charge** (bénin mais à connaître) : `Verify-Qdrant-Mount` rend ~50 % de `PROBE_ERROR` (`Wsl/Service/0x8007274c` — wsl.exe sous charge I/O du merge) ; tous les ~30 min, 3 échecs consécutifs déclenchent `Mount-Qdrant-VHDX`, qui meurt en Phase 5 `label=''` (lecture vide) exit 6 **AVANT tout geste compose** — la garde anti-split-brain a tenu 7 runs sur la journée, container inchangé. Le montage est SAIN (sentinel 285 ×2 namespaces + alias proxy OK + 15,27 M points servis). Le compose du script est conditionnel (`if ($needMount)` ligne 227) : le risque de restart involontaire exigerait une lecture de label VIDE en Phase 4 (umount+remount), non observé en 7 runs.
+- **Chemin sémantique RSM : `fallback_used:false`** (mode semantic réel, 9,1 s) — la recherche MCP passe, lentement ; embedder 0,17 s dims=2560. DNS↔IP concordants. Montage/sentinelle/alias : verts.
+- **Jalons suivants** : sweep 18:49 (re-sonde vecteurs divers) ; **nightly 24/11 02:17 = acceptation Q68** (si le blocage persiste à 02:00Z → proposition de désarmer le schtask une nuit, §4.3).
