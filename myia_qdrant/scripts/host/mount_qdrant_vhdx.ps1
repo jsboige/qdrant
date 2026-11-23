@@ -219,6 +219,15 @@ if ($mountInfoStr -match "^/dev/sd[a-z]+$") {
     if ($labelStr -eq $Label) {
         Log "$MountPoint deja monte sur $currentDev (label=$Label) dans PID-1 ns (idempotent)"
         $needMount = $false
+    } elseif ([string]::IsNullOrWhiteSpace($labelStr)) {
+        # 23/11/2026 : un label ILLISIBLE (sortie blkid vide -- wsl.exe sourd sous charge I/O,
+        # Wsl/Service/0x8007274c) signifie "je ne sais pas", PAS "mauvais disque". Le umount de la
+        # branche ci-dessous a ete execute sur ce faux negatif le 23/11 14:38Z : /mnt/qdrant-e
+        # demonte puis remonte sous le conteneur, 0 collections visibles pendant la fenetre, et
+        # l'alias /srv/qdrant-e tombe par propagation (meme peer group shared). Aucun geste ici :
+        # la Phase 5 tranche PAR DEVICE et refuse (exit 6) si le label reste illisible.
+        Log "$MountPoint monte sur $currentDev mais label ILLISIBLE (sortie blkid vide) -- sonde sourde, AUCUN umount ; la Phase 5 tranche par device" "WARN"
+        $needMount = $false
     } else {
         Log "$MountPoint monte sur $currentDev mais label='$labelStr' (attendu '$Label') -- umount + remount" "WARN"
         & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "umount $MountPoint" 2>&1 | Out-Null
@@ -259,23 +268,51 @@ $aliasPoint = "/srv/qdrant-e"
 # 13/11/2026 : l'echec du bind etait MASQUE (2>&1 | Out-Null + log inconditionnel) -- apres le
 # reboot du 13/11 l'alias est reste mort 65 min sans aucune trace dans le log. On capture le rc
 # et on VERIFIE le sentinel A TRAVERS l'alias ; 2eme tentative = purge d'un bind perime.
-$aliasCmd = "mkdir -p $aliasPoint && (mountpoint -q $aliasPoint || mount --bind $MountPoint $aliasPoint) && mount --make-shared $aliasPoint"
-$aliasSz = ""
-$aliasOut = ""
-for ($attempt = 1; $attempt -le 2; $attempt++) {
-    if ($attempt -eq 2) {
-        & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "umount $aliasPoint 2>/dev/null" 2>&1 | Out-Null
-        Start-Sleep -Seconds 1
-    }
-    $aliasOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c $aliasCmd 2>&1
+#
+# 23/11/2026 -- LE GESTE ET SA CONDITION DANS LE MEME APPEL wsl.exe. L'ancienne boucle separait
+# la lecture du sentinel (preuve) et le umount de la 2e tentative : sous charge I/O, wsl.exe rend
+# rc=-1 (Wsl/Service/0x8007274c) alors que l'alias est SAIN ; le `break` exigeait rc=0, donc un
+# alias sain non prouve entrait en 2e tentative = umount INCONDITIONNEL d'un alias sain, et si
+# le re-bind echouait a son tour l'alias restait mort (mesure 23/11 17:00Z et 18:21Z : "ECHEC apres
+# 3 tentative(s) rc=-1 sentinel='0'" puis "Idempotent ... skip restart", exit 0). Desormais le
+# diagnostic ET le geste tiennent dans UN SEUL payload bash : soit wsl.exe repond et le umount ne
+# tombe que sur un sentinel lu NON-285 dans cette meme execution, soit wsl.exe est sourd et RIEN
+# ne s'execute (nouvel essai, aucune decision sur une sonde muette).
+# Cas couverts : sain (make-shared seulement) ; absent (bind) ; perime (device detache, sentinel
+# illisible : umount -l puis bind -- garde 17/11 preservee).
+$aliasScript = @'
+expected=285
+alias=/srv/qdrant-e
+mpt=/mnt/qdrant-e
+sent=$alias/qdrant_data/storage/.qdrant_vhdx_sentinel
+sz=$(cat $sent 2>/dev/null | wc -c | tr -d '[:space:]')
+if [ "$sz" = "$expected" ]; then
+  mount --make-shared $alias 2>/dev/null
+  echo "alias-ok:sain"
+  exit 0
+fi
+mountpoint -q $alias && umount -l $alias 2>/dev/null
+mount --bind $mpt $alias && mount --make-shared $alias
+sz2=$(cat $sent 2>/dev/null | wc -c | tr -d '[:space:]')
+if [ "$sz2" = "$expected" ]; then echo "alias-ok:repare"; else echo "alias-ko:$sz2"; fi
+'@
+# CR-proof : voir $nsScript ci-dessous (lecon 31/10) -- strip des \r AVANT l'encodage.
+$aliasScriptLf = $aliasScript -replace "`r", ""
+$aliasB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($aliasScriptLf))
+$aliasVerdict = ""
+$aliasRc = $null
+for ($attempt = 1; $attempt -le 3; $attempt++) {
+    $aliasOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "echo $aliasB64 | base64 -d | bash" 2>&1
     $aliasRc = $LASTEXITCODE
-    $aliasSz = ((& wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "cat $aliasPoint/qdrant_data/storage/.qdrant_vhdx_sentinel 2>/dev/null | wc -c" 2>&1 | Out-String) -replace '\s','')
-    if ($aliasRc -eq 0 -and $aliasSz -eq "285") { break }
+    $aliasVerdict = [string](@((($aliasOut | Out-String).Trim() -split "`r?`n") | Where-Object { $_ -match "^alias-(ok|ko):" }) | Select-Object -First 1)
+    if ($aliasVerdict) { break }
 }
-if ($aliasSz -eq "285") {
-    Log "Alias $aliasPoint -> $MountPoint (bind, shared) verifie (sentinel=$aliasSz, tentative $attempt)" "OK"
+if ($aliasVerdict -match "^alias-ok:") {
+    Log "Alias $aliasPoint -> $MountPoint verifie par le sentinel ($($aliasVerdict.Split(':')[1]), tentative $attempt)" "OK"
+} elseif ($aliasVerdict) {
+    Log "Alias $aliasPoint -> $MountPoint NON VERIFIE apres bind : $aliasVerdict -- un compose up binderait le rootfs" "ERR"
 } else {
-    Log "Alias $aliasPoint -> $MountPoint ECHEC apres $attempt tentative(s) (rc=$aliasRc sentinel='$aliasSz') : $(($aliasOut | Out-String).Trim())" "ERR"
+    Log "Alias $aliasPoint -> $MountPoint : sonde sourde (wsl.exe sans reponse, rc=$aliasRc) apres $($attempt - 1) tentative(s) -- AUCUN geste, etat INCONNU ; le sweep verifie les 2 namespaces" "WARN"
 }
 
 # --- Phase 5: Verification PAR DEVICE (label), pas seulement compte collections ---
@@ -297,7 +334,14 @@ Log "OK: $MountPoint sur $srcDev label=$srcLabel (VHDX confirme)" "OK"
 $collOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "ls $MountPoint/qdrant_data/storage/collections 2>/dev/null | wc -l" 2>&1
 $lines = @(($collOut | Out-String) -split "`r?`n" | Where-Object { $_.Trim() -match "^\d+$" })
 $collCount = if ($lines.Count -gt 0) { [int]$lines[-1].Trim() } else { 0 }
-Log "Collections visibles sur ${MountPoint}: $collCount" "OK"
+if ($collCount -gt 0) {
+    Log "Collections visibles sur ${MountPoint}: $collCount" "OK"
+} else {
+    # 23/11/2026 : 0 collections sur un VHDX confirme par label = fenetre transitoire post-remount
+    # ou lecture avortee (mesure 14:38Z, loggee [OK] a l'epoque). Informatif, pas fatal : le compteur
+    # interne du conteneur (Phase 6) reste la verite de service.
+    Log "Collections visibles sur ${MountPoint}: 0 -- INCOHERENT avec un VHDX confirme par label (fenetre post-remount ou lecture avortee)" "WARN"
+}
 # --- Phase 5b: reparer les namespaces de montage PERIMES (proxy Docker Desktop) ---
 # Lecon 2026-10-29 (panne 23:22 -> 23:49) : le proxy docker-desktop-user-distro vit dans un
 # namespace de montage COPIE et PRIVE (mnt:[...] different de PID 1). Apres un detachement /
