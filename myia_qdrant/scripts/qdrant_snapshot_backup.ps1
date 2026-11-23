@@ -220,8 +220,29 @@ if ($missing.Count -eq 0) {
     $newSnapshotSize = (Get-Item $sourceFile).Length
     Write-Log "Reusing existing snapshot for $($missing.Count) missing dest(s): $sourceFile ($newSnapshotSize bytes)"
 } else {
-    # No destination has today's: create a fresh server snapshot and download once.
-    if ($PSCmdlet.ShouldProcess("$QdrantUrl/collections/$Collection/snapshots", 'POST create snapshot')) {
+    # No destination has today's. Before POSTing a NEW ~220 GB snapshot, check whether an
+    # interrupted earlier run already left a COMPLETED one server-side (2026-11-23: the 02:17
+    # run died on the 1800s HttpClient timeout while the server kept building — a naive rerun
+    # stacks a second ~220 GB artifact inside the VHDX, the 19/11 failure class). Qdrant only
+    # lists FINALIZED snapshots, so anything found here is restorable as-is.
+    $reuse = $null
+    try {
+        $srvList = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots" -Headers $headers -Method Get -TimeoutSec 60
+        # creation_time is a UTC timestamp whose yyyy-MM-dd prefix equals the date embedded
+        # in the snapshot NAME; nightly runs (03:17 local = 02:17 UTC) share the date in both
+        # zones. String prefix = no timezone-parsing drift between PS 5.1 and 7.
+        $reuse = @($srvList.result) | Where-Object { $_.creation_time -and "$($_.creation_time)".StartsWith($today) } |
+            Sort-Object -Property creation_time -Descending | Select-Object -First 1
+    } catch { Write-Log "WARN: reuse-check list failed (non-fatal, creating fresh): $($_.Exception.Message)" 'WARN' }
+
+    $snapName = $null
+    $snapSize = 0L
+    $createdThisRun = $false
+    if ($reuse) {
+        $snapName = $reuse.name
+        $snapSize = [int64]$reuse.size
+        Write-Log "REUSE: today's server-side snapshot already exists (leftover from an interrupted run): name=$snapName serverSize=$snapSize — creation SKIPPED"
+    } elseif ($PSCmdlet.ShouldProcess("$QdrantUrl/collections/$Collection/snapshots", 'POST create snapshot')) {
         try {
             # 1800s: at ~2M pts / 26 GB the snapshot builds in ~8 min but on 2026-08-20 the HTTP
             # response came back past 600s (run failed while the snapshot completed server-side)
@@ -230,23 +251,35 @@ if ($missing.Count -eq 0) {
         } catch { Write-Log "FATAL: snapshot creation failed: $($_.Exception.Message)" 'ERROR'; exit 1 }
         $snapName = $createResp.result.name
         if ([string]::IsNullOrWhiteSpace($snapName)) { Write-Log 'FATAL: snapshot response missing name' 'ERROR'; exit 1 }
-        Write-Log "Snapshot created: name=$snapName serverSize=$($createResp.result.size)"
+        $snapSize = [int64]$createResp.result.size
+        $createdThisRun = $true
+        Write-Log "Snapshot created: name=$snapName serverSize=$snapSize"
+    } else {
+        Write-Log 'WhatIf: would create + download snapshot, then distribute to all destinations'
+    }
+
+    if ($snapName) {
         if ([string]::IsNullOrWhiteSpace($TempDir)) { $TempDir = $env:TEMP }
         if (-not (Test-Path $TempDir)) { New-Item -ItemType Directory -Path $TempDir -Force | Out-Null }
         # TEMP-GUARD (2026-11-20): a ~210 GB download must never fill the temp volume (C: by
-        # default = the whole machine). Refuse cleanly: drop the server-side snapshot (else it
-        # lingers 48h inside the VHDX until orphan cleanup) and exit 1 — nothing rotated.
-        $snapSize = [int64]$createResp.result.size
+        # default = the whole machine). Refuse cleanly and exit 1 — nothing rotated.
+        # On refusal: a snapshot CREATED this run is dropped server-side (nobody else wants it,
+        # else it lingers 48h inside the VHDX until orphan cleanup); a REUSED one is KEPT — it
+        # is the only completed artifact of an interrupted run, retryable with a larger -TempDir.
         $tempRoot = [System.IO.Path]::GetPathRoot((Resolve-Path -LiteralPath $TempDir).ProviderPath)
         $tempFree = [int64](New-Object System.IO.DriveInfo($tempRoot)).AvailableFreeSpace
         $tempNeed = $snapSize + ([int64]$TempMarginGB * 1GB)
         Write-Log "Temp dir: $TempDir (free=$([math]::Round($tempFree/1GB,1)) GiB, need=$([math]::Round($tempNeed/1GB,1)) GiB incl. margin $TempMarginGB GiB)"
         if ($snapSize -gt 0 -and $tempFree -lt $tempNeed) {
             Write-Log "FATAL: TEMP-GUARD: $TempDir has $tempFree bytes free < snapshot $snapSize + margin $TempMarginGB GiB — download REFUSED (pass -TempDir on a larger volume)" 'ERROR'
-            try {
-                $null = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots/$snapName" -Headers $headers -Method Delete -TimeoutSec 120
-                Write-Log "Server-side snapshot cleaned after TEMP-GUARD refusal: $snapName"
-            } catch { Write-Log "WARN: server-side cleanup after TEMP-GUARD failed (orphan cleanup will catch it at 48h): $($_.Exception.Message)" 'WARN' }
+            if ($createdThisRun) {
+                try {
+                    $null = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots/$snapName" -Headers $headers -Method Delete -TimeoutSec 120
+                    Write-Log "Server-side snapshot cleaned after TEMP-GUARD refusal: $snapName"
+                } catch { Write-Log "WARN: server-side cleanup after TEMP-GUARD failed (orphan cleanup will catch it at 48h): $($_.Exception.Message)" 'WARN' }
+            } else {
+                Write-Log "TEMP-GUARD: reused server-side snapshot KEPT for retry ($snapName; orphan cleanup holds it 48h)" 'WARN'
+            }
             exit 1
         }
         $tmp = Join-Path $TempDir $snapName
@@ -256,13 +289,12 @@ if ($missing.Count -eq 0) {
         $sourceFile = $tmp
         $newSnapshotSize = (Get-Item $tmp).Length
         Write-Log "Downloaded to temp: size=$newSnapshotSize bytes"
-        # Server-side cleanup (non-fatal)
+        # Server-side cleanup (non-fatal) — safe for BOTH paths: the download succeeded, so the
+        # data now exists locally and is being fanned out below.
         try {
             $null = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots/$snapName" -Headers $headers -Method Delete -TimeoutSec 120
             Write-Log "Server-side snapshot cleaned: $snapName"
         } catch { Write-Log "WARN: server-side cleanup failed (non-fatal): $($_.Exception.Message)" 'WARN' }
-    } else {
-        Write-Log 'WhatIf: would create + download snapshot, then distribute to all destinations'
     }
 }
 

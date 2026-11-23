@@ -78,6 +78,9 @@ curl http://localhost:6335/healthz   # Students
 # Snapshots roo_tasks_semantic_index -> GDrive offsite (scheduled) / + D:\qdrant-backups local (manual runs only).
 # Poison-guard (abort if points < MinPoints), size-guard (skip retention if new < 50% of largest),
 # bounded retry on copy failure (3x300s, DriveFS degradation), orphan cleanup (>48h server-side),
+# same-day server-snapshot REUSE (a run interrupted after POST — e.g. 2026-11-23 1800s HTTP
+# timeout with the server still building — is recovered by the next run instead of stacking a
+# second ~220 GB artifact; reused snapshot survives a TEMP-GUARD refusal, a fresh one doesn't),
 # retention = DailyKeep 3 + WeeklyKeep 0 PER destination (user ruling 2026-10-07, dossier Q4 "A+B";
 # historical 7+4). **SA GATE (01/11/2026):** before rotating cloud copies out, `gdrive_sa_verify.ps1`
 # confirms SERVER-SIDE (Drive API as service account `qdrant-backup-purger@myia-backups.iam.gserviceaccount.com`,
