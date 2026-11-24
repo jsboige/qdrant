@@ -124,3 +124,21 @@ Relevé du 23:03Z (24/11, fenêtre saine, `qdrant_cgroup_sample.py` 15 s) : swap
 - Leviers, par ordre de la lane : (1) **arbitrage mémoire dans la VM** (vLLM medium 42 Gio, plafond `memory=128GB`, swap 32 Gio) — décision user, la VM est partagée ; (2) **réduire l'empreinte de qdrant** : binary quantization + rescore (le cache int8 pèse 36,5 Gio pour 15,3 M points) ; (3) gel d'ingest le temps de converger. Le relèvement à chaud de la limite du conteneur a été écarté : il rendrait le swap de la VM à qdrant en vidant le cache de fichiers de tous les conteneurs.
 - Chemin sémantique RSM : `fallback_used:true` à 18:43Z (31 s), `false` à 17:49Z (3,4 s) — il suit les épisodes. Embedder : 200, 2560 dims, 0,26 s à 17:49Z, 6,7 s à 22:58Z (ralenti, pas mort).
 - Sauvegarde nocturne : déclencheur réel **01:17Z (02:17 locales)**, résultat de la nuit du 23/11 = 1 (échec). Règle §4.3 appliquée telle quelle : blocage persistant → la lane propose de la reporter d'une nuit.
+### 10.4 Sweep 23:49Z (24/11 00:49 locales) — la lecture lente est liée au swap (mesuré), nightly reportée
+
+- **Trafic réel** (journal d'accès, `qdrant_traffic_stats.py --minute 22:56`) : lent 23:02Z → 23:20Z (réponses de 60 à 159 s, 6 × 5xx), sain 23:25Z → 23:35Z (max 0,25 s), lent de nouveau 23:36Z → 23:47Z (60-93 s), rapide 23:49Z → 23:51Z. Critère de clôture (§10.3) : **non atteint** — la plus longue fenêtre saine depuis 22:46Z dure 16 min.
+- **À chaud à 00:01Z, vecteurs réels** (embedder 200, 0,13 s, 2560 dims), compteurs lus de part et d'autre de chaque requête : `majflt` de `/proc/7/stat` (processus qdrant) et `pswpin` / `pswpout` de `/proc/vmstat` (toute la VM).
+
+  | requête | résultat | durée | défauts de page majeurs de qdrant | swap rentré dans la VM |
+  | --- | --- | --- | --- | --- |
+  | A, nouveau vecteur | connexion coupée côté client | 30,01 s | 21 | 131,6 Mo (et 659,9 Mo sortis) |
+  | B, nouveau vecteur | connexion coupée côté client | 30,01 s | 28 968 | 52,0 Mo |
+  | A, à nouveau | 200 | 18,13 s | 47 722 | 2 637 Mo |
+
+  Essai de 23:56Z : 44,65 s, puis 0,22 s et 0,22 s pour le même vecteur. **Mesuré : une réponse lente coïncide avec des dizaines de milliers de défauts de page majeurs et des gigaoctets de swap rentrés** (`VmSwap` 21,25 → 18,95 Gio sur la requête de 18 s) ; un vecteur déjà servi repart en 0,2 s. Limites : les compteurs de swap sont ceux de toute la VM (trafic réel concurrent) ; l'identité du point de sérialisation des blocages totaux (§10.1) reste à identifier ; la coupure à 30,01 s (`http=0`) n'a pas de cause établie.
+- **Mémoire à 00:00Z** : conteneur `memory.current` 47,35 Gio ; processus qdrant `VmRSS` 45,78 Gio, `VmSwap` 21,07 Gio (limite 60 Gio, pic 60,0) ; VM : `SwapFree` 2,26 Gio sur 32.
+- **Collection** : `status=green`, `optimizer_status=ok`, 303 segments, 15 384 791 points. 0 restart depuis 03:18:44Z.
+- **Sauvegarde nocturne du 24/11 : reportée d'une nuit.** `Qdrant-Snapshot-Daily` désarmée à 00:06Z (01:06 locales) : `State=Disabled`, `schtasks` « Désactivé », prochaine exécution N/A ; seule différence de définition le drapeau `<Enabled>false</Enabled>` (sha1 de la définition d'origine `ECED01A9C40C`). Dry-run posté avant le geste (`qdrant-nightly-postponed-dryrun-20261124T0003Z`). **À réarmer au sweep suivant** (`Enable-ScheduledTask` : retrouver `State=Ready` et le sha1 d'origine) pour que le run du 25/11 01:17Z parte. Dernière copie hors site : 21/11 ; acceptation Q68 décalée au 25/11.
+- **Montage** : label `qdrant-e` sur `/dev/sdd` ; sentinel 285 à travers l'alias dans PID-1 (23:59Z) et dans le ns du proxy (23:55Z, pid 7893). Run de `Mount-Qdrant-VHDX` de 23:36Z : alias vérifié sain, Phase 5 sourde → exit 6, aucun geste (comme prévu depuis la PR #40).
+- **Fil voisin** : po-2023:vllm annonce sa sonde `count` légère en production (`exact:false`). Vu du journal d'accès sur 7 h, aucun tiers ne compte plus sur la collection ; restent 119 appels `count` de RSM (37 > 1 s, un à 1 000 s — victimes) et mes 8 appels de sweep (0,00 s).
+
