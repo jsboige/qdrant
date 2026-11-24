@@ -10,11 +10,12 @@
 #   -Real             + execution REELLE du payload sur l'alias courant (non destructif s'il est sain)
 #   -Real -TestRepair + demontage/re-bind REEL de l'alias /srv/qdrant-e dans PID-1 (sans effet
 #                     sur le conteneur ; ne pas lancer pendant un compose up)
+# -Source <chemin>    teste la copie DEPLOYEE (C:\ProgramData\maint-scripts\...) au lieu du depot
 # Exit code = nombre d'echecs. Interpreteur de production = powershell.exe 5.1 : tester les deux.
-param([switch]$Real, [switch]$TestRepair)
+param([switch]$Real, [switch]$TestRepair, [string]$Source = '')
 if ($TestRepair -and -not $Real) { $Real = $true }
 $ErrorActionPreference = "Stop"
-$src = (Resolve-Path (Join-Path $PSScriptRoot '..\host\mount_qdrant_vhdx.ps1')).Path
+$src = if ($Source) { $Source } else { (Resolve-Path (Join-Path $PSScriptRoot '..\host\mount_qdrant_vhdx.ps1')).Path }
 $probeSrvAlias = '/mnt/d/qdrant/myia_qdrant/scripts/monitoring/probe_srv_alias.sh'
 $fail = 0
 
