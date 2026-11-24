@@ -45,14 +45,16 @@
     $t=Get-ScheduledTask "Verify-Qdrant-Mount"; $t.Settings.ExecutionTimeLimit='PT90S'; Set-ScheduledTask -TaskName "Verify-Qdrant-Mount" -Settings $t.Settings
 .NOTES
     Sortie codes:
-      0   = OK
+      0   = OK. Status OK_DOCKER_PROOF : la sonde wsl.exe etait illisible mais le chemin Docker
+            prouve que le conteneur voit >= MinCollections collections => pas de derive
       1   = mountpoint absent                                  (REMEDIATE-ELIGIBLE)
       2   = mounted sur disque sans label qdrant-e (drift)     (REMEDIATE-ELIGIBLE)
       3   = container voit < MinCollections collections        (REMEDIATE-ELIGIBLE)
       4   = container's /qdrant/storage sur device different   (REMEDIATE-ELIGIBLE)
-      5   = sonde aveugle : wsl.exe n'a pas execute la commande Linux (no remediation,
-            sauf apres ProbeErrorEscalateAfter echecs consecutifs -> traite comme 1)
-      9   = container down (pas un probleme de mount)          (no remediation)
+      5   = ETAT INCONNU : wsl.exe n'a pas execute la commande Linux, ou une valeur est
+            illisible, ou Docker est injoignable. AUCUNE remediation, a aucun rang de la
+            serie ; une ligne ESCALADE quand la serie atteint ProbeErrorEscalateAfter
+      9   = conteneur absent ou arrete (preuve Docker)         (REMEDIATE-ELIGIBLE)
       124 = self-timeout : un appel wsl/docker a hang > SelfTimeoutSeconds (force-exit)
 
     Update 2026-10-31 (fausses derives) : sur 30 j, 14 des 15 "NOT mounted" etaient des
@@ -64,6 +66,22 @@
     Le marqueur PROBE_RAN distingue "Linux dit non monte" (derive, code 1) de "Linux n'a
     pas repondu" (code 5). Un blocage WSL prolonge reste couvert : apres
     ProbeErrorEscalateAfter echecs consecutifs (~6 min), retour au chemin de remediation.
+
+    Update 2026-11-24 (Maintenance #380 -- fail-closed, le retour au chemin de remediation
+    ci-dessus est RETIRE) : la nuit du 24/11, wsl.exe a echoue 60-80 % des sessions
+    (fragmentation de la memoire de la VM) sur un montage RESTE SAIN. Apres 3 echecs, ProbeBlind
+    "traitait comme derive" : 8 faux veredicts DRIFT, l'erreur wsl.exe prise pour l'etat ou le
+    label, 3 lancements de Mount-Qdrant-VHDX (5 autres sauves par le cooldown, par chance).
+    Desormais un état INCONNU n'est JAMAIS une derive : code 5, aucune remediation, quel que
+    soit le rang de la serie. Une remediation exige une PREUVE POSITIVE, et le chemin Docker
+    (qui ne depend pas de wsl.exe : moteur sain toute cette nuit) en fournit une : compteur
+    de collections LU. Lu et >= MinCollections => pas de derive (OK_DOCKER_PROOF) ; lu et
+    < MinCollections => derive (code 3) ; non entier => "non mesure", jamais 0. Le texte de
+    sortie de wsl.exe n'est jamais une valeur d'etat.
+    Limite mesuree le 24/11 : NotifyEvent ecrivait avec des ID 1001-1009, hors de la plage
+    eventcreate (1-1000) -- aucune notification n'a jamais atteint le journal Windows ; et la
+    tache tourne sans elevation ("Acces refuse" tant que la source n'existe pas). L'escalade
+    qui compte est donc la ligne ESCALADE du log.
 
     Update 2026-05-24 (post-GPU-crash : le watchdog avait HANG des heures) :
       - Self-timeout interne ($SelfTimeoutSeconds, defaut 90s) : thread .NET qui force-exit
@@ -84,10 +102,13 @@ param(
     [string]$RemediationTask    = "Mount-Qdrant-VHDX",
     [int]$CooldownMinutes       = 15,
     [int]$SelfTimeoutSeconds    = 90,
-    [int]$ProbeErrorEscalateAfter = 3
+    [int]$ProbeErrorEscalateAfter = 3,
+    # Repertoire des logs/etat. Surcharge par le selftest (commandes factices) pour ne jamais
+    # toucher l'etat reel de la tache planifiee.
+    [string]$LogDir            = "C:\ProgramData\maint-scripts\logs"
 )
 
-$logDir = "C:\ProgramData\maint-scripts\logs"
+$logDir = $LogDir
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $logFile = Join-Path $logDir "verify-qdrant-mount.log"
 $stateFile = Join-Path $logDir "qdrant-mount-state.json"
@@ -222,35 +243,97 @@ if (Test-Path $stateFile) {
     } catch { }
 }
 
-function ProbeBlind {
-    param([string]$Probe, [string]$Raw)
-    # Pas de marqueur PROBE_RAN : wsl.exe a echoue avant la commande Linux, l'etat du montage
-    # est INCONNU. Ce n'est pas une derive ; Mount-Qdrant-VHDX passerait par le meme wsl.exe.
-    $streak = $prevStreak + 1
-    if ($streak -lt $ProbeErrorEscalateAfter) {
-        Log "PROBE_ERROR $Probe ($streak/$ProbeErrorEscalateAfter): wsl.exe n'a pas execute la commande Linux -- etat inconnu, pas de remediation (raw=$Raw)" "WARN"
-        WriteState -ExitCode 5 -Status "PROBE_ERROR" -Data @{ probe = $Probe; raw = $Raw; probe_error_streak = $streak }
-        exit 5
+function Get-DockerVerdict {
+    # Preuve par le chemin Docker (Maintenance #380) : le moteur Docker ne depend pas de wsl.exe.
+    # Rend une table { state ; count ; raw } avec state :
+    #   absent        : docker inspect dit "No such object"      (preuve positive : conteneur supprime)
+    #   stopped       : inspect reussit, Running=false            (preuve positive)
+    #   ok:<n>        : conteneur running, compteur de collections LU, >= MinCollections
+    #   low:<n>       : conteneur running, compteur LU, < MinCollections (preuve positive de derive)
+    #   unknown       : inspect en erreur autre (moteur injoignable, timeout)  -- ETAT INCONNU
+    #   unknown-count : running mais compteur illisible (docker exec en echec) -- ETAT INCONNU, jamais 0
+    $insp = & docker.exe inspect $Container --format '{{.State.Running}}' 2>&1
+    $inspRc = $LASTEXITCODE
+    $inspStr = ($insp | Out-String).Trim()
+    if ($inspRc -ne 0) {
+        if ($inspStr -match "No such object") { return @{ state = "absent"; count = $null; raw = $inspStr } }
+        return @{ state = "unknown"; count = $null; raw = $inspStr }
     }
-    Log "PROBE_ERROR $Probe persistant ($streak echecs consecutifs) -> traite comme derive" "ERROR"
-    return $streak
+    if ($inspStr -ne "true") { return @{ state = "stopped"; count = $null; raw = $inspStr } }
+    $cnt = & docker.exe exec $Container sh -c "ls //qdrant/storage/collections/ 2>/dev/null | wc -l" 2>&1
+    $cntRc = $LASTEXITCODE
+    $cntStr = ($cnt | Out-String).Trim()
+    $cntClean = $cntStr -replace "[^0-9]", ""
+    if ($cntRc -ne 0 -or $cntClean -notmatch "^\d+$") { return @{ state = "unknown-count"; count = $null; raw = $cntStr } }
+    $n = [int]$cntClean
+    if ($n -lt $MinCollections) { return @{ state = "low:$n"; count = $n; raw = $cntStr } }
+    return @{ state = "ok:$n"; count = $n; raw = $cntStr }
+}
+
+function ProbeUnknown {
+    # ETAT INCONNU (sonde wsl.exe aveugle, valeur illisible, Docker injoignable) : JAMAIS une
+    # derive, JAMAIS de remediation -- a aucun rang de la serie. Nuit du 24/11 : 8 faux veredicts
+    # DRIFT sur montage sain, 3 lancements de Mount-Qdrant-VHDX (Maintenance #380).
+    # Une remediation reste possible sur PREUVE DOCKER seule : compteur LU < MinCollections
+    # (code 3) ou conteneur absent/arrete (code 9).
+    param([string]$Probe, [string]$What, [string]$Raw)
+    $streak = $prevStreak + 1
+    $rawOne = (([string]$Raw) -replace "\0", "" -replace "[\r\n]+", " | ")
+    if ($rawOne.Length -gt 160) { $rawOne = $rawOne.Substring(0, 160) + "..." }
+    $docker = Get-DockerVerdict
+    $details = @{ probe = $Probe; unreadable = $What; raw = $rawOne; docker = $docker.state; probe_error_streak = $streak }
+    $line = "PROBE_ERROR $Probe ($streak/$ProbeErrorEscalateAfter): $What (docker=$($docker.state) raw=$rawOne)"
+    if ($streak -eq $ProbeErrorEscalateAfter) {
+        Log "$line -- ESCALADE : sonde wsl.exe illisible $streak fois de suite, l'instrument est en panne (voir Maintenance #380)" "ERROR"
+        NotifyEvent -EventId 905 -Type "WARNING" -Message "QdrantWatchdog : sonde wsl.exe illisible $streak fois de suite ($Probe). Aucune remediation decidee. Voir C:\ProgramData\maint-scripts\logs\verify-qdrant-mount.log"
+    } else {
+        Log "$line -- etat inconnu" "WARN"
+    }
+    if ($docker.state -like "ok:*") {
+        # Preuve positive d'ABSENCE de derive : le conteneur voit les vraies donnees.
+        Log "Docker prouve que $Container voit $($docker.count) collections (>= $MinCollections) : PAS de derive, pas de remediation" "WARN"
+        WriteState -ExitCode 0 -Status "OK_DOCKER_PROOF" -Data $details
+        exit 0
+    }
+    if ($docker.state -eq "absent" -or $docker.state -eq "stopped") {
+        WriteState -ExitCode 9 -Status "CONTAINER_DOWN" -Data $details
+        TryRemediate -ExitCode 9 -Status "CONTAINER_DOWN"
+        exit 9
+    }
+    if ($docker.state -like "low:*") {
+        Log "DRIFT prouvee par Docker : $Container voit $($docker.count) collections (< $MinCollections) -- store mauvais (conteneur sur un reste rootfs ?)" "ERROR"
+        WriteState -ExitCode 3 -Status "DRIFT_LOW_COLLECTIONS" -Data $details
+        TryRemediate -ExitCode 3 -Status "DRIFT_LOW_COLLECTIONS"
+        exit 3
+    }
+    WriteState -ExitCode 5 -Status "PROBE_ERROR" -Data $details
+    exit 5
+}
+
+function Test-ContainerDown {
+    # Conteneur absent ou arrete : preuve Docker positive, remediation autorisee (code 9).
+    param([string]$Raw)
+    Log "WARN: container $Container absent ou non running (docker=$Raw) -- skip check 3+4" "WARN"
+    WriteState -ExitCode 9 -Status "CONTAINER_DOWN" -Data @{ device = $ubuntuDev; label = $labelStr; container_state = $Raw }
+    NotifyEvent -EventId 909 -Type "WARNING" -Message "Container $Container absent ou non running (docker=$Raw). Mount Ubuntu OK ($ubuntuDev label=$labelStr) mais qdrant indisponible."
+    TryRemediate -ExitCode 9 -Status "CONTAINER_DOWN"
+    exit 9
 }
 
 # --- Check 1: mountpoint inside Ubuntu ---
 # --cd / : evite "wsl: Failed to translate" si PowerShell CWD est un path UNC/GDrive
 $mountInfo = & wsl.exe --cd / -d $Distro -u root -- bash -c "echo PROBE_RAN; mountpoint -q $MountPoint && findmnt -n -o SOURCE $MountPoint || echo UNMOUNTED" 2>&1
 $mountText = $mountInfo | Out-String
-$streak = 0
-if ($mountText -notmatch '(?m)^PROBE_RAN\s*$') { $streak = ProbeBlind -Probe "mount" -Raw $mountText.Trim() }
+if ($mountText -notmatch '(?m)^PROBE_RAN\s*$') { ProbeUnknown -Probe "mount" -What "wsl.exe n'a pas execute la commande Linux" -Raw $mountText.Trim() }
 # Filtrer les warnings WSL stderr (e.g. "wsl: Failed to translate ...")
 $mountStr = ($mountText -split "`r?`n" | Where-Object { $_ -match "^/dev/sd|^UNMOUNTED" } | Select-Object -First 1)
-if (-not $mountStr -or $mountStr -notmatch "^(/dev/sd[a-z]+)$") {
+if (-not $mountStr) { ProbeUnknown -Probe "mount" -What "reponse Linux sans device ni UNMOUNTED" -Raw $mountText.Trim() }
+if ($mountStr -eq "UNMOUNTED" -or $mountStr -notmatch "^(/dev/sd[a-z]+)$") {
+    # Linux a repondu (PROBE_RAN present) : le mountpoint n'est pas monte, ou pas sur un /dev/sd*.
     $rawState = $mountText.Trim()
     Log "DRIFT: $MountPoint NOT mounted (state=$rawState)" "ERROR"
-    $driftData = @{ raw_mount_state = $rawState }
-    if ($streak) { $driftData.probe_error_streak = $streak }
-    WriteState -ExitCode 1 -Status "DRIFT_UNMOUNTED" -Data $driftData
-    NotifyEvent -EventId 1001 -Type "ERROR" -Message "Qdrant mount $MountPoint absent (split-brain risk imminent). Run mount_qdrant_vhdx.ps1 admin pour recover. Voir C:\ProgramData\maint-scripts\logs\verify-qdrant-mount.log"
+    WriteState -ExitCode 1 -Status "DRIFT_UNMOUNTED" -Data @{ raw_mount_state = $rawState }
+    NotifyEvent -EventId 901 -Type "ERROR" -Message "Qdrant mount $MountPoint absent (split-brain risk imminent). Run mount_qdrant_vhdx.ps1 admin pour recover. Voir C:\ProgramData\maint-scripts\logs\verify-qdrant-mount.log"
     TryRemediate -ExitCode 1 -Status "DRIFT_UNMOUNTED"
     exit 1
 }
@@ -259,37 +342,30 @@ $ubuntuDev = $matches[1]
 # --- Check 2: label is qdrant-e ---
 $labelOut = & wsl.exe --cd / -d $Distro -u root -- bash -c "echo PROBE_RAN; blkid -s LABEL -o value $ubuntuDev 2>/dev/null" 2>&1
 $labelText = $labelOut | Out-String
-if ($labelText -notmatch '(?m)^PROBE_RAN\s*$') { $streak = ProbeBlind -Probe "label" -Raw $labelText.Trim() }
+if ($labelText -notmatch '(?m)^PROBE_RAN\s*$') { ProbeUnknown -Probe "label" -What "wsl.exe n'a pas execute la commande Linux" -Raw $labelText.Trim() }
 $labelStr = ($labelText -split "`r?`n" | Where-Object { $_ -match "^[A-Za-z0-9_-]+$" -and $_ -ne "PROBE_RAN" } | Select-Object -First 1)
-if (-not $labelStr) { $labelStr = ($labelText -replace '(?m)^PROBE_RAN\s*$', '').Trim() }
+if (-not $labelStr) {
+    # PROBE_RAN present mais blkid sans reponse : valeur ILLISIBLE, pas un label vide (PR #40).
+    ProbeUnknown -Probe "label" -What "label blkid illisible (sortie vide)" -Raw $labelText.Trim()
+}
 if ($labelStr -ne $ExpectedLabel) {
-    Log "DRIFT: $MountPoint mounte sur $ubuntuDev mais label='$labelStr' (attendu '$ExpectedLabel') -- split-brain!" "ERROR"
-    $driftData = @{ device = $ubuntuDev; label = $labelStr; expected_label = $ExpectedLabel }
-    if ($streak) { $driftData.probe_error_streak = $streak }
-    WriteState -ExitCode 2 -Status "DRIFT_WRONG_LABEL" -Data $driftData
-    NotifyEvent -EventId 1002 -Type "ERROR" -Message "Qdrant mounte sur disque inattendu : device=$ubuntuDev label='$labelStr' (attendu '$ExpectedLabel'). SPLIT-BRAIN imminent. Voir log."
+    Log "DRIFT: $MountPoint monte sur $ubuntuDev mais label='$labelStr' (attendu '$ExpectedLabel') -- split-brain!" "ERROR"
+    WriteState -ExitCode 2 -Status "DRIFT_WRONG_LABEL" -Data @{ device = $ubuntuDev; label = $labelStr; expected_label = $ExpectedLabel }
+    NotifyEvent -EventId 902 -Type "ERROR" -Message "Qdrant mounte sur disque inattendu : device=$ubuntuDev label='$labelStr' (attendu '$ExpectedLabel'). SPLIT-BRAIN imminent. Voir log."
     TryRemediate -ExitCode 2 -Status "DRIFT_WRONG_LABEL"
     exit 2
 }
 
-# --- Check 3: container sees >= MinCollections ---
-$running = & docker.exe inspect $Container --format '{{.State.Running}}' 2>&1
-if ($LASTEXITCODE -ne 0 -or ($running | Out-String).Trim() -ne "true") {
-    $rawRunning = ($running | Out-String).Trim()
-    Log "WARN: container $Container non running (state=$rawRunning) -- skip check 3+4" "WARN"
-    WriteState -ExitCode 9 -Status "CONTAINER_DOWN" -Data @{ device = $ubuntuDev; label = $labelStr; container_state = $rawRunning }
-    NotifyEvent -EventId 1009 -Type "WARNING" -Message "Container $Container non running (state=$rawRunning). Mount Ubuntu OK ($ubuntuDev label=$labelStr) mais qdrant indisponible."
-    TryRemediate -ExitCode 9 -Status "CONTAINER_DOWN"
-    exit 9
-}
-
-$collsOut = & docker.exe exec $Container sh -c "ls //qdrant/storage/collections/ 2>/dev/null | wc -l" 2>&1
-$collsClean = ($collsOut | Out-String).Trim() -replace "[^0-9]", ""
-$collCount = if ($collsClean -match "^\d+$") { [int]$collsClean } else { -1 }
-if ($collCount -lt $MinCollections) {
+# --- Check 3 : le conteneur voit-il >= MinCollections collections ? (preuve Docker) ---
+# Un echec de docker inspect/exec est un etat INCONNU (code 5), jamais un compteur a -1.
+$docker = Get-DockerVerdict
+if ($docker.state -eq "absent" -or $docker.state -eq "stopped") { Test-ContainerDown -Raw $docker.raw }
+if ($docker.state -eq "unknown" -or $docker.state -eq "unknown-count") { ProbeUnknown -Probe "docker" -What "Docker illisible ($($docker.state))" -Raw $docker.raw }
+$collCount = $docker.count
+if ($docker.state -like "low:*") {
     Log "DRIFT: container voit $collCount collections (< $MinCollections threshold)" "ERROR"
-    WriteState -ExitCode 3 -Status "DRIFT_LOW_COLLECTIONS" -Data @{ device = $ubuntuDev; collections_seen = $collCount; min_threshold = $MinCollections }
-    NotifyEvent -EventId 1003 -Type "ERROR" -Message "Qdrant container voit seulement $collCount collections (< $MinCollections). Cache stale, container down ou mount invalide."
+    WriteState -ExitCode 3 -Status "DRIFT_LOW_COLLECTIONS" -Data @{ device = $ubuntuDev; label = $labelStr; collections_seen = $collCount; min_threshold = $MinCollections }
+    NotifyEvent -EventId 903 -Type "ERROR" -Message "Qdrant container voit seulement $collCount collections (< $MinCollections). Cache stale, container down ou mount invalide."
     TryRemediate -ExitCode 3 -Status "DRIFT_LOW_COLLECTIONS"
     exit 3
 }
@@ -297,12 +373,15 @@ if ($collCount -lt $MinCollections) {
 # --- Check 4: container's /qdrant/storage device match Ubuntu's mount device ---
 # Eviter awk (probleme escape $ dans PowerShell). Utiliser cut.
 $dfOut = & docker.exe exec $Container sh -c "df //qdrant/storage | tail -1 | tr -s ' ' | cut -d' ' -f1" 2>&1
-$containerDev = (($dfOut | Out-String) -split "`r?`n" | Where-Object { $_ -match "^/dev/sd|^/dev/" } | Select-Object -First 1)
-if (-not $containerDev) { $containerDev = ($dfOut | Out-String).Trim() }
+$dfRc = $LASTEXITCODE
+$dfStr = ($dfOut | Out-String).Trim()
+if ($dfRc -ne 0 -or -not $dfStr) { ProbeUnknown -Probe "device" -What "device de /qdrant/storage illisible dans le conteneur" -Raw $dfStr }
+$containerDev = ($dfStr -split "`r?`n" | Where-Object { $_ -match "^/dev/" } | Select-Object -First 1)
+if (-not $containerDev) { $containerDev = ($dfStr -split "`r?`n" | Select-Object -First 1) }
 if ($containerDev -ne $ubuntuDev) {
     Log "DRIFT: container voit /qdrant/storage sur $containerDev mais Ubuntu mount $MountPoint sur $ubuntuDev -- bind-mount cache stale" "ERROR"
     WriteState -ExitCode 4 -Status "DRIFT_DEVICE_MISMATCH" -Data @{ ubuntu_device = $ubuntuDev; container_device = $containerDev; collections_seen = $collCount }
-    NotifyEvent -EventId 1004 -Type "ERROR" -Message "Bind-mount cache stale : Ubuntu mount $MountPoint=$ubuntuDev mais container voit $containerDev. Restart Docker Desktop pour refresh."
+    NotifyEvent -EventId 904 -Type "ERROR" -Message "Bind-mount cache stale : Ubuntu mount $MountPoint=$ubuntuDev mais container voit $containerDev. Restart Docker Desktop pour refresh."
     TryRemediate -ExitCode 4 -Status "DRIFT_DEVICE_MISMATCH"
     exit 4
 }

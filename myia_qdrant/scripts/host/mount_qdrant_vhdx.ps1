@@ -46,6 +46,19 @@
     Ce script doit etre rejoue a chaque boot/logon avant que qdrant_production ne fonctionne.
     REQUIS : /etc/fstab dans Ubuntu doit contenir l'entree qdrant-e (cf. CLAUDE.md "Persistent in-Ubuntu mount via /etc/fstab").
     REQUIS : /etc/wsl.conf doit contenir [boot] systemd=true (sinon fstab ignore).
+
+    Update 2026-11-24 (Maintenance #380 -- fail-closed avant le compose down/up) : l'ancien bloc
+    decidait un recreate quand le healthcheck n'etait pas "healthy" (moteur Docker injoignable,
+    healthcheck "starting", docker inspect en echec) ou quand le compteur de collections etait
+    illisible (fallback "0"). Les deux sont des ETATS INCONNUS, pas des pannes prouvees : sur un
+    montage sain, c'est un compose down/up de production decide par la garde. Desormais :
+      - absent / arrete (preuve Docker "No such object" ou Running=false) => compose up, comme avant ;
+      - healthy + compteur LU >= 50 => idempotent, exit 0, comme avant ;
+      - healthy + compteur LU < 50 => preuve positive d'un mauvais store, recreate ;
+      - healthy + compteur NON ENTIER => non mesure : exit 10, SAUF si le sentinel de l'alias a
+        ete lu = 285 dans ce meme run (preuve positive du store) => exit 0 sans geste ;
+      - moteur injoignable / healthcheck illisible => exit 10, aucun compose down/up.
+    Un "compose introuvable" reste un avertissement suivi d'exit 0 (rien a relancer).
 #>
 
 [CmdletBinding()]
@@ -57,7 +70,15 @@ param(
     [string]$ComposePath = "D:\qdrant\myia_qdrant\docker-compose.production.yml",
     [int]$WaitSeconds    = 30,
     [int]$DockerWaitSec  = 180,
-    [switch]$SkipDocker
+    [switch]$SkipDocker,
+    # Maintenance #380 : la sentinelle lue a travers l'alias (ou un namespace proxy dont le
+    # sentinel vaut 285) prouve que le store est le bon. Dans ce cas seulement, "healthy" mais
+    # compteur de collections illisible n'est plus un motif d'arret : le chemin rootfs vide est
+    # exclu par le sentinel, donc aucun compose down/up. Option de parametre reservee aux tests ;
+    # en production la preuve vient des sondes du script lui-meme ($script:AliasVerified).
+    [switch]$AliasVerified = $false,
+    # Repertoire de logs (surcharge par le selftest a commandes factices).
+    [string]$LogDir        = "C:\ProgramData\maint-scripts\logs"
 )
 
 # 'Continue' et NON 'Stop' : sous 'Stop', le stderr d'une commande native (wsl.exe,
@@ -71,7 +92,7 @@ param(
 # controle, il supprime seulement les aborts invisibles. Le bloc Phase 6 avait deja
 # ce meme correctif local (ligne ~277) : il est applique ici a tout le script.
 $ErrorActionPreference = "Continue"
-$logDir = "C:\ProgramData\maint-scripts\logs"
+$logDir = $LogDir
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $logFile = Join-Path $logDir "mount-qdrant-vhdx-$(Get-Date -f yyyyMMdd-HHmmss).log"
 
@@ -265,6 +286,10 @@ Log "$MountPoint marque shared (propagation cross-distro)"
 # \\wsl.localhost\Ubuntu\srv\qdrant-e\... (overlay docker-compose.production.pathfix.yml).
 # Idempotent : bind deja present -> no-op.
 $aliasPoint = "/srv/qdrant-e"
+# Maintenance #380 : la sentinelle lue a travers l'alias est une preuve POSITIVE du store, utile
+# quand le compteur de collections est illisible. Elle est portee par une variable de script pour
+# etre transmise a la decision de restart (le switch de parametre reste disponible pour les tests).
+$script:AliasVerified = $false
 # 13/11/2026 : l'echec du bind etait MASQUE (2>&1 | Out-Null + log inconditionnel) -- apres le
 # reboot du 13/11 l'alias est reste mort 65 min sans aucune trace dans le log. On capture le rc
 # et on VERIFIE le sentinel A TRAVERS l'alias ; 2eme tentative = purge d'un bind perime.
@@ -308,6 +333,7 @@ for ($attempt = 1; $attempt -le 3; $attempt++) {
     if ($aliasVerdict) { break }
 }
 if ($aliasVerdict -match "^alias-ok:") {
+    $script:AliasVerified = $true
     Log "Alias $aliasPoint -> $MountPoint verifie par le sentinel ($($aliasVerdict.Split(':')[1]), tentative $attempt)" "OK"
 } elseif ($aliasVerdict) {
     Log "Alias $aliasPoint -> $MountPoint NON VERIFIE apres bind : $aliasVerdict -- un compose up binderait le rootfs" "ERR"
@@ -477,27 +503,74 @@ echo "proxy-alias-scan-done:ok=$nok fixed=$nfix"
 $proxyAliasLf = $proxyAliasScript -replace "`r", ""
 $proxyAliasB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($proxyAliasLf))
 $proxyAliasOut = & wsl.exe -d $Distro -u root -- nsenter -t 1 -m -- bash -c "echo $proxyAliasB64 | base64 -d | bash" 2>&1
-foreach ($l in (($proxyAliasOut | Out-String).Trim() -split "`r?`n")) { if ($l) { Log "  $l" } }
+foreach ($l in (($proxyAliasOut | Out-String).Trim() -split "`r?`n")) {
+    if ($l) {
+        Log "  $l"
+        if ($l -match "^proxy-alias-scan-done:ok=(\d+) fixed=(\d+)" -and (([int]$matches[1] + [int]$matches[2]) -gt 0)) {
+            # Au moins un namespace proxy dont le sentinel vaut 285 : preuve positive du store.
+            $script:AliasVerified = $true
+        }
+    }
+}
 
 if (-not (Test-Path $ComposePath)) {
     Log "Compose introuvable: $ComposePath" "WARN"
     exit 0
 }
 
-# Idempotence check: si qdrant voit deja >= 50 collections (vraies donnees), skip restart
-$health = & docker.exe inspect qdrant_production --format '{{.State.Health.Status}}' 2>&1
-$healthStr = ($health | Out-String).Trim()
-Log "qdrant_production health: $healthStr"
+# --- Preuve par le chemin Docker (Maintenance #380) : "illisible" != "absent" ---
+# Un conteneur ABSENT ou ARRETE est une preuve POSITIVE : compose up est voulu (code 9).
+# Un moteur injoignable, un healthcheck illisible ou un docker exec en echec sont des ETATS
+# INCONNUS : le script refuse de redemarrer la production (exit 10), puisque c'est exactement
+# le chemin par lequel une garde redemarrait qdrant sur un montage sain.
+function Get-ContainerVerdict {
+    $insp = & docker.exe inspect qdrant_production --format '{{.State.Running}}' 2>&1
+    $inspRc = $LASTEXITCODE
+    $inspStr = ($insp | Out-String).Trim()
+    if ($inspRc -ne 0) {
+        if ($inspStr -match "No such object") { return @{ state = "absent"; raw = $inspStr } }
+        return @{ state = "unknown"; raw = $inspStr }
+    }
+    if ($inspStr -ne "true") { return @{ state = "stopped"; raw = $inspStr } }
+    $health = & docker.exe inspect qdrant_production --format '{{.State.Health.Status}}' 2>&1
+    $healthRc = $LASTEXITCODE
+    $healthStr = ($health | Out-String).Trim()
+    Log "qdrant_production health: $healthStr"
+    if ($healthRc -ne 0 -or $healthStr -eq "healthy") { return @{ state = "healthy"; raw = $healthStr } }
+    if ($healthStr -match "unhealthy") { return @{ state = "unhealthy"; raw = $healthStr } }
+    return @{ state = "unknown"; raw = $healthStr }
+}
 
-if ($healthStr -eq "healthy") {
+$verdict = Get-ContainerVerdict
+if ($verdict.state -eq "healthy") {
     $collInsideOut = & docker.exe exec qdrant_production sh -c "ls /qdrant/storage/collections 2>/dev/null | wc -l" 2>&1
-    $collInsideLines = @(($collInsideOut | Out-String) -split "`r?`n" | Where-Object { $_.Trim() -match "^\d+$" })
-    $collInsideStr = if ($collInsideLines.Count -gt 0) { $collInsideLines[-1].Trim() } else { "0" }
-    Log "qdrant voit $collInsideStr collections (interne)"
-    if ([int]$collInsideStr -ge 50) {
+    $collInsideRc = $LASTEXITCODE
+    $collInsideStr = ($collInsideOut | Out-String).Trim()
+    $collInsideClean = $collInsideStr -replace "[^0-9]", ""
+    # Non entier = "NON MESURE", jamais 0 : un docker exec en echec ne vaut pas un compteur.
+    if ($collInsideRc -ne 0 -or $collInsideClean -notmatch "^\d+$") {
+        if ($AliasVerified) {
+            Log "qdrant healthy mais compteur de collections ILLISIBLE (rc=$collInsideRc raw=$collInsideStr) : sentinelle de l'alias VERIFIEE, le store est prouve bon -- AUCUN compose down/up" "WARN"
+            exit 0
+        }
+        Log "qdrant healthy mais compteur de collections ILLISIBLE (rc=$collInsideRc raw=$collInsideStr) et sentinelle de l'alias non verifiee : ETAT INCONNU" "WARN"
+        FailExit -Code 10 -EventId 711 -Message "Etat INCONNU : qdrant healthy mais le compteur de collections est illisible. Aucun compose down/up sur une mesure manquante (Maintenance #380)."
+    }
+    $collInside = [int]$collInsideClean
+    Log "qdrant voit $collInside collections (interne)"
+    if ($collInside -ge 50) {
         Log "Idempotent: qdrant deja sur les vraies donnees, skip restart" "OK"
         exit 0
     }
+    # Preuve POSITIVE : le conteneur voit bien un store presque vide -> recreate voulu.
+    Log "qdrant healthy mais ne voit que $collInside collections (< 50) : preuve positive d'un mauvais store, recreate" "WARN"
+} elseif ($verdict.state -eq "unknown") {
+    Log "Etat du conteneur ILLISIBLE (docker=$($verdict.raw)) : pas de preuve positive de panne" "WARN"
+    FailExit -Code 10 -EventId 712 -Message "Etat INCONNU : moteur Docker injoignable ou healthcheck illisible ($($verdict.raw)). Aucun compose down/up sur une mesure manquante (Maintenance #380)."
+} elseif ($verdict.state -eq "unhealthy") {
+    Log "qdrant_production UNHEALTHY ($($verdict.raw)) : preuve positive de panne, recreate" "WARN"
+} else {
+    Log "qdrant_production absent ou non running ($($verdict.raw)) : compose up voulu" "WARN"
 }
 
 # Force restart pour rafraichir bind-mount cache (au cas ou Docker a demarre avant le mount)

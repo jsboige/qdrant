@@ -10,11 +10,12 @@
 #   -Real             + execution REELLE du payload sur l'alias courant (non destructif s'il est sain)
 #   -Real -TestRepair + demontage/re-bind REEL de l'alias /srv/qdrant-e dans PID-1 (sans effet
 #                     sur le conteneur ; ne pas lancer pendant un compose up)
+# -Source <chemin>    teste la copie DEPLOYEE (C:\ProgramData\maint-scripts\...) au lieu du depot
 # Exit code = nombre d'echecs. Interpreteur de production = powershell.exe 5.1 : tester les deux.
-param([switch]$Real, [switch]$TestRepair)
+param([switch]$Real, [switch]$TestRepair, [string]$Source = '')
 if ($TestRepair -and -not $Real) { $Real = $true }
 $ErrorActionPreference = "Stop"
-$src = (Resolve-Path (Join-Path $PSScriptRoot '..\host\mount_qdrant_vhdx.ps1')).Path
+$src = if ($Source) { $Source } else { (Resolve-Path (Join-Path $PSScriptRoot '..\host\mount_qdrant_vhdx.ps1')).Path }
 $probeSrvAlias = '/mnt/d/qdrant/myia_qdrant/scripts/monitoring/probe_srv_alias.sh'
 $fail = 0
 
@@ -127,6 +128,53 @@ foreach ($c in $p4cases) {
     $ok = ($script:Umount -eq $c.ExpUmount) -and ($needMount -eq $c.ExpNeed) -and ($last -like "*$($c.ExpTxt)*")
     Write-Host ("[4] label={0,-9} umount appele={1} needMount={2} -> {3}" -f "'$($c.Mode)'", $script:Umount, $needMount, $last)
     if (-not $ok) { Write-Host "    FAIL (attendu umount=$($c.ExpUmount), needMount=$($c.ExpNeed), *$($c.ExpTxt)*)"; $fail++ }
+}
+# --- 5) Phase 6 : decision de restart fail-closed (Maintenance #380) ---
+# Code REEL extrait (bloc "Preuve par le chemin Docker"), docker.exe factice, aucun compose.
+$p6s = $text.IndexOf('# --- Preuve par le chemin Docker')
+$p6e = $text.IndexOf('# Force restart pour rafraichir bind-mount cache')
+if ($p6s -lt 0 -or $p6e -lt 0) { Write-Host "[5] marqueurs Phase 6 INTROUVABLES"; exit 1 }
+$p6 = $text.Substring($p6s, $p6e - $p6s) -replace '(?m)^(\s*)exit (\d+)\s*$', '$1throw "EXIT:$2"'
+function NotifyEvent { param([int]$EventId, [string]$Type = 'ERROR', [string]$Message) }
+function FailExit { param([int]$Code, [int]$EventId, [string]$Message) $script:Logs += "[ERROR] $Message"; throw "EXIT:$Code" }
+function docker.exe {
+    $a = ($args -join ' ')
+    if ($a -match 'State.Running') {
+        switch ($script:Mode) {
+            'absent'     { $global:LASTEXITCODE = 1; 'Error: No such object: qdrant_production'; return }
+            'stopped'    { $global:LASTEXITCODE = 0; 'false'; return }
+            'bad-engine' { $global:LASTEXITCODE = 1; 'Cannot connect to the Docker daemon'; return }
+            default      { $global:LASTEXITCODE = 0; 'true'; return }
+        }
+    }
+    if ($a -match 'State.Health.Status') { $global:LASTEXITCODE = 0; 'healthy'; return }
+    if ($a -match 'wc -l') {
+        if ($script:Mode -eq 'bad-exec') { $global:LASTEXITCODE = 1; 'Error response from daemon: exec failed'; return }
+        $global:LASTEXITCODE = 0; $script:Coll; return
+    }
+    $global:LASTEXITCODE = 0
+}
+$p6cases = @(
+    @{ Id = 'C';  Mode = 'bad-engine'; Coll = ''; Alias = $false; Exit = 10; Note = 'moteur injoignable => refus, AUCUN compose' },
+    @{ Id = 'D';  Mode = 'bad-exec';   Coll = ''; Alias = $false; Exit = 10; Note = 'healthy + docker exec en echec => refus, AUCUN compose' },
+    @{ Id = 'D2'; Mode = 'bad-exec';   Coll = ''; Alias = $true;  Exit = 0;  Note = 'idem MAIS sentinel alias lu 285 => store prouve, exit 0 sans geste' },
+    @{ Id = 'D3'; Mode = 'bad-exec';   Coll = ''; Alias = $false; Exit = 10; Note = 'idem sans preuve => exit 10' },
+    @{ Id = 'F';  Mode = 'absent';     Coll = ''; Alias = $false; Exit = 0;  Note = 'conteneur supprime => compose up voulu (chemin restart atteint)' },
+    @{ Id = 'F2'; Mode = 'stopped';    Coll = ''; Alias = $false; Exit = 0;  Note = 'conteneur arrete => compose up voulu' },
+    @{ Id = 'G';  Mode = 'healthy';    Coll = '118'; Alias = $false; Exit = 0; Note = 'healthy + 118 collections => idempotent, exit 0' },
+    @{ Id = 'H';  Mode = 'healthy';    Coll = '3';   Alias = $false; Exit = 0; Note = 'healthy + compteur LU 3 => preuve positive, recreate voulu' },
+    @{ Id = 'I';  Mode = 'healthy';    Coll = '';    Alias = $false; Exit = 10; Note = 'compteur VIDE (aucun chiffre) => non mesure, refus' }
+)
+foreach ($c in $p6cases) {
+    $script:Mode = $c.Mode; $script:Coll = $c.Coll; $script:Logs = @()
+    $AliasVerified = $c.Alias
+    $rc = 0; $err = ''
+    try { & ([ScriptBlock]::Create($p6)) } catch { $err = $_.Exception.Message; if ($err -match '^EXIT:(\d+)$') { $rc = [int]$matches[1] } else { $rc = -99 } }
+    $recreate = ($script:Logs -match 'compose up voulu|recreate voulu|preuve positive d.un mauvais store').Count -gt 0
+    $expRecreate = $c.Id -match '^F|^H'
+    $ok = ($rc -eq $c.Exit) -and ($recreate -eq $expRecreate)
+    Write-Host ("[5] cas {0,-3} exit={1,3} recreate={2} -> {3} ({4})" -f $c.Id, $rc, $recreate, $(if ($ok) { 'PASS' } else { 'FAIL' }), $c.Note)
+    if (-not $ok) { $fail++; Write-Host "    erreur: $err"; $script:Logs | ForEach-Object { Write-Host "      $_" } }
 }
 Write-Host "RESULTAT : $(if ($fail -eq 0) { 'TOUT PASS' } else { "$fail ECHEC(S)" })"
 exit $fail
