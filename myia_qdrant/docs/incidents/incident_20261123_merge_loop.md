@@ -239,3 +239,30 @@ Relevé du 23:03Z (24/11, fenêtre saine, `qdrant_cgroup_sample.py` 15 s) : swap
 - **Corrections de la lane.** (1) Les posts de 11:52-11:55Z annonçaient « les `PUT /index` ont disparu depuis 10:59Z » : **prématuré** — la pause a duré de 10:59Z à 12:43Z. (2) « Les lectures répétées de `docker logs --since` dupliquent les lignes » : **faux** — 696 puis 705 lignes sont deux lectures séparées par le trafic arrivé entre elles ; ne jamais dédupliquer sur la ligne entière. (3) « Bord de 60 s du moteur sur le chemin d'écriture » (§10.8) : c'est un `WaitTimeout` rendu au client.
 - **Écart déclaré au prompt de sweep** (« 3 requêtes à chaud ») : une seule lecture légère (`count` approximatif), le service étant bloqué et les sondes pesant sur les clients (§10.4). Aucun restart (restart count 0 depuis le 23/11 03:18:44Z).
 - **Sauvegarde** : dernière copie hors site 21/11 ; nightly armée pour le 25/11 01:17Z, décision au one-shot de 01:07 locales. **Q17** : sans réponse (~38 h à 18:13Z), relance `ASK-USER` postée sur `global`.
+
+## §10.10 — 24/11 22:43-22:48Z : une lecture lente prise sur le fait — pages fichier froides, pool borné à 12
+
+Mesures en régime de trafic courant, **aucune sonde moteur** : procfs et cgroup dans le conteneur, journal d'accès pour le trafic réel.
+
+**1. Deux détecteurs écartés, un retenu.**
+- L'observateur v1 (détection par **fin** de réponses défectueuses) a capturé à 22:43:08Z la **libération** d'un blocage, pas son déroulement : 4 réponses défectueuses terminées (max 133,77 s), puis 41 s d'échantillonnage avec pools **vides** (0 thread bloquant vivant), 0 défaut de page majeur, pswpin +42 pages et **0 réponse terminée**.
+- Un détecteur par **silence de complétions** ne convient pas : en régime sain, p99 des intervalles entre fins = 22 s et max = 175 s (`gaps.py`, 18:30→22:46Z, 10 567 requêtes), alors que le blocage 19:27→22:23Z a laissé passer 2 702 requêtes.
+- Retenu : **occupation des pools bloquants** (`search-io-N` / `search-cpu-N`, N ≥ 1) lue en procfs toutes les 10 s. Au repos les pools sont vides (mesuré à 22:33Z et 22:43Z) ; un thread né pour une tâche porte un numéro de spawn (21906 ici), pas un indice de pool. Veilleur : `block_probe_v2.py`, seuil `pool_alive ≥ 3` sur 2 sondages consécutifs, armé jusqu'à 01:10Z.
+
+**2. La lecture lente, prise sur le fait.**
+- 22:45:57 → 22:46:09Z : un thread `search-io` vivant, `D/folio_wait_bit_common`, **+65 624 défauts de page majeurs en 12 s** (≈ 5 470/s) et +4,18 s de CPU ; pswpin de la VM **+8 pages** seulement.
+- 22:48:29Z : **le même thread** (même tid, `search-io-21906`), toujours vivant, `D/folio_wait_bit_common`, **1 441 363 défauts majeurs cumulés** depuis sa naissance — ≈ **5,5 Gio** de pages fichier lues pour une tâche de lecture en cours depuis **plus de 2 min 30**.
+- Lu ainsi : à cet instant la lenteur n'est ni un verrou applicatif ni du swap-in — la requête **pagine des pages fichier froides** des données de la collection (stockage disque), et le pool qui la sert est borné à `max_search_threads` = 12, minuterie de 60 s armée avant l'entrée dans le pool (faits de code, §10.9).
+
+**3. Pourquoi les pages sont froides** (`mem_pressure.py`, deltas sur 12,2 s, 22:47-22:48Z).
+- Swap de la VM **plein** (`SwapFree` = 4 kB) ; qdrant : `VmRSS` 34,4 Go et **`VmSwap` 25,6 Go** (constant sur la fenêtre) ; cgroup `memory.current` 33,9 Gio / 60, `swap.current` 24,4 Gio / 60.
+- Cache fichier du cgroup : **6,46 Gio, dont 6,45 Gio *inactifs*** (`active_file` 0,01 Gio) — évictable à vue, jamais promu.
+- **`workingset_refault_file` +6 562 pages/s** (≈ 26 Mo/s) contre `pgmajfault` cgroup +574/s ; `workingset_refault_anon` 0, `pgscan` / `pgsteal` 0, `pswpin` 0,1 page/s ; PSI io `some avg10` = 16,7 %.
+- Le noyau compte un **thrash de cache fichier** (pages évincées puis relues) à un rythme 11× supérieur aux défauts majeurs facturés au cgroup : l'essentiel des refaults se manifeste en défauts mineurs, par le readahead. **Deux sources de défauts coexistent** selon les fenêtres — swap-in dominant le 24/11 00:01Z (§10.4), fichier dominant ici ; mesurer l'une sans l'autre mène à une conclusion fausse.
+
+**4. Portée et limites.**
+- Le facteur limitant **observé** est la mémoire disponible pour le jeu de travail (cache int8 anonyme + cache page fichier) dans une VM à swap plein. Leviers inchangés : (a) geler l'ingest (moins de réécritures de segments, donc moins de pages froides), (b) arbitrage mémoire **au niveau VM** (décision user), (c) binary quantization (jeu de travail disque plus petit).
+- **Limite** : une seule tâche, un seul thread. Le régime de blocage complet (pool saturé, 5xx) n'a **pas** été échantillonné pendant son déroulement — le « point de sérialisation » du blocage n'est donc pas établi ; ce qui l'est, c'est le mécanisme de la lecture lente.
+- Critère de fermeture inchangé (0 5xx **et** 0 réponse > 5 s sur ≥ 60 min de trafic réel) : sur 22:20 → 22:44:48Z, **0 5xx mais 16 `PUT /points` > 5 s (max 133,77 s)** — non atteint. Lectures dans cette fenêtre : `POST /points/scroll` 539 requêtes, max 0,25 s.
+
+**Instruments** (`.tmp/`, non versionné) : `gaps.py` (distribution des silences), `mem_pressure.py` (photo + deltas : swap, cache fichier, refaults, PSI, io), `pool_probe.sh` (dans le conteneur), `block_probe_v2.py` (veilleur d'occupation des pools).
