@@ -184,3 +184,58 @@ Relevé du 23:03Z (24/11, fenêtre saine, `qdrant_cgroup_sample.py` 15 s) : swap
 - **Clôture.** `[REPAIRED]` **sans ligne `scope:`** posté à 10:59:52Z (`qdrant-repaired-clean60-20261124T1059Z`, crossPost `global` + `workspace-roo-extensions`). L'organe (`check-degraded-escalations.py --env-file D:/nanoclaw/.env`) enregistre : « REPAIRED myia-ai-01|qdrant … a fermé 5 escalade(s) » — 02:33:53Z, 03:46:39Z, 11:58:45Z, 07:02:02Z, 08:15:44Z. Son exit 2 porte sur **21 échéances d'autres lanes**, aucune de cette lane.
 - **Ce que la clôture ne dit pas.** Les deux fenêtres propres de 28 et 33 min montrent que 60 min est un **plancher de mesure**, pas une preuve de réparation : la classe récurrente (6 épisodes depuis le 23/11) reste non expliquée, la mémoire VM reste saturée (Q17 sans réponse), l'amplificateur #4910 n'est pas déployé partout, et #4902 critère 4 reste non coché. Un 7ᵉ épisode rouvrira une escalade.
 - **Instrumentation.** Un observateur avec sortie immédiate « ≥5 erreurs/10 min » ne détecte que le début d'un blocage ; pendant un épisode long il doit être relancé avec ce seuil désactivé (sinon il sort à la première salve et la fin n'est jamais observée). Le compteur ne doit retenir que `ts > T0` strictement : `docker logs --since T0` inclut la réponse qui se termine exactement à T0.
+
+### 10.9 Après-midi du 24/11 — neuf épisodes de 11:50Z à 18:11Z, aucune heure propre : la clôture de 10:59Z n'était pas une réparation
+
+- **Épisode 7, 11:00:21Z → 11:10:51Z** (sweep 11:49Z) : 705 requêtes sur 10:55:53Z → 11:49:30Z, 30 × 5xx, 60 réponses > 5 s, `count` OK à 247,33 s ; timeouts `retrieve`, `internal_scroll_by_id`, `count`. Le relâchement de 09:55Z avait tenu ~65 min. Escalade `[DEGRADED]` `qdrant-degraded-readpath-episode7-20261124T1154Z` (organe : postée 11:51:40Z, échéance 19:51:40Z).
+- **Neuf épisodes ensuite.** Journal d'accès figé à 18:12:18Z, fenêtre **11:10:51Z → 18:11:53Z : 15 031 requêtes, 194 × 5xx, 545 réponses > 5 s, max 666,64 s** (`.tmp/episodes.py` : minute en défaut = au moins un 5xx ou une réponse > 5 s ; épisodes regroupés si l'écart est ≤ 10 min).
+
+  | Épisode | Minutes en défaut (UTC) | Durée | n | 5xx | > 5 s | max |
+  |---|---|---|---|---|---|---|
+  | 8 | 11:50 → 12:15 | 26 min | 466 | 4 | 30 | 75,58 s |
+  | 9 | 12:31 → 12:40 | 10 min | 248 | 9 | 35 | 114,24 s |
+  | 10 | 12:51 → 13:03 | 13 min | 126 | 16 | 49 | 225,12 s |
+  | 11 | 13:15 → 13:30 | 16 min | 450 | 104 | 151 | 652,14 s |
+  | 12 | 14:19 → 14:30 | 12 min | 128 | 10 | 44 | 305,39 s |
+  | 13 | 15:15 → 15:25 | 11 min | 1 019 | 4 | 6 | 60,00 s |
+  | 14 | 16:12 → 16:46 | 35 min | 221 | 30 | 87 | 666,64 s |
+  | 15 | 16:59 | 1 min | 248 | 0 | 1 | 7,27 s |
+  | 16 | 17:28 → en cours à 18:11 | 44 min | 320 | 17 | 142 | 315,73 s |
+
+  **Fenêtres propres entre les épisodes : 39 min (11:10 → 11:50), 15, 48 (13:31 → 14:19), 44, 46, 28 — jamais 60.** Le critère §10.3 n'a donc pas été atteint de l'après-midi : aucun `[REPAIRED]`.
+
+  | Opération | n | 5xx | > 5 s | max |
+  |---|---|---|---|---|
+  | `POST /points/scroll` | 10 701 | 59 | 100 | 173,19 s |
+  | `PUT /points` | 2 984 | 0 | 217 | 184,89 s |
+  | `POST /points` (lecture par ID, §10.7) | 1 066 | 98 | 134 | 95,04 s |
+  | `POST /points/count` | 136 | 36 | 68 | 666,64 s |
+  | `PUT /index` | 132 | 0 | 19 | 315,73 s |
+  | `POST /points/query` | 8 | 1 | 4 | 30,01 s |
+  | `GET /` (info de collection) | 4 | 0 | 3 | 203,75 s |
+
+  Timeouts moteur sur la fenêtre : `retrieve@60s` × 100, `internal_scroll_by_id@60s` × 53, `count@60s` × 29, **`read_filtered@60s` × 7 (type nouveau)**, `retrieve@0ns` × 6, `retrieve@17.46s` × 1.
+- **Vue client (17:57Z).** Recherche sémantique RSM → `fallback_used: true` (repli texte, 75 s) ; `roosync_search diagnose` : `status: degraded`, « Lecture bornée expirée après QDRANT_TIMEOUT_MS=15000 », `collection_info.status: io_bound_pending`, `collection_probe: timeout`, connexions qdrant et OpenAI `success`, `embedding_live_dimension: 2560`. Inférence réelle : **dims 2560 en 1,30 s** — l'embedder est sain, c'est la lecture Qdrant qui échoue. `healthz` : 200 en 3 ms.
+- **Mesure discriminante (17:52-17:53Z)** : l'info de collection n'est pas lisible (abandon client à 30 s) ; **`count` avec `exact:false` répond 15 631 977 points en 2,22 s**. L'ingest continue : +101 723 points entre 11:50Z (15 530 254, lecture exacte) et 17:53Z. Plancher 1,5 M respecté.
+- **Mémoire (17:50Z)** : conteneur `memory.current` 39,26 Gio (max 60, pic 60), `memory.swap.current` 23,49 Gio ; `VmRSS` 38,14 / `VmSwap` 23,49 Gio ; VM `MemAvailable` 32,2 Gio, **`SwapFree` 0,00 Gio — swap VM plein** ; CPU 0,46 cœur ; `/dev/sdd` 2 706 lectures/s à 0,3 ms. `myia_vllm-medium-swift15-27b` : 42,06 / 48 Gio à 18:12Z.
+- **Lecture de code à `v1.20.2`** (le checkout local est `v1.20.0-130-gfc9a234584` ; chaque citation ci-dessous a été contrôlée par la lane sur `git show v1.20.2:<chemin>`) — **VÉRIFIÉ dans le code, le lien avec les blocages reste à établir** :
+  - `count` **exact** (`lib/collection/src/shards/local_shard/shard_ops.rs`, l. 371-404) : `tokio::time::timeout(timeout, self.read_filtered(...))`, délai écoulé ⇒ `CollectionError::timeout(timeout, "count")`. `read_filtered` (`segments_searcher/retrieve.rs`, l. 108-142) passe par `runtime_handle.spawn_blocking`, prend le porteur de segments par `try_read_for(t)` (échec ⇒ `timeout(t, "read_filtered")`), le relâche avant de lire (« Collect the segments first so we don't lock the segment holder during the operations »), puis verrouille chaque segment en lecture pendant le travail.
+  - `count` **approximatif** (`local_shard/mod.rs`, l. 1113-1142, `estimate_cardinality`) : `tokio::task::spawn_blocking` sur le runtime principal, `segments.read()` sans délai, simple estimation en mémoire — **aucun minuteur** sur ce chemin. Il répond donc pendant que le chemin exact attend.
+  - `retrieve` (`segments_searcher/retrieve.rs`, l. 40) : même `runtime_handle.spawn_blocking`. Les pools de ce runtime sont **bornés à `max_search_threads`** (`lib/storage/src/content_manager/toc/runtimes.rs`, l. 105-115 : `high_cpu_blocking_threads` et `high_io_blocking_threads` valent tous deux `max_search_threads` lorsqu'il est non nul) : **12 threads dans notre configuration** (`config/production.optimized.yaml`). Le minuteur de 60 s est armé **avant** l'entrée dans le pool : le temps passé en file compte dans le délai.
+  - `read_filtered` en timeout (7 fois) = porteur de segments non obtenu dans le délai : à ces instants-là un écrivain tenait ou attendait ce verrou (`parking_lot::RwLock`, `lib/shard/src/segment_holder/locked.rs`, l. 4 et 20). Écrivain principal : `finish_optimization` (`lib/shard/src/optimize.rs`, l. 422-457), qui prend la garde d'écriture **après** son `flush(true)`.
+  - **`PUT /points` en 200 à exactement 60 s n'est pas un succès lent.** `await_update_result` (`shard_ops.rs`, l. 161-212) : délai écoulé ⇒ `Ok(UpdateResult { status: UpdateStatus::WaitTimeout })`, donc HTTP 200 avec `status: "wait_timeout"`. `UpdateParams.timeout` (`src/common/update.rs`, l. 37-44) est un `Option<Duration>` sans défaut de 60 s : la valeur vient du client. **L'écriture n'était pas acquittée dans le délai** — à relire ainsi dans les §10.7 et §10.8.
+  - **Hypothèse « un lecteur lent tient le verrou du porteur, un écrivain attend, les nouveaux lecteurs sont mis en file » : RÉFUTÉE par le code** — les lecteurs relâchent ce verrou avant les I/O, et `count` approximatif, qui prend le même verrou en lecture, répondait en 2,22 s.
+  - **Échantillon de threads à 18:07:00Z** (phase dégradée, mais sans preuve de requêtes en file à cet instant) : 165 threads ; pool I/O = 1 worker async + **6 threads bloquants vivants sur 12** (5 en `futex_wait_queue`, 1 en `folio_wait_bit_common`) ; pool CPU = 1 worker async ; 141 autres threads en futex. Le pool n'était donc pas saturé à cet instant. Un observateur (`.tmp/block_thread_probe.py`) échantillonne les threads au prochain début de blocage avéré.
+  - **Le point de sérialisation des blocages reste non identifié.**
+- **#4910 — annoncé déployé sur ai-01 à 12:38:12Z** (ai-01:roo-extensions, build mcps/internal `30348860` ; « reste à le déployer siège par siège »). Avant/après sur le journal serveur, découpe à 12:38:12Z, lecture de 18:11:33Z (`.tmp/client_split.py`) :
+
+  | Période | Durée | Requêtes | 5xx | `POST /points` n | dont 5xx | paires espacées de 4-6 s | `PUT /index` |
+  |---|---|---|---|---|---|---|---|
+  | Avant (09:55:30 → 12:38:12Z) | 2 h 43 | 4 323 | 40 | 1 093 | 26 | 21 | 0 |
+  | Après (12:38:12 → 18:11Z) | 5 h 33 | 12 985 | 184 | 556 | 98 | 54 | 123 |
+
+  **Non concluant.** La cadence de 5 s est toujours présente après le déploiement, mais la période « après » compte trois fois plus de temps dégradé, et surtout **le conteneur ne voit qu'une seule adresse client** (la passerelle Docker — 17 308 requêtes, limite déjà notée au §10.5) : le siège ai-01 ne peut pas être isolé côté serveur. La mesure du critère réel de #4910 (« phase B ≠ N × 5 s ») se fait côté client, sur les journaux RSM de chaque siège.
+- **`PUT /index`** : 132 depuis 11:10Z (18:12Z, fin de requête) ; par minute de **départ** à 17:53Z : `12:43=11 12:55=11 15:19=11 16:17=11 16:20=11 17:28=11 17:33=11 17:34=11 17:38=11 17:43=9 17:44=2`. Elles étaient instantanées pendant l'épisode 6 ; dans l'après-midi 19 dépassent 5 s (max 315,73 s). **#4902 critère 4 : toujours non coché.**
+- **Corrections de la lane.** (1) Les posts de 11:52-11:55Z annonçaient « les `PUT /index` ont disparu depuis 10:59Z » : **prématuré** — la pause a duré de 10:59Z à 12:43Z. (2) « Les lectures répétées de `docker logs --since` dupliquent les lignes » : **faux** — 696 puis 705 lignes sont deux lectures séparées par le trafic arrivé entre elles ; ne jamais dédupliquer sur la ligne entière. (3) « Bord de 60 s du moteur sur le chemin d'écriture » (§10.8) : c'est un `WaitTimeout` rendu au client.
+- **Écart déclaré au prompt de sweep** (« 3 requêtes à chaud ») : une seule lecture légère (`count` approximatif), le service étant bloqué et les sondes pesant sur les clients (§10.4). Aucun restart (restart count 0 depuis le 23/11 03:18:44Z).
+- **Sauvegarde** : dernière copie hors site 21/11 ; nightly armée pour le 25/11 01:17Z, décision au one-shot de 01:07 locales. **Q17** : sans réponse (~38 h à 18:13Z), relance `ASK-USER` postée sur `global`.
