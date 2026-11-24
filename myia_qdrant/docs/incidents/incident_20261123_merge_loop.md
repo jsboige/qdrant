@@ -268,3 +268,26 @@ Mesures en régime de trafic courant, **aucune sonde moteur** : procfs et cgroup
 - Critère de fermeture inchangé (0 5xx **et** 0 réponse > 5 s sur ≥ 60 min de trafic réel) : sur 22:20 → 22:44:48Z, **0 5xx mais 16 `PUT /points` > 5 s (max 133,77 s)** — non atteint. Lectures dans cette fenêtre : `POST /points/scroll` 539 requêtes, max 0,25 s.
 
 **Instruments** (`.tmp/`, non versionné) : `gaps.py` (distribution des silences), `mem_pressure.py` (photo + deltas : swap, cache fichier, refaults, PSI, io), `pool_probe.sh` (dans le conteneur), `block_probe_v2.py` (veilleur d'occupation des pools).
+
+## §10.11 — 24/11 22:41 → 23:11Z : un épisode capturé de bout en bout — 16 min de pagination sur un thread, trois `count` rendus à la même seconde
+
+**1. L'épisode** (trafic réel, journal d'accès, 22:40 → 23:12:35Z) : 1 714 requêtes, **7 × 5xx, 63 > 5 s, max 604,93 s** ; minutes en défaut de 22:41Z à 23:02Z (seule 22:56Z est propre). Signature : `PUT /points wait=true` → **200 à exactement 60,00-60,02 s** (≈ 26, de 22:50:05Z à 22:58:54Z) = écritures non acquittées ; `POST /points/scroll` en 500 à 60 s (`internal_scroll_by_id@60s` ×6) ; `POST /points/count` en 500 à 60 s ×1 ; trafic effondré à 3-18 requêtes/min. **23:03 → 23:09Z : zéro requête.** 23:10Z : **1 017 requêtes, max 0,13 s** ; 23:11Z : 500.
+
+**2. Le thread** (veilleur v2, battements 22:48:54Z → 23:02:16Z) : `search-io-21906`, vivant du 22:45:57Z à 23:02:16Z, `D/folio_wait_bit_common` ou `R`, défauts majeurs cumulés 1 591 266 → **5 274 314** (≈ 20 Gio, ≈ 5 300/s soutenus) ; **aucun autre thread des pools vivant** sur les 13 battements ; `S/futex_wait_queue` à 23:02:16Z, disparu à 23:03:17Z.
+
+**3. Trois `POST /points/count`** (départs 22:52:06Z, 22:57:05Z, 22:57:11Z) se terminent **à la même seconde, 23:02:11Z** (604,93 s, 305,05 s, 299,19 s, statut 200) — l'instant où le thread cesse de pager. Ils n'occupaient aucun thread des pools pendant leur attente (battements 22:57:56Z, 22:58:57Z, 23:00:02Z, 23:01:03Z : un seul thread vivant).
+
+**4. Code vérifié à `v1.20.2`** (citations contrôlées sur `git show v1.20.2:<chemin>`) :
+- `read_filtered` — chemin du `count` exact (`lib/collection/src/collection_manager/segments_searcher/retrieve.rs` l.108-136) : le porteur est pris en lecture **seulement pour collecter les segments** (`try_read_for(t)`, échec ⇒ `timeout(t, "read_filtered")`), mais **le garde en lecture de chaque segment est tenu pendant tout son scan** (`segment.get().read().read_filtered(...)`).
+- `finish_optimization` (`lib/shard/src/optimize.rs` l.411-457) : « This block locks all write operations with collection. It should be fast. » — garde `upgradable_read` du porteur (l.424) et **verrou des updates** (l.425) tenus à travers `proxy_changes`, `changes.propagate(...)` et `optimized_segment.flush(true)` (l.429-441), puis `upgrade()` (l.456) et `swap_new` (l.457).
+- `delete_points_by_filter` (`lib/shard/src/update/points/delete.rs` l.102) travaille sur `&segments.read()` et appelle `apply_segments_batched`, qui prend **l'écriture de chaque segment** (`lib/shard/src/segment_holder/mod.rs` l.938-958) : ordre porteur-lecture → segment-écriture.
+- `LocalShard::update` (`lib/collection/src/shards/local_shard/shard_ops.rs` l.231-245) : l'update est appliqué par une tâche séparée ; `wait=true` attend le résultat sous `timeout` ⇒ `WaitTimeout` à 60 s.
+
+**5. Établi / supposé.**
+- **Établi** : la lenteur d'une lecture = pagination de pages fichier froides (§10.7, §10.10) ; pendant cette pagination, écritures non acquittées et lectures en 500 à 60 s ; **trois requêtes parties à 5 min d'écart rendues à la même seconde** ; puis silence de 8 min et rafale.
+- **Supposé, non vérifié** — le couplage par verrou : un lecteur lent tient la lecture d'un segment ; un écrivain qui attend l'écriture de ce segment (ordre porteur-lecture → segment-écriture) garde la lecture du porteur ; l'`upgrade()` de `finish_optimization` attend la disparition de ces lecteurs ; les nouveaux lecteurs se rangent derrière lui. Il rendrait compte des `read_filtered@60s` (7 l'après-midi), des `PUT` en `wait_timeout`, de la libération simultanée et de la rafale — **mais aucune mesure ne montre encore quels threads attendent le même futex**.
+- **Non établi** : quelle opération était la tâche de 16 min (le thread a servi plusieurs tâches ; un `count` rendu en 500 à 60 s a pu continuer après l'abandon du client) ; pourquoi les trois `count` n'occupaient aucun thread pendant leur attente.
+
+**6. Limites d'instrument, mesurées.** `/proc/<tid>/syscall` est **illisible** dans le conteneur (`Operation not permitted` ; `yama ptrace_scope=1`, pas de `CAP_SYS_PTRACE`) — pas de contournement tenté ; l'adresse du futex attendu demande un observateur privilégié (décision user). Le pool **naît par rafales de 12 threads inactifs** après les salves de `scroll` (23:10:28Z, 23:16:44Z, 23:17:10Z) : le veilleur v2 (seuil « ≥ 3 vivants ») a tiré dessus — **faux positif**. Corrigé : `lock_probe.py` ne déclenche que sur un *pager* (≥ 2 000 défauts/s) ou un *attendant* (vivant ≥ 30 s en futex, sans défaut) ; testé par exécution (0 épisode sur deux rafales inactives), armé jusqu'à 06:00Z.
+
+**7. Critère de fermeture : non atteint** (7 × 5xx et 63 > 5 s depuis 22:40Z). Escalade ouverte. Aucun restart, aucune sonde moteur.
