@@ -60,6 +60,12 @@ param(
     # TEMP-GUARD : marge exigee au-dela de la taille du snapshot sur le volume temp.
     [int]$TempMarginGB = 30,
     [int]$MinPoints      = 100000,
+    # Client timeout on the snapshot CREATION call. 1800 s was the old margin ("builds in ~8 min
+    # at ~2M pts / 26 GB", 2026-08-20). Measured 2026-11-26: the 01:17Z run gave up at 1800 s
+    # while the server kept building and finished at 10 961 s (3 h 02) for a 248 GB snapshot —
+    # the collection is ~16.5M pts and the build is dominated by cold-page paging. 14 400 s (4 h)
+    # leaves ~57 min of margin over that measurement.
+    [int]$CreateTimeoutSec = 14400,
     # Retention: user ruling 2026-11-17 (GO via Maintenance) = keep 1 offsite copy, with Q29
     # doctrine: the predecessor is deleted ONLY after the new copy is verified server-side.
     # At 03:17 today's copy is still uploading (DriveFS lags hours) -> offsite deletion is
@@ -231,8 +237,15 @@ if ($missing.Count -eq 0) {
         # creation_time is a UTC timestamp whose yyyy-MM-dd prefix equals the date embedded
         # in the snapshot NAME; nightly runs (03:17 local = 02:17 UTC) share the date in both
         # zones. String prefix = no timezone-parsing drift between PS 5.1 and 7.
-        $reuse = @($srvList.result) | Where-Object { $_.creation_time -and "$($_.creation_time)".StartsWith($today) } |
-            Sort-Object -Property creation_time -Descending | Select-Object -First 1
+        # 2026-11-26: creation_time came back NULL on v1.20.2 for the snapshot the engine really
+        # built (measured on the 01:17Z artifact), so this filter never matched and a rerun would
+        # have stacked a SECOND ~248 GB snapshot. Fall back to the UTC date embedded in the name.
+        $todayUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+        $reuse = @($srvList.result) | Where-Object {
+            $ct = if ($_.creation_time) { "$($_.creation_time)" } else { '' }
+            $nd = if ("$($_.name)" -match '-(\d{4}-\d\d-\d\d)-\d\d-\d\d-\d\d-') { $Matches[1] } else { '' }
+            ($ct -ne '' -and $ct.StartsWith($today)) -or ($nd -ne '' -and ($nd -eq $today -or $nd -eq $todayUtc))
+        } | Sort-Object -Property name -Descending | Select-Object -First 1
     } catch { Write-Log "WARN: reuse-check list failed (non-fatal, creating fresh): $($_.Exception.Message)" 'WARN' }
 
     $snapName = $null
@@ -244,10 +257,9 @@ if ($missing.Count -eq 0) {
         Write-Log "REUSE: today's server-side snapshot already exists (leftover from an interrupted run): name=$snapName serverSize=$snapSize — creation SKIPPED"
     } elseif ($PSCmdlet.ShouldProcess("$QdrantUrl/collections/$Collection/snapshots", 'POST create snapshot')) {
         try {
-            # 1800s: at ~2M pts / 26 GB the snapshot builds in ~8 min but on 2026-08-20 the HTTP
-            # response came back past 600s (run failed while the snapshot completed server-side)
-            # -- the old margin is gone as the collection grows.
-            $createResp = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots" -Headers $headers -Method Post -TimeoutSec 1800
+            # -CreateTimeoutSec (default 14 400 s): measured 10 961 s on 2026-11-26 for 248 GB
+            # at ~16.5M pts; the old 1800 s was tuned when the snapshot built in ~8 min.
+            $createResp = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots" -Headers $headers -Method Post -TimeoutSec $CreateTimeoutSec
         } catch { Write-Log "FATAL: snapshot creation failed: $($_.Exception.Message)" 'ERROR'; exit 1 }
         $snapName = $createResp.result.name
         if ([string]::IsNullOrWhiteSpace($snapName)) { Write-Log 'FATAL: snapshot response missing name' 'ERROR'; exit 1 }
