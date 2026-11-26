@@ -281,9 +281,10 @@ Meanwhile the VM had **52.7 Gio available and 23.5 Gio of swap free**, the conta
 anonymous memory 24.8 Gio of a 60 Gio limit: the memory pressure that the 23/11 dossier
 describes was **absent** and the block happened anyway.
 
-Thread states sampled at 18:21Z (procfs only, no engine request): all threads sleeping, 14
-named `optimization` parked in `futex_wait_queue`, one `update-17` in `hrtimer_nanosleep` (the
-deferred-points retry loop), no thread in `D` state. `segment.json` mtimes: 18:11:42, 18:14:29
+Worker threads sampled at 18:21Z (procfs only, no engine request): all sleeping, 14 named
+`optimization` parked in `futex_wait_queue`, one `update-17` in `hrtimer_nanosleep` (the
+deferred-points retry loop). ~~No thread in `D` state~~ — **corrected below.** `segment.json`
+mtimes: 18:11:42, 18:14:29
 ×2, 18:14:34, 18:17:27 — merge activity in and just before the block, nothing after 18:17:27
 while writes stayed blocked.
 
@@ -295,8 +296,28 @@ the switch was a mistake: the memory and quality gains are measured; the block c
 than the switch and survived it. What this measurement kills is the hypothesis that **swap /
 anonymous memory alone** explains the blocks.
 
-Consequence for the closure criterion: no 60-minute clean window can start before 19:09Z at
-the earliest, and the read-path escalation stays **open**.
+**Correction (26/11 18:45Z) — the block had a pager, and it is a pool thread.** "No thread in
+`D` state" above came from a one-off sample that listed the named worker threads only. The thread
+probe that ran through the block's last five minutes (`.tmp/write_probe.py`, 466 samples from
+18:21:41Z to 18:40:00Z, 0 environment errors) shows, in the same minute, **one `search-io` pool
+thread in `D/folio_wait_bit_common`**: 25 aggregated samples give it in `D` up to 18:26:09Z, others
+find it out of `D` while a page wait is still counted (the thread goes from one page wait to the
+next). The last sample carrying a page wait is 18:26:33Z; the release is 18:26:35-36Z. After
+18:26:40Z there is no page wait until the end of the probe — the only `D` states left are three
+one-thread episodes, all workers (`optimization` in `D/submit_bio_wait` at 18:33:34Z, then
+`D/jbd2_log_wait_commit` at 18:33:36Z and 18:37:43Z). **No `optimization` or `update-N` thread
+entered `D` between 18:21:41Z and the release.** The block is therefore the dossier §10.10-§10.11
+form — one pool thread paging cold pages — not the "reads blocked, no pager" form of §10.14.5.
+Not measured: file page or swap page (`folio_wait_bit_common` covers both; `pswpin` and
+`workingset_refault_file` were not sampled during the block), the volume paged, the request served.
+
+At rest at 18:44Z (PSI memory and I/O at 0 over 10 s): cgroup file cache **22.60 GiB** (2.31 active)
+for `anon` 20.94 GiB, `memory.current` 44.80 GiB of a 60 GiB limit, while the VM has **52 GiB
+available**. The container limit, not the VM, now bounds the file cache of a collection that maps
+several hundred GiB — a lever that belongs to the user (Q17-b), not applied by the lane.
+
+Consequence for the closure criterion: no 60-minute clean window can start before 19:27Z at the
+earliest, and the read-path escalation stays **open**.
 
 Consequence for the backup safety net, measured the same minute: the evening `-RetentionOnly`
 pass (the lane's 19:45 duty, dry-run `-WhatIf` first) **aborted at its poison guard** — the
