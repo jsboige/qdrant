@@ -11,8 +11,13 @@
       1. POISON-GUARD: GET /collections/<c>; abort (exit 2) if points_count < -MinPoints.
          => never snapshots a wiped/empty collection, never lets retention rotate out good backups.
       2. Create snapshot via REST (idempotent per day).
-      3. Download once to temp (-TempDir, else %TEMP%; TEMP-GUARD refuses the download when the
-         temp volume lacks snapshot size + -TempMarginGB), then distribute:
+      3. Fan out ONE source file. Since Q68 the server-side snapshot directory is a local volume
+         (/qdrant/snapshots bound to F:\\Backups\\qdrant\\<machine>\\server-snapshots), so when
+         -ServerSnapshotLocalRoot resolves the finished artifact it is read IN PLACE — no download,
+         no transit copy (2026-11-26: a 248 GB transit took C: to 2.5 %). Only if that fails:
+         download to temp (-TempDir, else first candidate of %TEMP% + -TempDirFallbacks that keeps
+         snapshot + -TempMarginGB + a floor of max(-TempFloorGB, -TempFloorPct %) free; refuses
+         cleanly when no candidate qualifies). Distribution:
          offsite = DIRECT Drive API upload (gdrive_user_upload.ps1, NO G: transit — the DriveFS
          copy failed silently twice: 2026-09-03 and 2026-11-17, local copy complete but never
          delivered server-side; legacy DriveFS copy remains as fallback only),
@@ -65,6 +70,14 @@ param(
     # Plancher laisse libre sur le volume de transit APRES le telechargement (2026-11-26 : le
     # transit de 247,9 Go a porte C: a 2,5 % pendant que Maintenance cherchait l'ecrivain).
     [int]$TempFloorGB = 50,
+    # Same floor as a share of the transit volume; the LARGER of -TempFloorGB and -TempFloorPct
+    # applies. 50 GB alone was no floor on 2026-11-26: C: holds 3.7 TiB, its 5 % STOP threshold
+    # is ~186 GiB, so a transit could keep 50 GB free and still cause a disk crisis.
+    [int]$TempFloorPct = 6,
+    # Host directory bound to /qdrant/snapshots (Q68). When the finished server-side snapshot is
+    # a file there with the size the API reports, the fan-out reads it IN PLACE: no download, no
+    # transit copy. '-' disables (always download). Default F:\Backups\qdrant\<MachineId>\server-snapshots.
+    [string]$ServerSnapshotLocalRoot = '',
     [int]$MinPoints      = 100000,
     # Client timeout on the snapshot CREATION call. 1800 s was the old margin ("builds in ~8 min
     # at ~2M pts / 26 GB", 2026-08-20). Measured 2026-11-26: the 01:17Z run gave up at 1800 s
@@ -96,6 +109,9 @@ $ProgressPreference = 'SilentlyContinue'
 
 if ([string]::IsNullOrWhiteSpace($MachineId)) {
     $MachineId = if ($env:COMPUTERNAME) { $env:COMPUTERNAME.ToLowerInvariant() } else { (hostname).ToLowerInvariant() }
+}
+if ([string]::IsNullOrWhiteSpace($ServerSnapshotLocalRoot)) {
+    $ServerSnapshotLocalRoot = "F:\Backups\qdrant\$MachineId\server-snapshots"
 }
 
 # API key: param > env > fork .env.production (QDRANT__SERVICE__API_KEY). Never echoed.
@@ -180,15 +196,24 @@ if ($pts -lt $MinPoints) {
 
 try {
     $orphList = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots" -Headers $headers -Method Get -TimeoutSec 60
-    $orphCutoff = (Get-Date).AddHours(-48)
+    $orphCutoff = (Get-Date).ToUniversalTime().AddHours(-48)
     $orphDeleted = 0
     foreach ($s in @($orphList.result)) {
-        try { $ct = [datetime]::Parse($s.creation_time, [Globalization.CultureInfo]::InvariantCulture) } catch { continue }
+        # 2026-11-26: v1.20.2 returns creation_time NULL (measured on the 26/11 artifact), so the
+        # Parse below threw for every snapshot and this cleanup had silently stopped deleting. Fall
+        # back to the UTC build time carried by the NAME (...-yyyy-MM-dd-HH-mm-ss[-N].snapshot).
+        $ct = $null
+        if ($s.creation_time) {
+            $ct = [datetime]::Parse("$($s.creation_time)", [Globalization.CultureInfo]::InvariantCulture).ToUniversalTime()
+        } elseif ("$($s.name)" -match '-(\d{4}-\d\d-\d\d-\d\d-\d\d-\d\d)(?:-\d+)?\.snapshot$') {
+            $ct = [datetime]::SpecifyKind([datetime]::ParseExact($Matches[1], 'yyyy-MM-dd-HH-mm-ss', [Globalization.CultureInfo]::InvariantCulture), 'Utc')
+        }
+        if ($null -eq $ct) { continue }
         if ($ct -lt $orphCutoff) {
             try {
                 $null = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots/$($s.name)" -Headers $headers -Method Delete -TimeoutSec 300
                 $orphDeleted++
-                Write-Log "Orphan cleanup: deleted server-side snapshot $($s.name) ($([math]::Round($s.size/1GB,2)) GB, created $($s.creation_time))"
+                Write-Log "Orphan cleanup: deleted server-side snapshot $($s.name) ($([math]::Round($s.size/1GB,2)) GB, created $($ct.ToString('s'))Z)"
             } catch { Write-Log "WARN: orphan delete failed $($s.name): $($_.Exception.Message)" 'WARN' }
         }
     }
@@ -217,6 +242,8 @@ foreach ($d in $destinations) {
 $newSnapshotSize = 0L
 $sourceFile = $null
 $tmp = $null
+# NO-TRANSIT: true when $tmp is the server-side snapshot file itself (read in place, never a copy).
+$tmpIsServerSide = $false
 
 if ($RetentionOnly -and $missing.Count -gt 0) {
     Write-Log "EVENING-PASS SKIPPED: today's snapshot absent from: $(($missing | ForEach-Object { $_.Name }) -join ', ') — nothing deleted (fail-safe)."
@@ -262,11 +289,38 @@ if ($missing.Count -eq 0) {
         $snapSize = [int64]$reuse.size
         Write-Log "REUSE: today's server-side snapshot already exists (leftover from an interrupted run): name=$snapName serverSize=$snapSize — creation SKIPPED"
     } elseif ($PSCmdlet.ShouldProcess("$QdrantUrl/collections/$Collection/snapshots", 'POST create snapshot')) {
+        $beforeNames = @(@($srvList.result) | ForEach-Object { "$($_.name)" })
+        $postStartedUtc = (Get-Date).ToUniversalTime().AddSeconds(-5)
+        $createResp = $null
         try {
             # -CreateTimeoutSec (default 14 400 s): measured 10 961 s on 2026-11-26 for 248 GB
             # at ~16.5M pts; the old 1800 s was tuned when the snapshot built in ~8 min.
             $createResp = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots" -Headers $headers -Method Post -TimeoutSec $CreateTimeoutSec
-        } catch { Write-Log "FATAL: snapshot creation failed: $($_.Exception.Message)" 'ERROR'; exit 1 }
+        } catch {
+            # 2026-11-26 (measured, 5-point collection on the F: bind): the engine can answer 500
+            # AFTER storing a complete snapshot — "failed to query resolved metadata <final path>:
+            # No such file or directory" on the metadata query that follows the final rename. A 500
+            # on the POST is therefore no proof of failure. Re-list: a snapshot that was absent
+            # before the call and whose name carries the build time of this call IS our artifact
+            # (the API only lists FINALIZED snapshots). Anything else — timeout included, the
+            # build is then still running server-side and the REUSE path catches it later — stays FATAL.
+            $postErr = $_.Exception.Message
+            $stored = $null
+            try {
+                $afterList = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots" -Headers $headers -Method Get -TimeoutSec 60
+                $stored = @($afterList.result) | Where-Object {
+                    $n = "$($_.name)"
+                    ($beforeNames -notcontains $n) -and ($n -match '-(\d{4}-\d\d-\d\d-\d\d-\d\d-\d\d)(?:-\d+)?\.snapshot$') -and
+                        ([datetime]::SpecifyKind([datetime]::ParseExact($Matches[1], 'yyyy-MM-dd-HH-mm-ss', [Globalization.CultureInfo]::InvariantCulture), 'Utc') -ge $postStartedUtc)
+                } | Sort-Object -Property name -Descending | Select-Object -First 1
+            } catch { }
+            if ($stored) {
+                Write-Log "POST create snapshot returned an error BUT the server stored a complete snapshot during the call — using it: name=$($stored.name) serverSize=$($stored.size) (POST error: $postErr)" 'WARN'
+                $createResp = [pscustomobject]@{ result = [pscustomobject]@{ name = $stored.name; size = $stored.size } }
+            } else {
+                Write-Log "FATAL: snapshot creation failed: $postErr" 'ERROR'; exit 1
+            }
+        }
         $snapName = $createResp.result.name
         if ([string]::IsNullOrWhiteSpace($snapName)) { Write-Log 'FATAL: snapshot response missing name' 'ERROR'; exit 1 }
         $snapSize = [int64]$createResp.result.size
@@ -277,62 +331,111 @@ if ($missing.Count -eq 0) {
     }
 
     if ($snapName) {
-        # Choix du volume de transit AVANT le telechargement. Le TEMP-GUARD ne refusait que si la
-        # place manquait ; il ne cherchait pas un autre volume. Le 26/11 le transit de 247,9 Go a
-        # porte C: de ~74 % a 2,5 % (Maintenance en crise disque), alors que F: avait 793 Go libres.
-        # Regle : le candidat doit avoir snapSize + marge + plancher libres, sinon on passe au suivant ;
-        # si aucun ne convient, on garde le temp par defaut et le TEMP-GUARD refuse proprement.
-        $tempNeedEarly = $snapSize + ([int64]$TempMarginGB * 1GB) + ([int64]$TempFloorGB * 1GB)
-        if ([string]::IsNullOrWhiteSpace($TempDir)) {
-            $picked = $null
-            foreach ($cand in (@($env:TEMP) + @($TempDirFallbacks))) {
-                if ([string]::IsNullOrWhiteSpace($cand)) { continue }
-                try {
-                    $candRoot = [System.IO.Path]::GetPathRoot($cand)
-                    $candFree = [int64](New-Object System.IO.DriveInfo($candRoot)).AvailableFreeSpace
-                } catch { continue }
-                if ($snapSize -le 0 -or $candFree -ge $tempNeedEarly) { $picked = $cand; break }
-                Write-Log "Temp candidate skipped: $cand free=$([math]::Round($candFree/1GB,1)) GiB < need=$([math]::Round($tempNeedEarly/1GB,1)) GiB (snapshot + margin $TempMarginGB + floor $TempFloorGB)" 'WARN'
+        # NO-TRANSIT (2026-11-26). Since Q68 the server-side snapshot directory IS a local volume
+        # (F:\Backups\qdrant\<machine>\server-snapshots, bound to /qdrant/snapshots): the finished
+        # artifact is already a file on this host. When it is reachable here with the size the API
+        # reports, the fan-out reads THAT file — no ~248 GB download, no second copy, no transit
+        # volume. The file is removed only AFTER the fan-out succeeded (see finally), so a failed
+        # upload leaves a complete artifact that the REUSE path picks up on the next run instead of
+        # dropping the only copy. Identity = collection + snapshot name (second-precision build
+        # time + collection id) AND exact byte size; anything else falls back to the download.
+        $directPath = $null
+        if ($ServerSnapshotLocalRoot -ne '-') {
+            $candPath = Join-Path (Join-Path $ServerSnapshotLocalRoot $Collection) $snapName
+            if (Test-Path -LiteralPath $candPath -PathType Leaf) {
+                $candLen = (Get-Item -LiteralPath $candPath).Length
+                if ($snapSize -gt 0 -and $candLen -ne $snapSize) {
+                    Write-Log "Server-side local file found but its size ($candLen) differs from the API ($snapSize) — HTTP download instead" 'WARN'
+                } else {
+                    $directPath = $candPath
+                }
             }
-            if (-not $picked) { $picked = $env:TEMP }
-            $TempDir = $picked
-            Write-Log "Temp volume selected: $TempDir"
         }
-        if (-not (Test-Path $TempDir)) { New-Item -ItemType Directory -Path $TempDir -Force | Out-Null }
-        # TEMP-GUARD (2026-11-20): a ~210 GB download must never fill the temp volume (C: by
-        # default = the whole machine). Refuse cleanly and exit 1 — nothing rotated.
-        # On refusal: a snapshot CREATED this run is dropped server-side (nobody else wants it,
-        # else it lingers 48h inside the VHDX until orphan cleanup); a REUSED one is KEPT — it
-        # is the only completed artifact of an interrupted run, retryable with a larger -TempDir.
-        $tempRoot = [System.IO.Path]::GetPathRoot((Resolve-Path -LiteralPath $TempDir).ProviderPath)
-        $tempFree = [int64](New-Object System.IO.DriveInfo($tempRoot)).AvailableFreeSpace
-        $tempNeed = $snapSize + ([int64]$TempMarginGB * 1GB)
-        Write-Log "Temp dir: $TempDir (free=$([math]::Round($tempFree/1GB,1)) GiB, need=$([math]::Round($tempNeed/1GB,1)) GiB incl. margin $TempMarginGB GiB)"
-        if ($snapSize -gt 0 -and $tempFree -lt $tempNeed) {
-            Write-Log "FATAL: TEMP-GUARD: $TempDir has $tempFree bytes free < snapshot $snapSize + margin $TempMarginGB GiB — download REFUSED (pass -TempDir on a larger volume)" 'ERROR'
-            if ($createdThisRun) {
-                try {
-                    $null = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots/$snapName" -Headers $headers -Method Delete -TimeoutSec 120
-                    Write-Log "Server-side snapshot cleaned after TEMP-GUARD refusal: $snapName"
-                } catch { Write-Log "WARN: server-side cleanup after TEMP-GUARD failed (orphan cleanup will catch it at 48h): $($_.Exception.Message)" 'WARN' }
+        if ($directPath) {
+            $tmpIsServerSide = $true
+            $tmp = $directPath
+            $sourceFile = $directPath
+            $newSnapshotSize = (Get-Item -LiteralPath $directPath).Length
+            Write-Log "NO-TRANSIT: fan-out reads the server-side snapshot file itself (no download, no temp copy): $directPath"
+        } else {
+            # Choix du volume de transit AVANT le telechargement. Le TEMP-GUARD ne refusait que si la
+            # place manquait ; il ne cherchait pas un autre volume. Le 26/11 le transit de 247,9 Go a
+            # porte C: de ~74 % a 2,5 % (Maintenance en crise disque), alors que F: avait 793 Go libres.
+            # Regle : le candidat doit garder snapSize + marge + plancher libres, sinon on passe au
+            # suivant ; si AUCUN ne convient on REFUSE (exit 1). Plus de repli sur %TEMP% « quand meme » :
+            # le soir du 26/11 C: etait remontee a 324 GiB, assez pour rechoisir C: et refaire tomber
+            # le volume a 2,5 % au milieu de la campagne de recuperation disque.
+            # Plancher = le plus grand de -TempFloorGB et de -TempFloorPct % du volume.
+            function Get-DriveSpace {
+                param([string]$Path)
+                $drv = New-Object System.IO.DriveInfo([System.IO.Path]::GetPathRoot($Path))
+                return @{ Free = [int64]$drv.AvailableFreeSpace; Total = [int64]$drv.TotalSize }
+            }
+            $noTransitVolume = $false
+            if ([string]::IsNullOrWhiteSpace($TempDir)) {
+                $picked = $null
+                foreach ($cand in (@($env:TEMP) + @($TempDirFallbacks))) {
+                    if ([string]::IsNullOrWhiteSpace($cand)) { continue }
+                    try {
+                        $candSpace = Get-DriveSpace $cand
+                        $candFree = [int64]$candSpace.Free
+                        $candFloor = [int64]([math]::Floor([double]$candSpace.Total * $TempFloorPct / 100.0))
+                        if ($candFloor -lt ([int64]$TempFloorGB * 1GB)) { $candFloor = [int64]$TempFloorGB * 1GB }
+                    } catch { continue }
+                    $candNeed = $snapSize + ([int64]$TempMarginGB * 1GB) + $candFloor
+                    if ($snapSize -le 0 -or $candFree -ge $candNeed) { $picked = $cand; break }
+                    Write-Log "Temp candidate skipped: $cand free=$([math]::Round($candFree/1GB,1)) GiB < need=$([math]::Round($candNeed/1GB,1)) GiB (snapshot + margin $TempMarginGB + floor $([math]::Round($candFloor/1GB,1)) GiB)" 'WARN'
+                }
+                if ($picked) {
+                    $TempDir = $picked
+                    Write-Log "Temp volume selected: $TempDir"
+                } else {
+                    $noTransitVolume = $true
+                    $TempDir = $env:TEMP
+                }
+            }
+            if (-not (Test-Path $TempDir)) { New-Item -ItemType Directory -Path $TempDir -Force | Out-Null }
+            # TEMP-GUARD (2026-11-20): a ~210 GB download must never fill the temp volume (C: by
+            # default = the whole machine). Refuse cleanly and exit 1 — nothing rotated.
+            # On refusal: a snapshot CREATED this run is dropped server-side (nobody else wants it,
+            # else it lingers 48h inside the VHDX until orphan cleanup); a REUSED one is KEPT — it
+            # is the only completed artifact of an interrupted run, retryable with a larger -TempDir.
+            $tempRoot = [System.IO.Path]::GetPathRoot((Resolve-Path -LiteralPath $TempDir).ProviderPath)
+            $tempFree = [int64](New-Object System.IO.DriveInfo($tempRoot)).AvailableFreeSpace
+            $tempNeed = $snapSize + ([int64]$TempMarginGB * 1GB)
+            if ($noTransitVolume) {
+                Write-Log "FATAL: TRANSIT-GUARD: no transit volume keeps snapshot $snapSize + margin $TempMarginGB GiB + floor (max of $TempFloorGB GiB and $TempFloorPct %) free — download REFUSED" 'ERROR'
             } else {
-                Write-Log "TEMP-GUARD: reused server-side snapshot KEPT for retry ($snapName; orphan cleanup holds it 48h)" 'WARN'
+                Write-Log "Temp dir: $TempDir (free=$([math]::Round($tempFree/1GB,1)) GiB, need=$([math]::Round($tempNeed/1GB,1)) GiB incl. margin $TempMarginGB GiB)"
+                if ($snapSize -gt 0 -and $tempFree -lt $tempNeed) {
+                    Write-Log "FATAL: TEMP-GUARD: $TempDir has $tempFree bytes free < snapshot $snapSize + margin $TempMarginGB GiB — download REFUSED (pass -TempDir on a larger volume)" 'ERROR'
+                }
             }
-            exit 1
+            if ($noTransitVolume -or ($snapSize -gt 0 -and $tempFree -lt $tempNeed)) {
+                if ($createdThisRun) {
+                    try {
+                        $null = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots/$snapName" -Headers $headers -Method Delete -TimeoutSec 120
+                        Write-Log "Server-side snapshot cleaned after TEMP-GUARD refusal: $snapName"
+                    } catch { Write-Log "WARN: server-side cleanup after TEMP-GUARD failed (orphan cleanup will catch it at 48h): $($_.Exception.Message)" 'WARN' }
+                } else {
+                    Write-Log "TEMP-GUARD: reused server-side snapshot KEPT for retry ($snapName; orphan cleanup holds it 48h)" 'WARN'
+                }
+                exit 1
+            }
+            $tmp = Join-Path $TempDir $snapName
+            try {
+                Invoke-WebRequest -Uri "$QdrantUrl/collections/$Collection/snapshots/$snapName" -Headers $dlHeaders -OutFile $tmp -TimeoutSec 3600
+            } catch { Write-Log "FATAL: download failed: $($_.Exception.Message)" 'ERROR'; exit 1 }
+            $sourceFile = $tmp
+            $newSnapshotSize = (Get-Item $tmp).Length
+            Write-Log "Downloaded to temp: size=$newSnapshotSize bytes"
+            # Server-side cleanup (non-fatal) — safe for BOTH paths: the download succeeded, so the
+            # data now exists locally and is being fanned out below.
+            try {
+                $null = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots/$snapName" -Headers $headers -Method Delete -TimeoutSec 120
+                Write-Log "Server-side snapshot cleaned: $snapName"
+            } catch { Write-Log "WARN: server-side cleanup failed (non-fatal): $($_.Exception.Message)" 'WARN' }
         }
-        $tmp = Join-Path $TempDir $snapName
-        try {
-            Invoke-WebRequest -Uri "$QdrantUrl/collections/$Collection/snapshots/$snapName" -Headers $dlHeaders -OutFile $tmp -TimeoutSec 3600
-        } catch { Write-Log "FATAL: download failed: $($_.Exception.Message)" 'ERROR'; exit 1 }
-        $sourceFile = $tmp
-        $newSnapshotSize = (Get-Item $tmp).Length
-        Write-Log "Downloaded to temp: size=$newSnapshotSize bytes"
-        # Server-side cleanup (non-fatal) — safe for BOTH paths: the download succeeded, so the
-        # data now exists locally and is being fanned out below.
-        try {
-            $null = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots/$snapName" -Headers $headers -Method Delete -TimeoutSec 120
-            Write-Log "Server-side snapshot cleaned: $snapName"
-        } catch { Write-Log "WARN: server-side cleanup failed (non-fatal): $($_.Exception.Message)" 'WARN' }
     }
 }
 
@@ -442,9 +545,22 @@ try {
     # Keep the temp when the copy failed: the server-side snapshot is already deleted by then, so
     # this file is the only remaining copy of today's backup. Deleting it to reclaim disk would
     # destroy the very thing the run exists to produce. Say where it is instead.
-    if ($tmp -and (Test-Path $tmp)) {
+    if ($tmp -and (Test-Path -LiteralPath $tmp)) {
         if ($copyFailed) {
             Write-Log "Temp KEPT (copy failed; this is the only remaining copy of today's snapshot): $tmp" 'WARN'
+        } elseif ($tmpIsServerSide) {
+            # NO-TRANSIT: $tmp IS the server-side artifact, so it is removed only now that every
+            # destination has its copy — through the API (the engine's own way, same as the download
+            # path does right after its download); a host-side leftover is then cleared.
+            if ($WhatIfPreference) {
+                Write-Log "WhatIf: would clean the server-side snapshot after the fan-out: $snapName"
+            } else {
+                try {
+                    $null = Invoke-RestMethod -Uri "$QdrantUrl/collections/$Collection/snapshots/$snapName" -Headers $headers -Method Delete -TimeoutSec 120
+                    Write-Log "Server-side snapshot cleaned: $snapName"
+                } catch { Write-Log "WARN: server-side cleanup failed (non-fatal): $($_.Exception.Message)" 'WARN' }
+                if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+            }
         } else {
             Remove-Item $tmp -Force -ErrorAction SilentlyContinue
         }
