@@ -12,11 +12,18 @@ read path: synthetic probes (random vectors, healthz) do not see what clients ac
     ... | python qdrant_traffic_stats.py --hourly 03:00
         one line per hour from 03:00Z
     optional: --collection <name>   (default roo_tasks_semantic_index)
+    optional: --include-probes      count the lane's own probes too (excluded by default)
 
 Closure criterion used for the 2026-11-23 incident: 0 5xx AND 0 response > 5 s for >= 60 min.
 Timestamps in the log are UTC. Python 3.7+, standard library only.
 Founding measurement (2026-11-23): a sweep probe read "all 200" while the access log showed
 100 % of the ``points`` requests failing for 20 minutes.
+
+Probe discipline (measured 2026-11-26): the lane tags its own requests with
+``Referer: lane-sweep-probe/<name>``. They are NOT client traffic and are skipped by default:
+during the binary-quantization switch 300 probe queries made a 4-minute window read
+"326 requests, 0 defect". In the actix access log the first quoted field is the Referer and
+the second the User-Agent — the opposite of what a regex author tends to assume.
 """
 import argparse
 import collections
@@ -24,18 +31,22 @@ import re
 import sys
 from datetime import datetime, timedelta
 
+PROBE_REFERER_PREFIX = 'lane-sweep-probe'
+
 ACTIX = re.compile(
     r'^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)\.\d+Z\s+INFO\s+actix_web::middleware::logger:\s+'
-    r'(\S+)\s+"(\w+)\s+(\S+)\s+HTTP/[\d.]+"\s+(\d{3})\s+(\d+)\s+"[^"]*"\s+"([^"]*)"\s+([\d.]+)\s*$')
+    r'(\S+)\s+"(\w+)\s+(\S+)\s+HTTP/[\d.]+"\s+(\d{3})\s+(\d+)\s+"([^"]*)"\s+"[^"]*"\s+([\d.]+)\s*$')
 
 
-def read_rows(coll):
+def read_rows(coll, include_probes=False):
     rows = []
     for line in sys.stdin.buffer.read().decode('utf-8', 'replace').splitlines():
         m = ACTIX.match(line)
         if not m:
             continue
-        ts, _ip, _meth, path, status, _size, _ua, dur = m.groups()
+        ts, _ip, _meth, path, status, _size, referer, dur = m.groups()
+        if not include_probes and referer.startswith(PROBE_REFERER_PREFIX):
+            continue
         parts = path.split('?')[0].split('/')
         if len(parts) < 3 or parts[1] != 'collections' or parts[2] != coll:
             continue
@@ -80,10 +91,12 @@ def endpoint_table(rows, title):
 def main():
     ap = argparse.ArgumentParser(description='Qdrant real client traffic from the access log (stdin).')
     ap.add_argument('--collection', default='roo_tasks_semantic_index')
+    ap.add_argument('--include-probes', action='store_true',
+                    help='count the lane\'s own tagged probes (Referer %s/*) as traffic' % PROBE_REFERER_PREFIX)
     ap.add_argument('--minute', metavar='HH:MM', help='one line per minute from this UTC time')
     ap.add_argument('--hourly', metavar='HH:MM', help='one line per hour from this UTC time')
     args = ap.parse_args()
-    rows = read_rows(args.collection)
+    rows = read_rows(args.collection, args.include_probes)
     if not rows:
         sys.exit('no access-log line for collection %s' % args.collection)
     now = max(r[0] for r in rows)
