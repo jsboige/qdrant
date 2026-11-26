@@ -539,3 +539,24 @@ Sous l'hypothèse « la première victime est aléatoire, proportionnellement au
    **Instrument.** Sur ce régime, `pgmajfault` de `/proc/vmstat` et de `memory.stat` compte ≈ 11 fois moins que le `majflt` de `/proc/<tid>/stat` (≈ 490-550/s contre ≈ 5 500/s, relevés à la même seconde) : l'un compte par fenêtre de fault-around, l'autre par page. Les « défauts majeurs du processus » cités dans ce dossier viennent de `/proc/<pid>/stat` (par page) et restent comparables entre eux ; ne pas mélanger les deux. `/proc/vmstat` est masqué dans le conteneur (lire `memory.stat`).
 
    **Conséquences.** L'observateur v2 (`.tmp/clean_window_watch2.py`, prouvé par exécution : 19 défauts retrouvés sur la fenêtre de contrôle) redémarre sa fenêtre une seconde après chaque premier défaut au lieu de s'arrêter ; armé à 19:21:25Z, durée max 12 h. Escalade **ouverte**. Une correction côté appelateur — plus aucun `count` exact sur cette collection — devient le levier n° 1 ; la PR `jsboige/jsboige-mcp-servers#1933` était **encore ouverte à 19:25Z**. Publié sur `roo-extensions#4928`.
+
+### 10.21 Relevé du 26/11 19:21Z → 23:50Z (sweep de 00:50 locale) — une seule famille d'ouvertures : un `count` exact horaire
+
+**Chiffres.** 23 051 requêtes client depuis la levée du bloc de 19:21:10Z, **61 défectueuses** (0,26 %) : 28 × `POST /points/count` en 500 à ≈ 60 s, 12 × `scroll` en 500, 11 × `PUT .../points` en 200 après plus de 5 s, 7 × `count` en 200 entre 5 et 6,3 s, 2 × `scroll` en 200 à 125,4 et 50,1 s, 1 × `query` en 200 à 8,5 s.
+
+**Quatre épisodes, quatre formes :**
+
+| fenêtre | ce qui s'est passé |
+|---|---|
+| 20:11:59 → 20:20:53 | **salve de 18 `count`** lancés à 3-10 s d'intervalle, tous en 500 à 60 s ; puis 11 `scroll` partis entre 20:17:16 et 20:20:02 **rendus ensemble à 20:20:53** (durées 216,4 · 208,3 · 194,7 · 188,5 · 185,8 · 179,7 · 130,4 · 124,8 · 101,4 · 98,8 · 85,5 s, deux d'entre eux en 200) |
+| 21:19:13 → 21:30:47 | 1 `count` en 500 à 61,0 s, puis 4 `PUT` lents (5,9-11,0 s) — forme « écriture seule » du §10.12 |
+| 22:19:13 → 22:20:15 | **un** `count` en 500 à 61,3 s, rien d'autre — contre-exemple du §10.17 |
+| 23:19:13 → 23:20:15 | **un** `count` en 500 à 61,4 s, rien d'autre |
+
+Puis plus rien : 541 requêtes, 0 défaut, max 1,70 s jusqu'à 23:50:23Z (fenêtre propre en cours, observateur v2).
+
+**Le fait structurel : les ouvertures sont horaires, et c'est un `count` exact.** Sur 24 h (26/11 00:00Z → 24:00Z), la collection a reçu **690 `count`**, dont **126 défectueux** (5xx ou plus de 5 s). Les 500 à 60 s suivent une cadence horaire qui **dérive de +5 min** : 01:50:17, 02:50:17, 03:55:19, 04:55:24, 06:00:17, 07:00:19, 08:00:22, 09:05:19, 10:05:18, 11:05:22, 12:05:22, 13:05:21, 14:05:20, 15:10:21, 17:10:21, 18:15:16, 19:15:14, 21:20:15, 22:20:15, 23:20:15. Entre deux, des salves (00:15 ×3, 14:18/14:31/14:37 ×3, 15:59-16:11 ×7, 20:13 ×18) — forme « redémarrage du processus appelant » (chaque démarrage refait sa vérification exacte). **Ce `count` horaire n'est pas identifié** : le conteneur ne voit qu'une seule adresse cliente. C'est la première chose à localiser côté appelant, parce qu'il n'est pas couvert par l'essai `countPointsByHostOs` → `exact:false` s'il vient d'un troisième site.
+
+**Ce que la fenêtre enseigne sur le minuteur.** Les `scroll` rendus à 20:20:53 avec des durées jusqu'à **216 s** montrent que les 60 s ne bornent pas la latence vue par le client : les requêtes ont attendu leur thread (pool de 12) puis ont été servies ou refusées en bloc à la seconde où les threads se sont libérés. Une requête `scroll` peut donc coûter 3 min 36 au client alors que son minuteur interne est à 60 s.
+
+**Rien n'a été redémarré** : conteneur `StartedAt 2026-11-26T15:55:16Z`, `Restarts 0`, `healthy`.
