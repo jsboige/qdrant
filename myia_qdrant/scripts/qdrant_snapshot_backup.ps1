@@ -59,6 +59,12 @@ param(
     [string]$TempDir = '',
     # TEMP-GUARD : marge exigee au-dela de la taille du snapshot sur le volume temp.
     [int]$TempMarginGB = 30,
+    # Volume(s) de repli pour le transit, essayes dans l'ordre quand -TempDir n'est pas fourni et
+    # que le premier candidat (le temp de l'utilisateur) ne laisse pas la place voulue.
+    [string[]]$TempDirFallbacks = @('F:\qdrant-tmp'),
+    # Plancher laisse libre sur le volume de transit APRES le telechargement (2026-11-26 : le
+    # transit de 247,9 Go a porte C: a 2,5 % pendant que Maintenance cherchait l'ecrivain).
+    [int]$TempFloorGB = 50,
     [int]$MinPoints      = 100000,
     # Client timeout on the snapshot CREATION call. 1800 s was the old margin ("builds in ~8 min
     # at ~2M pts / 26 GB", 2026-08-20). Measured 2026-11-26: the 01:17Z run gave up at 1800 s
@@ -271,7 +277,27 @@ if ($missing.Count -eq 0) {
     }
 
     if ($snapName) {
-        if ([string]::IsNullOrWhiteSpace($TempDir)) { $TempDir = $env:TEMP }
+        # Choix du volume de transit AVANT le telechargement. Le TEMP-GUARD ne refusait que si la
+        # place manquait ; il ne cherchait pas un autre volume. Le 26/11 le transit de 247,9 Go a
+        # porte C: de ~74 % a 2,5 % (Maintenance en crise disque), alors que F: avait 793 Go libres.
+        # Regle : le candidat doit avoir snapSize + marge + plancher libres, sinon on passe au suivant ;
+        # si aucun ne convient, on garde le temp par defaut et le TEMP-GUARD refuse proprement.
+        $tempNeedEarly = $snapSize + ([int64]$TempMarginGB * 1GB) + ([int64]$TempFloorGB * 1GB)
+        if ([string]::IsNullOrWhiteSpace($TempDir)) {
+            $picked = $null
+            foreach ($cand in (@($env:TEMP) + @($TempDirFallbacks))) {
+                if ([string]::IsNullOrWhiteSpace($cand)) { continue }
+                try {
+                    $candRoot = [System.IO.Path]::GetPathRoot($cand)
+                    $candFree = [int64](New-Object System.IO.DriveInfo($candRoot)).AvailableFreeSpace
+                } catch { continue }
+                if ($snapSize -le 0 -or $candFree -ge $tempNeedEarly) { $picked = $cand; break }
+                Write-Log "Temp candidate skipped: $cand free=$([math]::Round($candFree/1GB,1)) GiB < need=$([math]::Round($tempNeedEarly/1GB,1)) GiB (snapshot + margin $TempMarginGB + floor $TempFloorGB)" 'WARN'
+            }
+            if (-not $picked) { $picked = $env:TEMP }
+            $TempDir = $picked
+            Write-Log "Temp volume selected: $TempDir"
+        }
         if (-not (Test-Path $TempDir)) { New-Item -ItemType Directory -Path $TempDir -Force | Out-Null }
         # TEMP-GUARD (2026-11-20): a ~210 GB download must never fill the temp volume (C: by
         # default = the whole machine). Refuse cleanly and exit 1 — nothing rotated.
