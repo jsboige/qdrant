@@ -595,3 +595,36 @@ Les deux faits publiés comme supposés le 26/11 (§10.17 : boucle auto-entreten
 **Décision.** Escalade `qdrant-degraded-readpath-episode7-20261124T1154Z` **ouverte** : le critère est littéral (0 × 5xx **et** 0 réponse > 5 s) et les écritures > 5 s persistent. Le levier n° 1 — plus aucun `count` exact sur cette collection — est **retiré sur cette machine et son effet est mesuré** : c'est le premier changement depuis le 23/11 qui agit sur la classe de blocs de lecture. La prochaine lecture utile est le taux d'écritures lentes sur 24 h (aucun changement d'encodage n'y touche) et la salve de démarrages en heure pleine, déjà passée sans incident (04:13-04:47 : 0 défaut de lecture).
 
 **Aucun redémarrage** : `StartedAt 2026-11-26T15:55:16Z`, `Restarts 0`, `healthy`.
+
+### 10.24 27/11 07:13Z — rechute de lecture après le portage : deux salves de trois `count` exacts, et trois threads qui pagent dix minutes après leur 500
+
+**Ce qui est mesuré.** À 07:07:02Z un `count` rend 200 en 0,001 s (corps 85 o). Puis **deux salves**, chacune de trois comptages qui se chevauchent et échouent au minuteur moteur :
+
+| salve | débuts (UTC) | écarts | durées | statut | corps |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 07:13:09 / 07:13:26 / 07:13:45 | +17,1 s / +19,5 s | 60,002 / 60,003 / 60,003 s | 500 | 123 o |
+| 2 | 07:21:59 / 07:22:13 / 07:22:30 | +14,4 s / +16,8 s | 60,00 s chacune | 500 | 127 / 126 / 125 o |
+
+La seconde salve démarre 8 min 51 s après le premier départ. Un 500 à **60,00 s pile** sur `points/count` est le minuteur du moteur, armé seulement pour le comptage **exact** (`exact:false` passe par `estimate_cardinality` sur le runtime principal, sans minuteur — lecture de code v1.20.2, §10.16) : **les six requêtes sont exactes**.
+
+**Ce qui a suivi (fenêtre exacte 07:13:02 → 07:23:13Z, 10,2 min, 170 requêtes client réelles, sondes de lane exclues).** 31 lectures, **19 × 5xx et 19 > 5 s** : **14 des 26 `scroll`** et **5 des 5 `count`** rendent 500 à 60,00 s. 139 écritures, 0 × 5xx, **63 > 5 s, max 100,39 s**. Premier défaut de LECTURE : un `PUT wait=true` démarré à 07:14:07 rend 200 à 62,78 s (donc `wait_timeout`, non acquitté) ; premier `scroll` en 500 démarré à 07:14:40 — tous deux **postérieurs** au premier comptage (58 s et 91 s). Mais le moteur était déjà lent avant : écritures lentes continues depuis 07:06:14 (18,35 s), un `wait=true` de 11,74 s dès 07:04, et 35-53 s entre 06:37:48 et 06:41:47 après la salve de redémarrage des sièges (06:38:35Z). **Association mesurée, causalité non établie** : le comptage exact n'est pas la seule cause du régime, il en est un acteur.
+
+**Les trois pagineurs (mesuré en direct).** À 07:20:55Z, exactement **trois threads `search-io`** (tids 48882, 48883, 50155 ; noms `search-io-15737/8/9`) prennent **24 843 / 24 784 / 24 664 défauts de page majeurs en 5 s** ; à 07:23:03Z **5 175 / 5 147 / 5 132 par seconde**, en `R`/`D`, deux d'entre eux en `folio_wait_bit_common`. Le pool compte 8 threads `search-io`, cinq au repos. Les 500 sont rendus à 07:14:45 et les threads pagent **dix minutes plus tard** : le minuteur borne la réponse, pas le balayage (§10.20, revérifié). Trois pagineurs pour trois comptages est une **inférence par le compte** (aucune pile lue), pas une mesure.
+*Échantillonneur corrigé* : une première version découpait `/proc/<tid>/stat` par mots et se cassait sur les noms contenant un espace (`Illegal number: ac`, champs décalés) ; la version retenue retire le préfixe jusqu'à la dernière `)` puis lit `state` = champ 1 et `majflt` = champ 10. Ordres de grandeur divergents, comme en §10.20 : somme par thread ≈ **14 900 majflt/s** contre `pgmajfault` de la VM **+4 163 en 5 s (833/s)** — deux compteurs, deux unités (fenêtres de fault-around).
+
+**Mémoire au même instant (07:22:28Z).** cgroup 37,06 GB dont 10,02 GB en swap ; `VmRSS` 34,12 GB (`RssAnon` 16,41 / `RssFile` 17,72), `VmSwap` 9,06 GB ; VM `SwapFree` 15,96 GB. Aucune exhaustion : c'est le paginement des pages **fichier** froides (§10.10), et `pswpout` +4 003 en 5 s montre que la VM évacuait aussi. Le plafond de 60 Gio n'est pas le facteur limitant à cet instant (Q17-b inchangé).
+
+**Une lecture de métadonnées est bloquée aussi.** Sonde de lane étiquetée : `GET /collections/roo_tasks_semantic_index` rend **HTTP 000 à 15,01 s** (mon propre délai) — le comptage de points reste illisible pendant le bloc. `healthz` n'écrit pas dans le journal d'accès : son absence n'y prouve rien (§10.14).
+
+**Origine des deux salves : non identifiée, et voici ce qui la borne.**
+
+- Aucun processus `node` n'a démarré sur ai-01 dans les deux heures autour de 07:13 ; la dernière salve est celle des **22 sièges à 06:38:35Z** ;
+- 16 fichiers de transcripts locaux modifiés en 30 min, **2 occurrences** de `cleanup`/`points/count`, toutes deux dans ma propre session : aucun appel de nettoyage local ;
+- la salve de démarrage d'ai-01 (06:38:35Z) a produit un `count` **instantané** à 06:38:51 (0,002 s) : la copie portée répond vite ;
+- les deux sites `exact: true` restants de la copie portée sont `resetCollection` (l. 2094) et `cleanupOldVectors` (l. 2330, comptage **filtré** sous `retryWithBackoff`, déclenché par l'action de l'outil `roosync-indexing`, l. 1720-1734) — hors du chemin périodique, mais joignables par un appel d'outil.
+
+Suppositions concurrentes, non départageables côté serveur (une seule adresse client) : (a) trois sièges RSM d'une machine **sans** le portage démarrant à 15-19 s d'intervalle, puis trois autres 9 min plus tard ; (b) trois appels d'outil `resetCollection`/`cleanupOldVectors` depuis des sessions, exécutés dans un RSM d'ai-01. **Le proxy voit l'appelant** — la question est tranchable côté roo-extensions en une lecture de journal.
+
+**Ce que cela corrige dans le dossier.** Le §10.23 concluait « le levier est retiré et son effet est mesuré » : vrai **pour les comptages d'ai-01**, faux comme propriété de la classe. La dernière ligne propre (03:30:17Z) tombait 3 h 43 avant la rechute, et la phrase « la salve de démarrages en heure pleine, déjà passée sans incident » est démentie par les deux salves de 07:13 et 07:22. Les chiffres de la fenêtre 03:30:17 → 06:27:48Z restent exacts (26 848 requêtes, 0 défaut de lecture) : ils décrivent un creux, pas une réparation.
+
+**Décision.** Escalade `qdrant-degraded-readpath-episode7-20261124T1154Z` **ouverte**, aucun `[REPAIRED]`. **Aucun redémarrage** (`StartedAt 2026-11-26T15:55:16Z`, `Restarts 0`). Demandes à roo-extensions : (1) nommer l'appelant des six comptages depuis le journal du proxy (07:13:09-07:13:45Z et 07:21:59-07:22:30Z) ; (2) dire quelles machines exécutent encore une copie du RSM sans `jsboige-mcp-servers#1933` ; (3) passer `cleanupOldVectors` (l. 2330) en `exact: false` — ce comptage ne sert qu'à décider « zéro ou pas », la boucle de scroll fait le reste ; pour `resetCollection` (l. 2094) le garde protège un plancher de 10 000 points et une estimation suffirait, mais la décision appartient à la lane propriétaire. Observateur de fin de bloc armé (une notification) pour dater la sortie.
