@@ -41,7 +41,10 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
     $cmd = "& '$sPath' -ExpectedSizeBytes $ExpectedSizeBytes -Machine '$Machine' -RootFolderId '$RootFolderId' -SaKeyPath '$SaKeyPath'"
     if ($SnapshotName) { $cmd += " -SnapshotName '$($SnapshotName.Replace("'","''"))'" }
     if ($WhatIfLike)   { $cmd += ' -WhatIfLike' }
-    & $pwsh -NoProfile -Command $cmd
+    # NB : l'`exit` du script appele ne termine que le pipeline de -Command, pas la session pwsh —
+    # sans la queue ci-dessous, 5.1 relaie 1 au lieu du code reel (mesure 27/11 : rc 1 au lieu de 2
+    # sur ABSENT ; avec la queue : rc 2). Les appelants testent -ne 0, mais le code doit rester vrai.
+    & $pwsh -NoProfile -Command ($cmd + '; exit $LASTEXITCODE')
     exit $LASTEXITCODE
 }
 
