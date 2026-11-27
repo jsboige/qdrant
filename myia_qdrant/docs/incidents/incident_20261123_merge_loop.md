@@ -560,3 +560,20 @@ Puis plus rien : 541 requêtes, 0 défaut, max 1,70 s jusqu'à 23:50:23Z (fenêt
 **Ce que la fenêtre enseigne sur le minuteur.** Les `scroll` rendus à 20:20:53 avec des durées jusqu'à **216 s** montrent que les 60 s ne bornent pas la latence vue par le client : les requêtes ont attendu leur thread (pool de 12) puis ont été servies ou refusées en bloc à la seconde où les threads se sont libérés. Une requête `scroll` peut donc coûter 3 min 36 au client alors que son minuteur interne est à 60 s.
 
 **Rien n'a été redémarré** : conteneur `StartedAt 2026-11-26T15:55:16Z`, `Restarts 0`, `healthy`.
+
+### 10.22 27/11 01:23Z — le critère des 60 min est atteint ; l'escalade reste ouverte, et voici pourquoi
+
+**Mesure.** L'observateur v2 (`bl05cxihd`, armé à 19:21:34Z, redémarre sa fenêtre à chaque rechute) a rendu à **01:23:42Z** une fenêtre **00:22:53 → 01:23:42Z, 2 087 requêtes client réelles, 0 × 5xx, 0 réponse > 5 s** — 47 rechutes avant, la dernière achevée à 00:22:52Z. C'est la première fenêtre propre qui contient le créneau du `count` horaire (01:19:01Z).
+
+**Ce que dit le créneau, et ce qu'il ne dit pas.** Le `count` horaire échouait à ≈ 61 s à 21:19:13, 22:19:13, 23:19:13 et 00:19:25 ; au créneau suivant, **aucun `count` de plus de 5 ms n'est parti** (200 à 0,00 s à 01:19:01 et 01:22:10, plus celui du poison-guard du backup à 01:17:39). La cadence d'échec s'est arrêtée — **la cause de l'arrêt n'est pas établie**.
+
+**Le levier n'est pas retiré sur cette machine (code lu le 27/11 à 01:30Z).** La copie du RSM qui tourne ici est `D:\roo-extensions\mcps\internal\servers\roo-state-manager` :
+- `VectorIndexer.ts:2170-2187` — `countPointsByHostOs()` fait `qdrant.count(COLLECTION_NAME, { filter: host_os, exact: true })` sous `retryWithBackoff` : **la correction fusionnée en amont (`jsboige-mcp-servers#1933`, le 26/11 à 19:57:47Z) n'est pas dans cette copie** ;
+- `background-services.ts:1392` — l'appelant est `verifyQdrantConsistency()`, dont la garde anti-fuite vaut **24 h** (`CONSISTENCY_CHECK_INTERVAL`) et n'est armée **qu'après un comptage réussi** (l. 1405) : un comptage qui échoue est **rejoué au prochain appel**, indéfiniment ;
+- l. 1393-1403 — le `Promise.race` de 10 s **n'annule pas** la requête HTTP : le moteur continue son balayage jusqu'à son propre minuteur de 60 s.
+
+Les deux faits publiés comme supposés le 26/11 (§10.17 : boucle auto-entretenue ; abandon client sans arrêt du serveur) sont donc **confirmés par lecture du code**.
+
+**Décision.** L'escalade `qdrant-degraded-readpath-episode7-20261124T1154Z` **reste ouverte** : le critère a été atteint pendant le creux nocturne (2 087 requêtes/h contre 10-20 k/h en journée), et la salve de comptages exacts qu'ouvre chaque vague de démarrages de sessions (3 à 18 : 00:15 ×3, 14:18 ×3, 15:59-16:11 ×7, 20:13 ×18) n'a pas été retestée. Fermer maintenant reproduirait la fausse clôture du 24/11. Une veille de rechute est ré-armée (observateur v1 : sortie 3 au premier défaut, donc notification immédiate) ; `[REPAIRED]` seulement si une fenêtre propre contient une salve.
+
+**Demande à la lane propriétaire (roo-extensions)** : porter `jsboige-mcp-servers#1933` dans la copie vendorisée qui tourne sur ai-01 (ou dire laquelle est déployée) et redémarrer les sièges. Tant que `exact: true` est dans le code exécuté ici, chaque démarrage de session peut rouvrir un bloc.
